@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field
 
 class ProcessingRequest(BaseModel):
     """Запрос на обработку файла"""
-    file_id: str = Field(..., description="ID файла в Telegram")
+    file_id: Optional[str] = Field(None, description="ID файла в Telegram")
+    file_path: Optional[str] = Field(None, description="Путь к локальному файлу")
     file_name: str = Field(..., description="Имя файла")
     template_id: int = Field(..., description="ID шаблона")
     llm_provider: str = Field(..., description="LLM провайдер")
     user_id: int = Field(..., description="ID пользователя")
     language: str = Field("ru", description="Язык транскрипции")
+    is_external_file: bool = Field(False, description="Флаг внешнего файла")
 
 
 class TranscriptionResult(BaseModel):

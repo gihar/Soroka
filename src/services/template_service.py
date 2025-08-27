@@ -170,15 +170,14 @@ class TemplateService:
                 "content": """# Резюме встречи
 
 **Участники:** {{ participants }}
-**Дата:** {{ date }}
 
 ## Ключевые моменты
 {{ key_points }}
 
-## Решения
+## Принятые решения
 {{ decisions }}
 
-## Действия
+## Дальнейшие действия
 {{ action_items }}
 
 {% if dialogue_analysis %}

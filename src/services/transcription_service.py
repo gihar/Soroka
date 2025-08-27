@@ -64,7 +64,8 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
-    def transcribe_with_diarization(self, file_path: str, language: str = "ru") -> TranscriptionResult:
+    def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
+                                   progress_callback=None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией"""
         # Проверяем наличие ffmpeg
         if not self._check_ffmpeg():
@@ -93,9 +94,17 @@ class TranscriptionService:
             if DIARIZATION_AVAILABLE and settings.enable_diarization:
                 try:
                     logger.info("Выполнение диаризации...")
-                    diarization_result = diarization_service.diarize_file(file_path, language)
+                    if progress_callback:
+                        progress_callback(10, "Инициализация диаризации...")
+                    
+                    diarization_result = diarization_service.diarize_file(
+                        file_path, language, progress_callback
+                    )
                     
                     if diarization_result:
+                        if progress_callback:
+                            progress_callback(90, "Обработка результатов диаризации...")
+                        
                         # Извлекаем текст из результатов диаризации
                         transcription = ""
                         for segment in diarization_result.segments:
@@ -108,6 +117,9 @@ class TranscriptionService:
                         result.formatted_transcript = diarization_result.get_formatted_transcript()
                         result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
                         
+                        if progress_callback:
+                            progress_callback(100, "Диаризация завершена!")
+                        
                         logger.info(f"Диаризация успешна. Найдено говорящих: {len(diarization_result.speakers)}")
                         return result
                         
@@ -115,18 +127,30 @@ class TranscriptionService:
                     logger.warning(f"Ошибка при диаризации, переходим к обычной транскрипции: {e}")
             
             # Fallback к обычной транскрипции через Whisper
+            if progress_callback:
+                progress_callback(20, "Загрузка модели Whisper...")
+            
             self._load_whisper_model()
             
+            if progress_callback:
+                progress_callback(40, "Выполнение транскрипции...")
+            
             logger.info("Выполнение стандартной транскрипции...")
-            whisper_result = self.whisper_model.transcribe(
-                file_path, 
-                language=language,
-                word_timestamps=False
+            
+            # Создаем обертку для отслеживания прогресса
+            whisper_result = self._transcribe_with_progress(
+                file_path, language, progress_callback
             )
+            
+            if progress_callback:
+                progress_callback(90, "Обработка результатов...")
             
             transcription = whisper_result["text"].strip()
             result.transcription = transcription
             result.formatted_transcript = transcription  # Без разделения говорящих
+            
+            if progress_callback:
+                progress_callback(100, "Транскрипция завершена!")
             
             logger.info(f"Стандартная транскрибация завершена. Длина текста: {len(transcription)} символов")
             
@@ -140,6 +164,45 @@ class TranscriptionService:
                     file_path
                 )
             raise TranscriptionError(str(e), file_path)
+    
+    def _transcribe_with_progress(self, file_path: str, language: str, progress_callback=None):
+        """Транскрипция с имитацией прогресса"""
+        import time
+        import threading
+        
+        # Создаем результат для хранения
+        result_container = {"result": None, "error": None}
+        
+        def whisper_worker():
+            """Выполнить транскрипцию в отдельном потоке"""
+            try:
+                result_container["result"] = self.whisper_model.transcribe(
+                    file_path, 
+                    language=language,
+                    word_timestamps=False
+                )
+            except Exception as e:
+                result_container["error"] = e
+        
+        # Запускаем транскрипцию в отдельном потоке
+        thread = threading.Thread(target=whisper_worker)
+        thread.start()
+        
+        # Имитируем прогресс во время выполнения
+        if progress_callback:
+            current_progress = 40
+            while thread.is_alive() and current_progress < 85:
+                time.sleep(2)  # Обновляем каждые 2 секунды
+                current_progress += 5
+                progress_callback(current_progress, "Транскрибация в процессе...")
+        
+        # Ждем завершения
+        thread.join()
+        
+        if result_container["error"]:
+            raise result_container["error"]
+            
+        return result_container["result"]
     
     def cleanup_file(self, file_path: str):
         """Удалить временный файл"""

@@ -23,6 +23,9 @@ DATABASE_URL=sqlite:///bot.db
 # Максимальный размер файла (в байтах)
 MAX_FILE_SIZE=52428800
 
+# Максимальный размер внешнего файла (в байтах) - для Google Drive и Яндекс.Диск
+MAX_EXTERNAL_FILE_SIZE=52428800
+
 # Директория для временных файлов
 TEMP_DIR=temp
 

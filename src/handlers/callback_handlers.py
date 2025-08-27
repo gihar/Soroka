@@ -197,23 +197,40 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         data = await state.get_data()
         
         # Проверяем наличие обязательных данных
-        required_fields = ['file_id', 'file_name', 'template_id', 'llm_provider']
-        for field in required_fields:
-            if not data.get(field):
+        if not data.get('template_id') or not data.get('llm_provider'):
+            await callback.message.edit_text(
+                "❌ Ошибка: отсутствуют обязательные данные. Пожалуйста, повторите процесс."
+            )
+            await state.clear()
+            return
+        
+        # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
+        is_external_file = data.get('is_external_file', False)
+        if is_external_file:
+            if not data.get('file_path') or not data.get('file_name'):
                 await callback.message.edit_text(
-                    f"❌ Ошибка: отсутствует {field}. Пожалуйста, повторите процесс."
+                    "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
+                )
+                await state.clear()
+                return
+        else:
+            if not data.get('file_id') or not data.get('file_name'):
+                await callback.message.edit_text(
+                    "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
                 )
                 await state.clear()
                 return
         
         # Создаем запрос на обработку
         request = ProcessingRequest(
-            file_id=data['file_id'],
+            file_id=data.get('file_id') if not is_external_file else None,
+            file_path=data.get('file_path') if is_external_file else None,
             file_name=data['file_name'],
             template_id=data['template_id'],
             llm_provider=data['llm_provider'],
             user_id=callback.from_user.id,
-            language="ru"
+            language="ru",
+            is_external_file=is_external_file
         )
         
         # Создаем прогресс-трекер

@@ -23,6 +23,8 @@ class ProgressStage:
         self.completed_at: Optional[datetime] = None
         self.is_active = False
         self.is_completed = False
+        self.progress_percent: float = 0.0  # Процент выполнения (0-100)
+        self.progress_text: str = ""  # Дополнительный текст прогресса
 
 
 class ProgressTracker:
@@ -57,6 +59,10 @@ class ProgressTracker:
         self.add_stage(
             "validation", "Проверка", "🔍", 
             "Проверяю формат и размер файла...", 2
+        )
+        self.add_stage(
+            "file_preparation", "Подготовка файла", "📁", 
+            "Подготавливаю файл к обработке...", 3
         )
         self.add_stage(
             "conversion", "Конвертация", "🔄", 
@@ -119,10 +125,17 @@ class ProgressTracker:
         logger.info(f"Завершен этап: {stage.name}")
         await self.update_display()
     
-    async def update_stage_progress(self, stage_id: str, progress_percent: float = None):
+    async def update_stage_progress(self, stage_id: str, progress_percent: float = None, 
+                                   progress_text: str = ""):
         """Обновить прогресс конкретного этапа"""
         if stage_id not in self.stages or stage_id != self.current_stage:
             return
+        
+        stage = self.stages[stage_id]
+        if progress_percent is not None:
+            stage.progress_percent = max(0, min(100, progress_percent))
+        if progress_text:
+            stage.progress_text = progress_text
         
         await self.update_display()
     
@@ -162,9 +175,17 @@ class ProgressTracker:
                 text += f"✅ {stage.emoji} {stage.name} - {duration:.1f}с\n"
             elif stage.is_active:
                 elapsed = (datetime.now() - stage.started_at).total_seconds() if stage.started_at else 0
-                progress_bar = self._create_progress_bar(elapsed, stage.estimated_duration)
+                
+                # Используем процентный прогресс, если доступен
+                if stage.progress_percent > 0:
+                    progress_bar = self._create_progress_bar_from_percent(stage.progress_percent)
+                    description = stage.progress_text or stage.description
+                else:
+                    progress_bar = self._create_progress_bar(elapsed, stage.estimated_duration)
+                    description = stage.description
+                
                 text += f"🔄 {stage.emoji} {stage.name} {progress_bar}\n"
-                text += f"   _{stage.description}_\n"
+                text += f"   _{description}_\n"
             else:
                 text += f"⏳ {stage.emoji} {stage.name}\n"
         
@@ -175,7 +196,7 @@ class ProgressTracker:
         return text
     
     def _create_progress_bar(self, elapsed: float, estimated: float) -> str:
-        """Создать визуальный индикатор прогресса"""
+        """Создать визуальный индикатор прогресса на основе времени"""
         if estimated <= 0:
             return "..."
         
@@ -183,6 +204,15 @@ class ProgressTracker:
         filled = int(progress * 10)
         bar = "█" * filled + "░" * (10 - filled)
         percentage = int(progress * 100)
+        
+        return f"[{bar}] {percentage}%"
+    
+    def _create_progress_bar_from_percent(self, percent: float) -> str:
+        """Создать визуальный индикатор прогресса из процентов"""
+        progress = min(percent / 100.0, 1.0)
+        filled = int(progress * 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        percentage = int(percent)
         
         return f"[{bar}] {percentage}%"
     

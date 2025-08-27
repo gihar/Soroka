@@ -276,14 +276,86 @@ def setup_quick_actions_handlers() -> Router:
     @router.message(F.text == "📊 Статистика")
     async def stats_button_handler(message: Message):
         """Обработчик кнопки статистики"""
-        await message.answer(
-            "📊 **Ваша статистика**\n\n"
-            "🔄 Обработано файлов: 0\n"
-            "📝 Создано протоколов: 0\n"
-            "⏱️ Общее время: 0 мин\n"
-            "🎯 Средняя точность: N/A\n\n"
-            "📈 Функция в разработке..."
-        )
+        logger.info(f"Пользователь {message.from_user.id} запросил статистику")
+        try:
+            from database import db
+            from reliability.middleware import monitoring_middleware
+            from reliability.health_check import health_checker
+            from datetime import datetime, timedelta
+            
+            # Получаем статистику пользователя из базы данных
+            user_stats = await db.get_user_stats(message.from_user.id)
+            
+            # Получаем системную статистику
+            system_stats = monitoring_middleware.get_stats()
+            
+            if user_stats:
+                # Форматируем личную статистику
+                total_files = user_stats.get('total_files', 0)
+                active_days = user_stats.get('active_days', 0)
+                favorite_templates = user_stats.get('favorite_templates', [])
+                llm_providers = user_stats.get('llm_providers', [])
+                
+                # Строим сообщение
+                stats_text = f"📊 **Ваша статистика**\n\n"
+                stats_text += f"🔄 **Обработано файлов:** {total_files}\n"
+                stats_text += f"📅 **Активных дней:** {active_days}\n"
+                
+                if user_stats.get('first_file_date'):
+                    try:
+                        first_date = datetime.fromisoformat(user_stats['first_file_date'].replace('Z', '+00:00'))
+                        days_since_first = (datetime.now() - first_date.replace(tzinfo=None)).days
+                        stats_text += f"🎯 **Дней с начала использования:** {days_since_first}\n"
+                    except:
+                        pass
+                
+                # Любимые шаблоны
+                if favorite_templates:
+                    stats_text += f"\n📝 **Популярные шаблоны:**\n"
+                    for template in favorite_templates[:3]:
+                        stats_text += f"• {template['name']}: {template['count']} раз\n"
+                
+                # LLM провайдеры
+                if llm_providers:
+                    stats_text += f"\n🤖 **Используемые AI модели:**\n"
+                    for provider in llm_providers[:3]:
+                        provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
+                        stats_text += f"• {provider_name}: {provider['count']} раз\n"
+                
+                # Системная статистика
+                stats_text += f"\n🌐 **Общая статистика системы:**\n"
+                stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
+                stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
+                stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
+                
+                if system_stats.get('error_rate', 0) > 0:
+                    stats_text += f"• Процент ошибок: {system_stats.get('error_rate', 0):.1f}%\n"
+                else:
+                    stats_text += f"• ✅ Система работает стабильно\n"
+                
+            else:
+                # Новый пользователь
+                stats_text = f"📊 **Добро пожаловать!**\n\n"
+                stats_text += f"🔄 **Обработано файлов:** 0\n"
+                stats_text += f"📅 **Активных дней:** 0\n\n"
+                stats_text += f"🚀 Отправьте свой первый файл для обработки!\n\n"
+                
+                # Системная статистика для новых пользователей
+                stats_text += f"🌐 **Статистика системы:**\n"
+                stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
+                stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
+                stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
+            
+            await message.answer(stats_text, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении статистики: {e}")
+            await message.answer(
+                "📊 **Статистика**\n\n"
+                "❌ Временно недоступна статистика.\n"
+                "Попробуйте позже или обратитесь к администратору.",
+                parse_mode="Markdown"
+            )
     
     @router.message(F.text == "❓ Помощь")
     async def help_button_handler(message: Message):
