@@ -1,0 +1,58 @@
+"""
+Модели обработки файлов
+"""
+
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+
+class ProcessingRequest(BaseModel):
+    """Запрос на обработку файла"""
+    file_id: str = Field(..., description="ID файла в Telegram")
+    file_name: str = Field(..., description="Имя файла")
+    template_id: int = Field(..., description="ID шаблона")
+    llm_provider: str = Field(..., description="LLM провайдер")
+    user_id: int = Field(..., description="ID пользователя")
+    language: str = Field("ru", description="Язык транскрипции")
+
+
+class TranscriptionResult(BaseModel):
+    """Результат транскрипции"""
+    transcription: str = Field(..., description="Текст транскрипции")
+    diarization: Optional[Dict[str, Any]] = Field(None, description="Данные диаризации")
+    speakers_text: Dict[str, str] = Field(default_factory=dict, description="Текст по говорящим")
+    formatted_transcript: str = Field("", description="Форматированная транскрипция")
+    speakers_summary: str = Field("", description="Резюме говорящих")
+
+
+class DiarizationData(BaseModel):
+    """Данные диаризации"""
+    segments: List[Dict[str, Any]] = Field(default_factory=list, description="Сегменты диаризации")
+    speakers: List[str] = Field(default_factory=list, description="Список говорящих")
+    total_speakers: int = Field(0, description="Общее количество говорящих")
+    formatted_transcript: Optional[str] = Field(None, description="Форматированная транскрипция")
+
+
+class ProcessingResult(BaseModel):
+    """Результат обработки"""
+    transcription_result: TranscriptionResult
+    protocol_text: str = Field(..., description="Сгенерированный протокол")
+    template_used: Dict[str, Any] = Field(..., description="Использованный шаблон")
+    llm_provider_used: str = Field(..., description="Использованный LLM провайдер")
+    processing_duration: Optional[float] = Field(None, description="Время обработки в секундах")
+
+
+class ProcessingHistory(BaseModel):
+    """История обработки"""
+    id: int = Field(..., description="ID записи")
+    user_id: int = Field(..., description="ID пользователя")
+    file_name: str = Field(..., description="Имя файла")
+    template_id: int = Field(..., description="ID шаблона")
+    llm_provider: str = Field(..., description="LLM провайдер")
+    transcription_text: str = Field(..., description="Текст транскрипции")
+    result_text: str = Field(..., description="Результирующий текст")
+    created_at: datetime = Field(..., description="Дата создания")
+
+    class Config:
+        from_attributes = True

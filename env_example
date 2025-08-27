@@ -1,0 +1,41 @@
+# Telegram Bot Token
+TELEGRAM_TOKEN=your_telegram_bot_token_here
+
+# OpenAI API Key
+OPENAI_API_KEY=your_openai_api_key_here
+
+# OpenAI Base URL (для использования альтернативных провайдеров типа OpenRouter)
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+# OpenAI Model (модель для генерации)
+OPENAI_MODEL=gpt-3.5-turbo
+
+# Anthropic API Key
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Yandex GPT API Key and Folder ID
+YANDEX_API_KEY=your_yandex_api_key_here
+YANDEX_FOLDER_ID=your_yandex_folder_id_here
+
+# Database URL (по умолчанию SQLite)
+DATABASE_URL=sqlite:///bot.db
+
+# Максимальный размер файла (в байтах)
+MAX_FILE_SIZE=52428800
+
+# Директория для временных файлов
+TEMP_DIR=temp
+
+# Уровень логирования
+LOG_LEVEL=INFO
+
+# SSL Verification (false для отключения проверки SSL сертификатов)
+SSL_VERIFY=false
+
+# Настройки диаризации (разделение говорящих)
+ENABLE_DIARIZATION=true
+HUGGINGFACE_TOKEN=your_huggingface_token_here_optional
+DIARIZATION_DEVICE=auto
+COMPUTE_TYPE=auto
+MAX_SPEAKERS=10
+MIN_SPEAKERS=1
