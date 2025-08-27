@@ -215,9 +215,9 @@ class OptimizedProcessingService(BaseProcessingService):
                     except Exception as e:
                         logger.warning(f"Ошибка при обновлении прогресса: {e}")
             
-            # Используем thread pool для CPU-интенсивной задачи
-            transcription_result = await thread_manager.run_in_thread(
-                self._run_transcription_sync, file_path, request.language, progress_callback
+            # Выполняем транскрипцию асинхронно
+            transcription_result = await self._run_transcription_async(
+                file_path, request.language, progress_callback
             )
             
             processing_metrics.transcription_duration = time.time() - start_time
@@ -241,9 +241,9 @@ class OptimizedProcessingService(BaseProcessingService):
         
         return transcription_result
     
-    def _run_transcription_sync(self, file_path: str, language: str, progress_callback=None):
-        """Синхронная транскрипция для выполнения в thread pool"""
-        return self.transcription_service.transcribe_with_diarization(
+    async def _run_transcription_async(self, file_path: str, language: str, progress_callback=None):
+        """Асинхронная транскрипция"""
+        return await self.transcription_service.transcribe_with_diarization(
             file_path, language, progress_callback
         )
     

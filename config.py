@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # SSL настройки
     ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
     
+    # Транскрипция
+    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако) или hybrid (гибридный)")
+    groq_api_key: Optional[str] = Field(None, description="API ключ Groq для облачной транскрипции")
+    groq_model: str = Field("whisper-large-v3-turbo", description="Модель Groq для транскрипции")
+    
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")
     huggingface_token: Optional[str] = Field(None, description="Токен Hugging Face для моделей диаризации")

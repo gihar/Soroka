@@ -35,6 +35,11 @@ LOG_LEVEL=INFO
 # SSL Verification (false для отключения проверки SSL сертификатов)
 SSL_VERIFY=false
 
+# Настройки транскрипции
+TRANSCRIPTION_MODE=hybrid
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=whisper-large-v3-turbo
+
 # Настройки диаризации (разделение говорящих)
 ENABLE_DIARIZATION=true
 HUGGINGFACE_TOKEN=your_huggingface_token_here_optional

@@ -12,8 +12,15 @@ from pathlib import Path
 from loguru import logger
 
 from models.processing import TranscriptionResult, DiarizationData
-from exceptions.processing import TranscriptionError
+from exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError
 from config import settings
+
+try:
+    from groq import Groq
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
+    logger.warning("Groq SDK недоступен")
 
 try:
     from diarization import diarization_service, DiarizationResult
@@ -28,8 +35,17 @@ class TranscriptionService:
     
     def __init__(self):
         self.whisper_model = None
+        self.groq_client = None
         self.temp_dir = Path(settings.temp_dir)
         self.temp_dir.mkdir(exist_ok=True)
+        
+        # Инициализация Groq клиента
+        if GROQ_AVAILABLE and settings.groq_api_key:
+            try:
+                self.groq_client = Groq(api_key=settings.groq_api_key)
+                logger.info("Groq клиент инициализирован")
+            except Exception as e:
+                logger.warning(f"Ошибка при инициализации Groq клиента: {e}")
     
     def _load_whisper_model(self, model_size: str = "base"):
         """Загрузить модель Whisper"""
@@ -64,11 +80,57 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
-    def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
+    async def _transcribe_with_groq(self, file_path: str, progress_callback=None) -> str:
+        """Транскрибация через Groq API"""
+        if not self.groq_client:
+            raise CloudTranscriptionError("Groq клиент не инициализирован", file_path)
+        
+        if not os.path.exists(file_path):
+            raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
+        
+        try:
+            if progress_callback:
+                progress_callback(20, "Подготовка файла для облачной транскрипции...")
+            
+            logger.info(f"Начало облачной транскрипции файла: {file_path}")
+            
+            # Читаем файл и отправляем в Groq
+            with open(file_path, "rb") as file:
+                if progress_callback:
+                    progress_callback(40, "Отправка файла в облако...")
+                
+                transcription = self.groq_client.audio.transcriptions.create(
+                    file=(os.path.basename(file_path), file.read()),
+                    model=settings.groq_model,
+                    response_format="verbose_json",
+                )
+                
+                if progress_callback:
+                    progress_callback(90, "Получение результатов...")
+                
+                result_text = transcription.text
+                logger.info(f"Облачная транскрипция завершена. Длина текста: {len(result_text)} символов")
+                
+                return result_text
+                
+        except Exception as e:
+            logger.error(f"Ошибка при облачной транскрипции файла {file_path}: {e}")
+            
+            # Проверяем тип ошибки для более точной диагностики
+            if "api" in str(e).lower() or "unauthorized" in str(e).lower():
+                raise GroqAPIError(str(e), file_path, str(e))
+            elif "rate" in str(e).lower() or "limit" in str(e).lower():
+                raise GroqAPIError(f"Превышен лимит запросов: {e}", file_path, str(e))
+            elif "file" in str(e).lower() or "format" in str(e).lower():
+                raise CloudTranscriptionError(f"Ошибка формата файла: {e}", file_path)
+            else:
+                raise CloudTranscriptionError(str(e), file_path)
+    
+    async def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
                                    progress_callback=None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией"""
-        # Проверяем наличие ffmpeg
-        if not self._check_ffmpeg():
+        # Для облачной транскрипции ffmpeg не нужен
+        if settings.transcription_mode == "local" and not self._check_ffmpeg():
             raise TranscriptionError(
                 "ffmpeg не найден в системе. "
                 "Установите ffmpeg для транскрипции аудио/видео файлов.",
@@ -126,33 +188,100 @@ class TranscriptionService:
                 except Exception as e:
                     logger.warning(f"Ошибка при диаризации, переходим к обычной транскрипции: {e}")
             
-            # Fallback к обычной транскрипции через Whisper
-            if progress_callback:
-                progress_callback(20, "Загрузка модели Whisper...")
+            # Выбираем метод транскрипции в зависимости от настроек
+            if settings.transcription_mode == "cloud" and self.groq_client:
+                # Облачная транскрипция через Groq
+                if progress_callback:
+                    progress_callback(20, "Подготовка к облачной транскрипции...")
+                
+                logger.info("Выполнение облачной транскрипции через Groq...")
+                transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                
+                if progress_callback:
+                    progress_callback(100, "Облачная транскрипция завершена!")
+                    
+            elif settings.transcription_mode == "hybrid" and self.groq_client:
+                # Гибридный подход: облачная транскрипция + локальная диаризация
+                if progress_callback:
+                    progress_callback(20, "Подготовка к гибридной обработке...")
+                
+                logger.info("Выполнение гибридной транскрипции: облачная + диаризация...")
+                
+                # Сначала выполняем облачную транскрипцию
+                if progress_callback:
+                    progress_callback(30, "Облачная транскрипция...")
+                
+                transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                
+                # Затем применяем диаризацию к уже полученному тексту
+                if DIARIZATION_AVAILABLE and settings.enable_diarization:
+                    if progress_callback:
+                        progress_callback(70, "Применение диаризации к тексту...")
+                    
+                    logger.info("Применение диаризации к облачному тексту...")
+                    
+                    try:
+                        # Используем диаризацию для разделения говорящих
+                        diarization_result = diarization_service.diarize_file(
+                            file_path, language, progress_callback
+                        )
+                        
+                        if diarization_result:
+                            if progress_callback:
+                                progress_callback(90, "Обработка результатов диаризации...")
+                            
+                            # Обновляем результат с диаризацией
+                            result.diarization = diarization_result.to_dict()
+                            result.speakers_text = diarization_result.get_speakers_text()
+                            result.formatted_transcript = diarization_result.get_formatted_transcript()
+                            result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                            
+                            logger.info(f"Гибридная обработка завершена. Найдено говорящих: {len(diarization_result.speakers)}")
+                            
+                            if progress_callback:
+                                progress_callback(100, "Гибридная обработка завершена!")
+                            
+                            result.transcription = transcription
+                            return result
+                            
+                    except Exception as e:
+                        logger.warning(f"Ошибка при диаризации в гибридном режиме: {e}")
+                        # Продолжаем без диаризации
+                
+                if progress_callback:
+                    progress_callback(100, "Гибридная обработка завершена!")
+                
+                logger.info(f"Гибридная транскрибация завершена. Длина текста: {len(transcription)} символов")
+                
+            else:
+                # Fallback к обычной транскрипции через Whisper
+                if progress_callback:
+                    progress_callback(20, "Загрузка модели Whisper...")
+                
+                self._load_whisper_model()
+                
+                if progress_callback:
+                    progress_callback(40, "Выполнение транскрипции...")
+                
+                logger.info("Выполнение стандартной транскрипции...")
+                
+                # Создаем обертку для отслеживания прогресса
+                whisper_result = self._transcribe_with_progress(
+                    file_path, language, progress_callback
+                )
+                
+                if progress_callback:
+                    progress_callback(90, "Обработка результатов...")
+                
+                transcription = whisper_result["text"].strip()
+                
+                if progress_callback:
+                    progress_callback(100, "Транскрипция завершена!")
+                
+                logger.info(f"Стандартная транскрибация завершена. Длина текста: {len(transcription)} символов")
             
-            self._load_whisper_model()
-            
-            if progress_callback:
-                progress_callback(40, "Выполнение транскрипции...")
-            
-            logger.info("Выполнение стандартной транскрипции...")
-            
-            # Создаем обертку для отслеживания прогресса
-            whisper_result = self._transcribe_with_progress(
-                file_path, language, progress_callback
-            )
-            
-            if progress_callback:
-                progress_callback(90, "Обработка результатов...")
-            
-            transcription = whisper_result["text"].strip()
             result.transcription = transcription
             result.formatted_transcript = transcription  # Без разделения говорящих
-            
-            if progress_callback:
-                progress_callback(100, "Транскрипция завершена!")
-            
-            logger.info(f"Стандартная транскрибация завершена. Длина текста: {len(transcription)} символов")
             
             return result
             
@@ -222,7 +351,7 @@ class TranscriptionService:
             file_path = await self.download_file(file_url, file_name)
             
             # Транскрибируем с диаризацией
-            result = self.transcribe_with_diarization(file_path, language)
+            result = await self.transcribe_with_diarization(file_path, language)
             
             return result
             
