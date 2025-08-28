@@ -2,7 +2,7 @@
 Исключения для обработки файлов
 """
 
-from exceptions.base import BotException
+from src.exceptions.base import BotException
 
 
 class ProcessingError(BotException):

@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 from loguru import logger
 
-from models.processing import TranscriptionResult, DiarizationData
-from exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError
+from src.models.processing import TranscriptionResult, DiarizationData
+from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError
 from config import settings
 
 try:
@@ -32,6 +32,9 @@ except ImportError:
 
 class TranscriptionService:
     """Обновленный сервис транскрипции"""
+    
+    # Максимальный размер файла для Groq API (25 MB)
+    GROQ_MAX_FILE_SIZE = 25 * 1024 * 1024
     
     def __init__(self):
         self.whisper_model = None
@@ -57,6 +60,22 @@ class TranscriptionService:
             except Exception as e:
                 logger.error(f"Ошибка при загрузке модели Whisper: {e}")
                 raise TranscriptionError(f"Не удалось загрузить модель Whisper: {e}")
+    
+    def _check_file_size_for_groq(self, file_path: str) -> bool:
+        """Проверить, подходит ли файл для облачной транскрипции по размеру"""
+        try:
+            file_size = os.path.getsize(file_path)
+            is_suitable = file_size <= self.GROQ_MAX_FILE_SIZE
+            
+            if not is_suitable:
+                file_size_mb = file_size / (1024 * 1024)
+                max_size_mb = self.GROQ_MAX_FILE_SIZE / (1024 * 1024)
+                logger.warning(f"Файл слишком большой для облачной транскрипции: {file_size_mb:.1f}MB (максимум: {max_size_mb}MB)")
+            
+            return is_suitable
+        except Exception as e:
+            logger.error(f"Ошибка при проверке размера файла {file_path}: {e}")
+            return False
     
     async def download_file(self, file_url: str, file_name: str) -> str:
         """Скачать файл по URL"""
@@ -87,6 +106,13 @@ class TranscriptionService:
         
         if not os.path.exists(file_path):
             raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
+        
+        # Проверяем размер файла перед отправкой
+        if not self._check_file_size_for_groq(file_path):
+            raise CloudTranscriptionError(
+                f"Файл слишком большой для облачной транскрипции. Максимальный размер: {self.GROQ_MAX_FILE_SIZE / (1024 * 1024)}MB", 
+                file_path
+            )
         
         try:
             if progress_callback:
@@ -123,6 +149,8 @@ class TranscriptionService:
                 raise GroqAPIError(f"Превышен лимит запросов: {e}", file_path, str(e))
             elif "file" in str(e).lower() or "format" in str(e).lower():
                 raise CloudTranscriptionError(f"Ошибка формата файла: {e}", file_path)
+            elif "413" in str(e) or "too large" in str(e).lower():
+                raise CloudTranscriptionError(f"Файл слишком большой для облачной транскрипции: {e}", file_path)
             else:
                 raise CloudTranscriptionError(str(e), file_path)
     
@@ -141,7 +169,10 @@ class TranscriptionService:
         if not os.path.exists(file_path):
             raise TranscriptionError(f"Файл не найден: {file_path}", file_path)
         
-        logger.info(f"Начало транскрибации с диаризацией файла: {file_path}")
+        # Логируем информацию о файле
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        logger.info(f"Начало транскрибации с диаризацией файла: {file_path} (размер: {file_size_mb:.1f}MB)")
         
         result = TranscriptionResult(
             transcription="",
@@ -159,7 +190,7 @@ class TranscriptionService:
                     if progress_callback:
                         progress_callback(10, "Инициализация диаризации...")
                     
-                    diarization_result = diarization_service.diarize_file(
+                    diarization_result = await diarization_service.diarize_file(
                         file_path, language, progress_callback
                     )
                     
@@ -190,15 +221,41 @@ class TranscriptionService:
             
             # Выбираем метод транскрипции в зависимости от настроек
             if settings.transcription_mode == "cloud" and self.groq_client:
-                # Облачная транскрипция через Groq
-                if progress_callback:
-                    progress_callback(20, "Подготовка к облачной транскрипции...")
-                
-                logger.info("Выполнение облачной транскрипции через Groq...")
-                transcription = await self._transcribe_with_groq(file_path, progress_callback)
-                
-                if progress_callback:
-                    progress_callback(100, "Облачная транскрипция завершена!")
+                # Проверяем размер файла для облачной транскрипции
+                if self._check_file_size_for_groq(file_path):
+                    # Облачная транскрипция через Groq
+                    if progress_callback:
+                        progress_callback(20, "Подготовка к облачной транскрипции...")
+                    
+                    logger.info("Выполнение облачной транскрипции через Groq...")
+                    transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                    
+                    if progress_callback:
+                        progress_callback(100, "Облачная транскрипция завершена!")
+                else:
+                    # Файл слишком большой, переключаемся на локальную транскрипцию
+                    logger.info("Файл слишком большой для облачной транскрипции, переключаемся на локальную...")
+                    if progress_callback:
+                        progress_callback(20, "Файл слишком большой, используем локальную транскрипцию...")
+                    
+                    self._load_whisper_model()
+                    
+                    if progress_callback:
+                        progress_callback(40, "Выполнение локальной транскрипции...")
+                    
+                    whisper_result = self._transcribe_with_progress(
+                        file_path, language, progress_callback
+                    )
+                    
+                    if progress_callback:
+                        progress_callback(90, "Обработка результатов...")
+                    
+                    transcription = whisper_result["text"].strip()
+                    
+                    if progress_callback:
+                        progress_callback(100, "Локальная транскрипция завершена!")
+                    
+                    logger.info(f"Локальная транскрибация завершена. Длина текста: {len(transcription)} символов")
                     
             elif settings.transcription_mode == "hybrid" and self.groq_client:
                 # Гибридный подход: облачная транскрипция + локальная диаризация
@@ -207,18 +264,33 @@ class TranscriptionService:
                 
                 logger.info("Выполнение гибридной транскрипции: облачная + диаризация...")
                 
-                # Сначала выполняем облачную транскрипцию
-                if progress_callback:
-                    progress_callback(30, "Облачная транскрипция...")
-                
-                transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                # Проверяем размер файла для облачной транскрипции
+                if self._check_file_size_for_groq(file_path):
+                    # Сначала выполняем облачную транскрипцию
+                    if progress_callback:
+                        progress_callback(30, "Облачная транскрипция...")
+                    
+                    transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                else:
+                    # Файл слишком большой, используем локальную транскрипцию
+                    logger.info("Файл слишком большой для облачной транскрипции, используем локальную...")
+                    if progress_callback:
+                        progress_callback(30, "Локальная транскрипция (файл слишком большой)...")
+                    
+                    self._load_whisper_model()
+                    
+                    whisper_result = self._transcribe_with_progress(
+                        file_path, language, progress_callback
+                    )
+                    
+                    transcription = whisper_result["text"].strip()
                 
                 # Затем применяем диаризацию к уже полученному тексту
                 if DIARIZATION_AVAILABLE and settings.enable_diarization:
                     if progress_callback:
                         progress_callback(70, "Применение диаризации к тексту...")
                     
-                    logger.info("Применение диаризации к облачному тексту...")
+                    logger.info("Применение диаризации к тексту...")
                     
                     try:
                         # Используем диаризацию для разделения говорящих

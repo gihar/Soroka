@@ -11,7 +11,7 @@ from loguru import logger
 from services.user_service import UserService
 from services.template_service import TemplateService
 from services.enhanced_llm_service import EnhancedLLMService
-from models.user import UserCreate
+from src.models.user import UserCreate
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 

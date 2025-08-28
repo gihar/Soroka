@@ -9,16 +9,16 @@ import aiofiles
 from typing import Dict, Any, Optional
 from loguru import logger
 
-from services.base_processing_service import BaseProcessingService
-from models.processing import ProcessingRequest, ProcessingResult
-from exceptions.processing import ProcessingError
-from performance.cache_system import performance_cache, cache_transcription, cache_llm_response
-from performance.metrics import metrics_collector, PerformanceTimer, performance_timer
-from performance.async_optimization import (
+from src.services.base_processing_service import BaseProcessingService
+from src.models.processing import ProcessingRequest, ProcessingResult
+from src.exceptions.processing import ProcessingError
+from src.performance.cache_system import performance_cache, cache_transcription, cache_llm_response
+from src.performance.metrics import metrics_collector, PerformanceTimer, performance_timer
+from src.performance.async_optimization import (
     task_pool, thread_manager, optimized_file_processing,
     OptimizedHTTPClient, async_lru_cache
 )
-from performance.memory_management import memory_optimizer
+from src.performance.memory_management import memory_optimizer
 
 
 class OptimizedProcessingService(BaseProcessingService):

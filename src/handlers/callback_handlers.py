@@ -190,7 +190,7 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
 
 async def _process_file(callback: CallbackQuery, state: FSMContext, processing_service: OptimizedProcessingService):
     """Начать обработку файла"""
-    from models.processing import ProcessingRequest
+    from src.models.processing import ProcessingRequest
     
     try:
         # Получаем данные из состояния
@@ -263,15 +263,33 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             
             result_message = MessageBuilder.processing_complete_message(result_dict)
             
-            # Отправляем сообщение о завершении
-            await callback.bot.send_message(
-                callback.message.chat.id,
-                result_message,
-                parse_mode="Markdown"
-            )
+            # Отправляем сообщение о завершении с обработкой ошибок длины
+            try:
+                await callback.bot.send_message(
+                    callback.message.chat.id,
+                    result_message,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                if "message is too long" in str(e).lower():
+                    # Если сообщение слишком длинное, отправляем без Markdown
+                    await callback.bot.send_message(
+                        callback.message.chat.id,
+                        result_message
+                    )
+                else:
+                    raise e
             
-            # Отправляем протокол
-            await _send_long_message(callback.message.chat.id, result.protocol_text, callback.bot)
+            # Отправляем протокол с обработкой ошибок
+            try:
+                await _send_long_message(callback.message.chat.id, result.protocol_text, callback.bot)
+            except Exception as e:
+                logger.error(f"Ошибка отправки протокола: {e}")
+                # Отправляем уведомление об ошибке
+                await callback.bot.send_message(
+                    callback.message.chat.id,
+                    "⚠️ Протокол слишком длинный для отправки. Попробуйте обработать файл меньшего размера."
+                )
             
             # Запрашиваем обратную связь
             feedback_manager = QuickFeedbackManager(feedback_collector)
@@ -281,7 +299,47 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             
         except Exception as e:
             logger.error(f"Ошибка при обработке файла: {e}")
-            await progress_tracker.error("processing", str(e))
+            
+            # Специальная обработка ошибок размера файла
+            error_message = str(e)
+            if "message is too long" in error_message.lower():
+                user_message = (
+                    "📄 **Сообщение слишком длинное**\n\n"
+                    "Результат обработки превышает лимит Telegram. Попробуйте:\n\n"
+                    "• Обработать файл меньшего размера\n"
+                    "• Разделить длинную запись на части\n"
+                    "• Использовать более короткий аудиофайл"
+                )
+            elif "too large" in error_message.lower() or "413" in error_message:
+                user_message = (
+                    "📦 **Файл слишком большой для облачной транскрипции**\n\n"
+                    "Система автоматически переключилась на локальную транскрипцию, "
+                    "но произошла ошибка. Попробуйте:\n\n"
+                    "• Сжать аудиофайл до меньшего размера\n"
+                    "• Разделить длинную запись на несколько частей\n"
+                    "• Использовать формат с лучшим сжатием (MP3)\n"
+                    "• Снизить качество аудио"
+                )
+            elif "transcription" in error_message.lower():
+                user_message = (
+                    "🎤 **Ошибка при транскрипции**\n\n"
+                    f"Детали: {error_message}\n\n"
+                    "Попробуйте:\n"
+                    "• Проверить качество аудио\n"
+                    "• Убедиться, что файл не поврежден\n"
+                    "• Попробовать другой аудиофайл"
+                )
+            else:
+                user_message = f"❌ **Ошибка при обработке файла**\n\n{error_message}"
+            
+            await progress_tracker.error("processing", user_message)
+            
+            # Отправляем сообщение пользователю
+            await callback.bot.send_message(
+                callback.message.chat.id,
+                user_message,
+                parse_mode="Markdown"
+            )
         
     except Exception as e:
         logger.error(f"Ошибка при обработке файла: {e}")
@@ -292,16 +350,27 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
 
 async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 4096):
     """Отправить длинное сообщение по частям"""
+    # Учитываем заголовок при расчете максимальной длины части
+    header_template = "📄 **Протокол встречи** (часть {}/{})\n\n"
+    max_header_length = len(header_template.format(999, 999))  # Максимальная длина заголовка
+    max_part_length = max_length - max_header_length
+    
     if len(text) <= max_length:
-        await bot.send_message(chat_id, text, parse_mode="Markdown")
-        return
+        try:
+            await bot.send_message(chat_id, text, parse_mode="Markdown")
+            return
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения: {e}")
+            # Если не удалось отправить с Markdown, пробуем без него
+            await bot.send_message(chat_id, text)
+            return
     
     # Разбиваем текст на части
     parts = []
     current_part = ""
     
     for line in text.split('\n'):
-        if len(current_part) + len(line) + 1 <= max_length:
+        if len(current_part) + len(line) + 1 <= max_part_length:
             current_part += line + '\n'
         else:
             if current_part:
@@ -311,10 +380,26 @@ async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 409
     if current_part:
         parts.append(current_part.strip())
     
-    # Отправляем части
+    # Отправляем части с обработкой ошибок
     for i, part in enumerate(parts):
-        await bot.send_message(
-            chat_id,
-            f"📄 **Протокол встречи** (часть {i+1}/{len(parts)})\n\n{part}",
-            parse_mode="Markdown"
-        )
+        try:
+            header = f"📄 **Протокол встречи** (часть {i+1}/{len(parts)})\n\n"
+            full_message = header + part
+            
+            # Проверяем, что сообщение не превышает лимит
+            if len(full_message) > max_length:
+                # Если превышает, отправляем без Markdown
+                await bot.send_message(chat_id, full_message)
+            else:
+                await bot.send_message(chat_id, full_message, parse_mode="Markdown")
+                
+        except Exception as e:
+            logger.error(f"Ошибка отправки части {i+1}: {e}")
+            # Пробуем отправить без Markdown
+            try:
+                header = f"📄 Протокол встречи (часть {i+1}/{len(parts)})\n\n"
+                await bot.send_message(chat_id, header + part)
+            except Exception as e2:
+                logger.error(f"Критическая ошибка отправки части {i+1}: {e2}")
+                # Отправляем простой текст без заголовка
+                await bot.send_message(chat_id, part[:max_length])

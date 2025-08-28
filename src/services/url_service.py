@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs
 from loguru import logger
 
 from config import settings
-from exceptions.file import FileError, FileSizeError, FileTypeError
+from src.exceptions.file import FileError, FileSizeError, FileTypeError
 
 
 class URLService:

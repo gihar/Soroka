@@ -42,7 +42,9 @@ GROQ_MODEL=whisper-large-v3-turbo
 
 # Настройки диаризации (разделение говорящих)
 ENABLE_DIARIZATION=true
+DIARIZATION_PROVIDER=whisperx
 HUGGINGFACE_TOKEN=your_huggingface_token_here_optional
+PICOVOICE_ACCESS_KEY=your_picovoice_access_key_here_optional
 DIARIZATION_DEVICE=auto
 COMPUTE_TYPE=auto
 MAX_SPEAKERS=10

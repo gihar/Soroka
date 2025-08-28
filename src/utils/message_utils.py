@@ -118,3 +118,84 @@ def format_processing_progress(stage: str, details: str = "") -> str:
         message += details
     
     return message
+
+
+def safe_send_message(bot, chat_id: int, text: str, parse_mode: str = "Markdown", max_length: int = 4096):
+    """
+    Безопасная отправка сообщения с автоматической обработкой длинных сообщений
+    
+    Args:
+        bot: Telegram bot instance
+        chat_id: ID чата
+        text: Текст сообщения
+        parse_mode: Режим парсинга (Markdown или HTML)
+        max_length: Максимальная длина сообщения
+    """
+    import asyncio
+    from loguru import logger
+    
+    async def _safe_send():
+        try:
+            # Проверяем длину сообщения
+            if len(text) <= max_length:
+                await bot.send_message(chat_id, text, parse_mode=parse_mode)
+                return
+            
+            # Если сообщение слишком длинное, разбиваем на части
+            parts = []
+            current_part = ""
+            
+            for line in text.split('\n'):
+                if len(current_part) + len(line) + 1 <= max_length:
+                    current_part += line + '\n'
+                else:
+                    if current_part:
+                        parts.append(current_part.strip())
+                    current_part = line + '\n'
+            
+            if current_part:
+                parts.append(current_part.strip())
+            
+            # Отправляем части
+            for i, part in enumerate(parts):
+                try:
+                    header = f"📄 Часть {i+1}/{len(parts)}\n\n"
+                    full_message = header + part
+                    
+                    if len(full_message) <= max_length:
+                        await bot.send_message(chat_id, full_message, parse_mode=parse_mode)
+                    else:
+                        # Если с заголовком не помещается, отправляем без него
+                        await bot.send_message(chat_id, part, parse_mode=parse_mode)
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка отправки части {i+1}: {e}")
+                    # Пробуем отправить без форматирования
+                    try:
+                        await bot.send_message(chat_id, part)
+                    except Exception as e2:
+                        logger.error(f"Критическая ошибка отправки части {i+1}: {e2}")
+                        # Отправляем обрезанную версию
+                        await bot.send_message(chat_id, part[:max_length])
+                        
+        except Exception as e:
+            logger.error(f"Ошибка в safe_send_message: {e}")
+            # Пробуем отправить без форматирования
+            try:
+                await bot.send_message(chat_id, text[:max_length])
+            except Exception as e2:
+                logger.error(f"Критическая ошибка отправки сообщения: {e2}")
+                raise e2
+    
+    # Запускаем асинхронную функцию
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Если мы уже в асинхронном контексте, создаем задачу
+            return asyncio.create_task(_safe_send())
+        else:
+            # Если нет активного цикла, запускаем новый
+            return asyncio.run(_safe_send())
+    except RuntimeError:
+        # Если нет активного цикла событий, создаем новый
+        return asyncio.run(_safe_send())

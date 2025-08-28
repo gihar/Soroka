@@ -2,7 +2,7 @@
 Исключения для работы с пользователями
 """
 
-from exceptions.base import BotException
+from src.exceptions.base import BotException
 
 
 class UserNotFoundError(BotException):

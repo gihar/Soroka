@@ -193,7 +193,7 @@ class MessageBuilder:
         if result.get("llm_provider_used"):
             message += f"🤖 ИИ: {result['llm_provider_used']}\n"
         
-        # Информация о транскрипции
+        # Информация о транскрипции (с ограничением длины)
         if result.get("transcription_result"):
             transcription = result["transcription_result"]
             if transcription.get("transcription"):
@@ -201,12 +201,17 @@ class MessageBuilder:
                 word_count = len(transcription["transcription"].split())
                 message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
         
-        # Информация о диаризации
+        # Информация о диаризации (с ограничением списка участников)
         if result.get("transcription_result", {}).get("diarization"):
             diarization = result["transcription_result"]["diarization"]
             speakers_count = diarization.get("total_speakers", 0)
             if speakers_count > 1:
-                speakers_list = ", ".join(diarization.get("speakers", []))
+                speakers = diarization.get("speakers", [])
+                # Ограничиваем список участников, чтобы не превысить лимит
+                if len(speakers) > 5:
+                    speakers_list = ", ".join(speakers[:5]) + f" и еще {len(speakers) - 5}"
+                else:
+                    speakers_list = ", ".join(speakers)
                 message += f"👥 Участники: {speakers_count} ({speakers_list})\n"
         
         # Время обработки
@@ -215,6 +220,30 @@ class MessageBuilder:
             message += f"⏱️ Время обработки: {duration:.1f} сек\n"
         
         message += "\n📄 **Протокол отправляется ниже...**"
+        
+        # Проверяем, что сообщение не превышает лимит Telegram
+        if len(message) > 4000:  # Оставляем запас для безопасности
+            # Создаем сокращенную версию
+            message = "🎉 **Протокол успешно создан!**\n\n"
+            message += "📋 **Результат обработки:**\n"
+            
+            if result.get("template_used"):
+                template_name = result["template_used"].get("name", "Неизвестный")
+                message += f"📝 Шаблон: {template_name}\n"
+            
+            if result.get("llm_provider_used"):
+                message += f"🤖 ИИ: {result['llm_provider_used']}\n"
+            
+            if result.get("transcription_result", {}).get("transcription"):
+                char_count = len(result["transcription_result"]["transcription"])
+                word_count = len(result["transcription_result"]["transcription"].split())
+                message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
+            
+            if result.get("processing_duration"):
+                duration = result["processing_duration"]
+                message += f"⏱️ Время обработки: {duration:.1f} сек\n"
+            
+            message += "\n📄 **Протокол отправляется ниже...**"
         
         return message
     

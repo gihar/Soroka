@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from loguru import logger
 
 from services import TemplateService
-from models.template import TemplateCreate
+from src.models.template import TemplateCreate
 from exceptions import TemplateValidationError
 
 

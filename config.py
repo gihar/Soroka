@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")
+    diarization_provider: str = Field("whisperx", description="Провайдер диаризации: whisperx, pyannote, picovoice")
     huggingface_token: Optional[str] = Field(None, description="Токен Hugging Face для моделей диаризации")
+    picovoice_access_key: Optional[str] = Field(None, description="Access Key для Picovoice API")
     diarization_device: str = Field("auto", description="Устройство для диаризации: auto, cpu, mps, cuda")
     compute_type: str = Field("auto", description="Тип вычислений: auto, int8, float16, float32")
     max_speakers: int = Field(10, description="Максимальное количество говорящих")

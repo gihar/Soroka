@@ -7,7 +7,7 @@ from typing import List
 from aiogram import Bot
 from loguru import logger
 
-from exceptions.file import FileError, FileSizeError, FileTypeError
+from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from config import settings
 
 
