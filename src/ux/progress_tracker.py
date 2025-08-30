@@ -1,5 +1,5 @@
 """
-Система отслеживания прогресса обработки файлов
+Система отслеживания прогресса обработки файлов (оптимизированная)
 """
 
 import asyncio
@@ -11,24 +11,20 @@ from datetime import datetime, timedelta
 
 
 class ProgressStage:
-    """Этап обработки с индикацией прогресса"""
+    """Упрощенный этап обработки"""
     
-    def __init__(self, name: str, emoji: str, description: str, 
-                 estimated_duration: int = 10):
+    def __init__(self, name: str, emoji: str, description: str):
         self.name = name
         self.emoji = emoji  
         self.description = description
-        self.estimated_duration = estimated_duration  # секунды
         self.started_at: Optional[datetime] = None
         self.completed_at: Optional[datetime] = None
         self.is_active = False
         self.is_completed = False
-        self.progress_percent: float = 0.0  # Процент выполнения (0-100)
-        self.progress_text: str = ""  # Дополнительный текст прогресса
 
 
 class ProgressTracker:
-    """Трекер прогресса с визуализацией"""
+    """Упрощенный трекер прогресса"""
     
     def __init__(self, bot: Bot, chat_id: int, message: Message):
         self.bot = bot
@@ -38,51 +34,28 @@ class ProgressTracker:
         self.current_stage: Optional[str] = None
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
-        self.update_interval = 3  # секунды
+        self.update_interval = 5  # Увеличили интервал до 5 секунд
         
-    def add_stage(self, stage_id: str, name: str, emoji: str, 
-                  description: str, estimated_duration: int = 10):
+    def add_stage(self, stage_id: str, name: str, emoji: str, description: str):
         """Добавить этап обработки"""
-        self.stages[stage_id] = ProgressStage(
-            name, emoji, description, estimated_duration
-        )
+        self.stages[stage_id] = ProgressStage(name, emoji, description)
     
     def setup_default_stages(self):
-        """Настройка стандартных этапов обработки"""
-        # Сохраняем порядок этапов
-        self.stages = {}  # Сбрасываем, чтобы гарантировать порядок
+        """Настройка упрощенных этапов обработки"""
+        self.stages = {}
         
+        # Объединили технические этапы в более понятные для пользователя
         self.add_stage(
-            "download", "Скачивание", "⬇️", 
-            "Загружаю файл с серверов Telegram...", 5
-        )
-        self.add_stage(
-            "validation", "Проверка", "🔍", 
-            "Проверяю формат и размер файла...", 2
-        )
-        self.add_stage(
-            "file_preparation", "Подготовка файла", "📁", 
-            "Подготавливаю файл к обработке...", 3
-        )
-        self.add_stage(
-            "conversion", "Конвертация", "🔄", 
-            "Подготавливаю файл для обработки...", 8
+            "preparation", "Подготовка", "📁", 
+            "Подготавливаю файл к обработке..."
         )
         self.add_stage(
             "transcription", "Транскрипция", "🎯", 
-            "Преобразую аудио в текст...", 30
+            "Преобразую аудио в текст..."
         )
         self.add_stage(
-            "diarization", "Диаризация", "👥", 
-            "Определяю говорящих...", 20
-        )
-        self.add_stage(
-            "llm_processing", "Генерация", "🤖", 
-            "Создаю протокол с помощью ИИ...", 15
-        )
-        self.add_stage(
-            "formatting", "Оформление", "📝", 
-            "Форматирую итоговый документ...", 3
+            "analysis", "Анализ", "🤖", 
+            "Анализирую содержание и создаю протокол..."
         )
     
     async def start_stage(self, stage_id: str):
@@ -109,7 +82,7 @@ class ProgressTracker:
         
         await self.update_display()
     
-    async def complete_stage(self, stage_id: str):
+    async def complete_stage(self, stage_id: str, compression_info: dict = None):
         """Завершить этап"""
         if stage_id not in self.stages:
             return
@@ -123,21 +96,52 @@ class ProgressTracker:
             self.current_stage = None
             
         logger.info(f"Завершен этап: {stage.name}")
+        
+        # Показываем информацию о сжатии только если есть значительная экономия
+        if compression_info and compression_info.get("compressed", False):
+            ratio = compression_info.get("compression_ratio", 0)
+            if ratio > 20:  # Показываем только если сжатие > 20%
+                await self._show_compression_info(compression_info)
+                return
+        
         await self.update_display()
     
+    async def _show_compression_info(self, compression_info: dict):
+        """Показать упрощенную информацию о сжатии"""
+        try:
+            original_mb = compression_info.get("original_size_mb", 0)
+            compressed_mb = compression_info.get("compressed_size_mb", 0)
+            ratio = compression_info.get("compression_ratio", 0)
+            
+            compression_message = (
+                f"🗜️ **Файл оптимизирован!**\n\n"
+                f"📊 Размер уменьшен на {ratio:.0f}%\n"
+                f"({original_mb:.1f}MB → {compressed_mb:.1f}MB)\n\n"
+                f"🔄 Продолжаю обработку..."
+            )
+            
+            await self.message.edit_text(compression_message, parse_mode="Markdown")
+            
+            # Через 2 секунды возвращаемся к обычному отображению
+            await asyncio.sleep(2)
+            await self.update_display()
+            
+        except Exception as e:
+            logger.error(f"Ошибка отображения информации о сжатии: {e}")
+            await self.update_display()
+    
     async def update_stage_progress(self, stage_id: str, progress_percent: float = None, 
-                                   progress_text: str = ""):
+                                   progress_text: str = "", compression_info: dict = None):
         """Обновить прогресс конкретного этапа"""
         if stage_id not in self.stages or stage_id != self.current_stage:
             return
         
-        stage = self.stages[stage_id]
-        if progress_percent is not None:
-            stage.progress_percent = max(0, min(100, progress_percent))
-        if progress_text:
-            stage.progress_text = progress_text
-        
-        await self.update_display()
+        # Обрабатываем специальный callback для завершения сжатия
+        if progress_text == "compression_complete" and compression_info:
+            logger.info(f"Получен callback сжатия: {compression_info}")
+            await self._show_compression_info(compression_info)
+        else:
+            await self.update_display()
     
     async def complete_all(self):
         """Завершить все этапы"""
@@ -158,12 +162,12 @@ class ProgressTracker:
             logger.error(f"Ошибка обновления прогресса: {e}")
     
     def _format_progress_text(self, final: bool = False) -> str:
-        """Сформировать текст с прогрессом"""
+        """Сформировать упрощенный текст с прогрессом"""
         if final:
             total_time = datetime.now() - self.start_time
             return (
                 "✅ **Обработка завершена!**\n\n"
-                f"⏱️ Общее время: {total_time.total_seconds():.1f} сек\n\n"
+                f"⏱️ Время: {total_time.total_seconds():.0f}с\n"
                 "📄 Протокол готов и будет отправлен ниже."
             )
         
@@ -171,50 +175,21 @@ class ProgressTracker:
         
         for stage_id, stage in self.stages.items():
             if stage.is_completed:
-                duration = (stage.completed_at - stage.started_at).total_seconds() if stage.started_at else 0
-                text += f"✅ {stage.emoji} {stage.name} - {duration:.1f}с\n"
+                text += f"✅ {stage.emoji} {stage.name}\n"
             elif stage.is_active:
-                elapsed = (datetime.now() - stage.started_at).total_seconds() if stage.started_at else 0
-                
-                # Используем процентный прогресс, если доступен
-                if stage.progress_percent > 0:
-                    progress_bar = self._create_progress_bar_from_percent(stage.progress_percent)
-                    description = stage.progress_text or stage.description
-                else:
-                    progress_bar = self._create_progress_bar(elapsed, stage.estimated_duration)
-                    description = stage.description
-                
+                # Упрощенный прогресс-бар
+                progress_bar = "▰▰▰▰▰▰▰▰▰▰"  # Статичный прогресс-бар
                 text += f"🔄 {stage.emoji} {stage.name} {progress_bar}\n"
-                text += f"   _{description}_\n"
+                text += f"   _{stage.description}_\n"
             else:
                 text += f"⏳ {stage.emoji} {stage.name}\n"
         
-        # Показываем общее время
+        # Показываем общее время только если прошло больше 10 секунд
         total_elapsed = (datetime.now() - self.start_time).total_seconds()
-        text += f"\n⏱️ Общее время: {total_elapsed:.0f}с"
+        if total_elapsed > 10:
+            text += f"\n⏱️ {total_elapsed:.0f}с"
         
         return text
-    
-    def _create_progress_bar(self, elapsed: float, estimated: float) -> str:
-        """Создать визуальный индикатор прогресса на основе времени"""
-        if estimated <= 0:
-            return "..."
-        
-        progress = min(elapsed / estimated, 1.0)
-        filled = int(progress * 10)
-        bar = "█" * filled + "░" * (10 - filled)
-        percentage = int(progress * 100)
-        
-        return f"[{bar}] {percentage}%"
-    
-    def _create_progress_bar_from_percent(self, percent: float) -> str:
-        """Создать визуальный индикатор прогресса из процентов"""
-        progress = min(percent / 100.0, 1.0)
-        filled = int(progress * 10)
-        bar = "█" * filled + "░" * (10 - filled)
-        percentage = int(percent)
-        
-        return f"[{bar}] {percentage}%"
     
     async def _auto_update(self):
         """Автоматическое обновление дисплея"""
@@ -265,9 +240,5 @@ class ProgressFactory:
         
         tracker = ProgressTracker(bot, chat_id, initial_message)
         tracker.setup_default_stages()
-        
-        # Убираем диаризацию если отключена
-        if not enable_diarization and "diarization" in tracker.stages:
-            del tracker.stages["diarization"]
         
         return tracker

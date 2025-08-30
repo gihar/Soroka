@@ -99,12 +99,9 @@ class OptimizedProcessingService(BaseProcessingService):
             
             processing_metrics.validation_duration = 0.5  # Примерное время
             
-            # Этап 2: Получение файла
+            # Этап 1: Подготовка файла
             if progress_tracker:
-                if request.is_external_file:
-                    await progress_tracker.start_stage("file_preparation")
-                else:
-                    await progress_tracker.start_stage("download")
+                await progress_tracker.start_stage("preparation")
             
             with PerformanceTimer("file_download", metrics_collector):
                 if request.is_external_file:
@@ -135,7 +132,7 @@ class OptimizedProcessingService(BaseProcessingService):
                 
                 processing_metrics.file_format = os.path.splitext(request.file_name)[1]
             
-            # Этап 3: Кэшированная транскрипция
+            # Этап 2: Транскрипция
             if progress_tracker:
                 await progress_tracker.start_stage("transcription")
                 
@@ -143,17 +140,18 @@ class OptimizedProcessingService(BaseProcessingService):
                 temp_file_path, request, processing_metrics, progress_tracker
             )
             
-            # Этап 4: Кэшированная генерация LLM
+            # Этап 3: Анализ и генерация
             if progress_tracker:
-                await progress_tracker.start_stage("llm_processing")
+                await progress_tracker.start_stage("analysis")
                 
             llm_result = await self._optimized_llm_generation(
                 transcription_result, template, request, processing_metrics
             )
             
-            # Этап 5: Быстрое форматирование
+            # Форматирование (включается в этап анализа)
             if progress_tracker:
-                await progress_tracker.start_stage("formatting")
+                # Форматирование происходит в рамках этапа анализа
+                pass
                 
             with PerformanceTimer("formatting", metrics_collector):
                 processing_metrics.formatting_duration = 0.1
@@ -196,7 +194,7 @@ class OptimizedProcessingService(BaseProcessingService):
             start_time = time.time()
             
             # Создаем thread-safe колбэк для обновления прогресса
-            def progress_callback(percent, message):
+            def progress_callback(percent, message, compression_info=None):
                 """Thread-safe колбэк для обновления прогресса транскрипции"""
                 if progress_tracker:
                     try:
@@ -206,7 +204,7 @@ class OptimizedProcessingService(BaseProcessingService):
                             # Планируем выполнение в основном потоке
                             asyncio.run_coroutine_threadsafe(
                                 progress_tracker.update_stage_progress(
-                                    "transcription", percent, message
+                                    "transcription", percent, message, compression_info
                                 ), loop
                             )
                     except RuntimeError:
@@ -216,9 +214,11 @@ class OptimizedProcessingService(BaseProcessingService):
                         logger.warning(f"Ошибка при обновлении прогресса: {e}")
             
             # Выполняем транскрипцию асинхронно
+            logger.info(f"Запускаем транскрипцию файла: {file_path}")
             transcription_result = await self._run_transcription_async(
                 file_path, request.language, progress_callback
             )
+            logger.info(f"Транскрипция завершена. Результат получен: {hasattr(transcription_result, 'transcription')}")
             
             processing_metrics.transcription_duration = time.time() - start_time
             
@@ -226,11 +226,8 @@ class OptimizedProcessingService(BaseProcessingService):
             if hasattr(transcription_result, 'transcription'):
                 processing_metrics.transcription_length = len(transcription_result.transcription)
             
-            # Если есть диаризация, показываем соответствующий этап
+            # Диаризация включается в этап транскрипции
             if hasattr(transcription_result, 'diarization') and transcription_result.diarization:
-                if progress_tracker and "diarization" in progress_tracker.stages:
-                    await progress_tracker.start_stage("diarization")
-                    
                 diarization_data = transcription_result.diarization
                 if isinstance(diarization_data, dict):
                     processing_metrics.speakers_count = diarization_data.get('total_speakers', 0)

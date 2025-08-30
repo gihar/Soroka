@@ -99,12 +99,20 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
-    def _preprocess_for_groq(self, file_path: str) -> str:
+    def _preprocess_for_groq(self, file_path: str) -> tuple[str, dict]:
         """Предобработать файл для Groq API: конвертировать в 16KHz моно MP3"""
+        compression_info = {
+            "compressed": False,
+            "original_size_mb": 0,
+            "compressed_size_mb": 0,
+            "compression_ratio": 0,
+            "compression_saved_mb": 0
+        }
+        
         try:
             if not self._check_ffmpeg():
                 logger.warning("ffmpeg не найден, пропускаем предобработку")
-                return file_path
+                return file_path, compression_info
             
             # Создаем временный файл для предобработки
             temp_mp3 = self.temp_dir / f"{Path(file_path).stem}_preprocessed.mp3"
@@ -130,17 +138,27 @@ class TranscriptionService:
                 processed_size = os.path.getsize(temp_mp3)
                 original_mb = original_size / (1024 * 1024)
                 processed_mb = processed_size / (1024 * 1024)
-                logger.info(f"Файл предобработан для Groq API: {processed_mb:.1f}MB (было: {original_mb:.1f}MB)")
-                return str(temp_mp3)
+                
+                # Рассчитываем информацию о сжатии
+                compression_info = {
+                    "compressed": True,
+                    "original_size_mb": original_mb,
+                    "compressed_size_mb": processed_mb,
+                    "compression_ratio": (1 - processed_mb / original_mb) * 100 if original_mb > 0 else 0,
+                    "compression_saved_mb": original_mb - processed_mb
+                }
+                
+                logger.info(f"Файл предобработан для Groq API: {processed_mb:.1f}MB (было: {original_mb:.1f}MB, сжатие: {compression_info['compression_ratio']:.1f}%)")
+                return str(temp_mp3), compression_info
             else:
                 logger.warning(f"Ошибка предобработки файла: {result.stderr}")
-                return file_path
+                return file_path, compression_info
                 
         except Exception as e:
             logger.warning(f"Не удалось предобработать файл: {e}")
-            return file_path
+            return file_path, compression_info
     
-    async def _transcribe_with_groq(self, file_path: str, progress_callback=None) -> str:
+    async def _transcribe_with_groq(self, file_path: str, progress_callback=None) -> tuple[str, dict]:
         """Транскрибация через Groq API"""
         if not self.groq_client:
             raise CloudTranscriptionError("Groq клиент не инициализирован", file_path)
@@ -155,7 +173,27 @@ class TranscriptionService:
             logger.info(f"Начало облачной транскрипции файла: {file_path}")
             
             # Предобрабатываем файл для Groq API
-            processed_file = self._preprocess_for_groq(file_path)
+            logger.info(f"Начинаем предобработку файла: {file_path}")
+            if progress_callback:
+                progress_callback(25, "Сжатие файла для ускорения обработки...")
+            
+            processed_file, compression_info = self._preprocess_for_groq(file_path)
+            logger.info(f"Предобработка завершена. Результат: {compression_info}")
+            
+            # Если есть информация о сжатии, передаем её через callback
+            if compression_info and compression_info.get("compressed", False):
+                logger.info(f"Передаем информацию о сжатии через callback: {compression_info}")
+                if progress_callback:
+                    # Вызываем callback с информацией о сжатии
+                    try:
+                        progress_callback(100, "compression_complete", compression_info)
+                        # Помечаем как показанную
+                        compression_info["shown_during_processing"] = True
+                        logger.info("Callback сжатия успешно вызван")
+                    except Exception as e:
+                        logger.warning(f"Не удалось уведомить о сжатии: {e}")
+            else:
+                logger.info("Информация о сжатии не найдена или файл не сжат")
             
             # Проверяем размер предобработанного файла
             if not self._check_file_size_for_groq(processed_file):
@@ -189,7 +227,7 @@ class TranscriptionService:
                 result_text = transcription.text
                 logger.info(f"Облачная транскрипция завершена. Длина текста: {len(result_text)} символов")
                 
-                return result_text
+                return result_text, compression_info
                 
         except Exception as e:
             logger.error(f"Ошибка при облачной транскрипции файла {file_path}: {e}")
@@ -231,8 +269,18 @@ class TranscriptionService:
             diarization=None,
             speakers_text={},
             formatted_transcript="",
-            speakers_summary=""
+            speakers_summary="",
+            compression_info=None
         )
+        
+        # Инициализируем информацию о сжатии
+        compression_info = {
+            "compressed": False,
+            "original_size_mb": 0,
+            "compressed_size_mb": 0,
+            "compression_ratio": 0,
+            "compression_saved_mb": 0
+        }
         
         try:
             # Пробуем диаризацию с WhisperX (если доступна)
@@ -261,6 +309,7 @@ class TranscriptionService:
                         result.speakers_text = diarization_result.get_speakers_text()
                         result.formatted_transcript = diarization_result.get_formatted_transcript()
                         result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                        result.compression_info = compression_info
                         
                         if progress_callback:
                             progress_callback(100, "Диаризация завершена!")
@@ -280,7 +329,7 @@ class TranscriptionService:
                         progress_callback(20, "Подготовка к облачной транскрипции...")
                     
                     logger.info("Выполнение облачной транскрипции через Groq...")
-                    transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                    transcription, compression_info = await self._transcribe_with_groq(file_path, progress_callback)
                     
                     if progress_callback:
                         progress_callback(100, "Облачная транскрипция завершена!")
@@ -323,7 +372,7 @@ class TranscriptionService:
                     if progress_callback:
                         progress_callback(30, "Облачная транскрипция...")
                     
-                    transcription = await self._transcribe_with_groq(file_path, progress_callback)
+                    transcription, compression_info = await self._transcribe_with_groq(file_path, progress_callback)
                 
                 except (CloudTranscriptionError, GroqAPIError) as e:
                     # При ошибке облачной транскрипции автоматически переключаемся на локальную
@@ -408,6 +457,7 @@ class TranscriptionService:
             
             result.transcription = transcription
             result.formatted_transcript = transcription  # Без разделения говорящих
+            result.compression_info = compression_info
             
             return result
             
@@ -467,6 +517,8 @@ class TranscriptionService:
                 logger.info(f"Временный файл удален: {file_path}")
         except Exception as e:
             logger.warning(f"Не удалось удалить файл {file_path}: {e}")
+    
+
     
     async def transcribe_telegram_file_with_diarization(self, file_url: str, file_name: str, 
                                                        language: str = "ru") -> TranscriptionResult:

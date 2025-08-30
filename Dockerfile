@@ -16,6 +16,7 @@ COPY requirements.txt .
 
 # Устанавливаем Python зависимости
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir "numpy<2" && \
     pip install --no-cache-dir -r requirements.txt
 
 # Копируем исходный код

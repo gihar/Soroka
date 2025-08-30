@@ -92,7 +92,8 @@ class MessageBuilder:
             "🔒 **Ограничения:**\n"
             "• Максимальный размер файла: 20MB\n"
             "• Рекомендуемая длительность: до 60 минут\n"
-            "• Лучшее качество: четкая речь без шумов\n\n"
+            "• Лучшее качество: четкая речь без шумов\n"
+            "• Система автоматически сжимает файлы для ускорения обработки\n\n"
             
             "❓ **Нужна помощь?** Просто отправьте файл и следуйте инструкциям!"
         )
@@ -200,6 +201,17 @@ class MessageBuilder:
                 char_count = len(transcription["transcription"])
                 word_count = len(transcription["transcription"].split())
                 message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
+            
+            # Информация о сжатии файла (показывается только если не было показано ранее)
+            if transcription.get("compression_info"):
+                compression = transcription["compression_info"]
+                if compression.get("compressed", False) and not compression.get("shown_during_processing", False):
+                    original_mb = compression.get("original_size_mb", 0)
+                    compressed_mb = compression.get("compressed_size_mb", 0)
+                    ratio = compression.get("compression_ratio", 0)
+                    saved_mb = compression.get("compression_saved_mb", 0)
+                    
+                    message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB (экономия {ratio:.1f}%, -{saved_mb:.1f}MB)\n"
         
         # Информация о диаризации (с ограничением списка участников)
         if result.get("transcription_result", {}).get("diarization"):
@@ -239,6 +251,15 @@ class MessageBuilder:
                 word_count = len(result["transcription_result"]["transcription"].split())
                 message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
             
+            # Информация о сжатии файла (сокращенная версия)
+            if result.get("transcription_result", {}).get("compression_info"):
+                compression = result["transcription_result"]["compression_info"]
+                if compression.get("compressed", False):
+                    original_mb = compression.get("original_size_mb", 0)
+                    compressed_mb = compression.get("compressed_size_mb", 0)
+                    ratio = compression.get("compression_ratio", 0)
+                    message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB ({ratio:.1f}%)\n"
+            
             if result.get("processing_duration"):
                 duration = result["processing_duration"]
                 message += f"⏱️ Время обработки: {duration:.1f} сек\n"
@@ -265,7 +286,8 @@ class MessageBuilder:
                 f"• Сжать файл с помощью программ для конвертации\n"
                 f"• Разделить запись на несколько частей\n"
                 f"• Использовать формат с лучшим сжатием (MP3)\n"
-                f"• Снизить качество аудио для уменьшения размера"
+                f"• Снизить качество аудио для уменьшения размера\n"
+                f"• Система автоматически сжимает файлы для ускорения обработки"
             )
         
         elif error_type == "format":
@@ -281,7 +303,8 @@ class MessageBuilder:
                 f"💡 **Что можно сделать:**\n"
                 f"• Конвертировать файл в поддерживаемый формат\n"
                 f"• Отправить файл как документ\n"
-                f"• Использовать онлайн-конвертеры"
+                f"• Использовать онлайн-конвертеры\n"
+                f"• Система автоматически сжимает файлы для ускорения обработки"
             )
         
         return cls.error_message("validation", str(error_details))

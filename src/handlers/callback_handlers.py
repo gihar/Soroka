@@ -256,7 +256,8 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
                 "llm_provider_used": result.llm_provider_used,
                 "transcription_result": {
                     "transcription": result.transcription_result.transcription,
-                    "diarization": result.transcription_result.diarization
+                    "diarization": result.transcription_result.diarization,
+                    "compression_info": result.transcription_result.compression_info
                 },
                 "processing_duration": result.processing_duration
             }
