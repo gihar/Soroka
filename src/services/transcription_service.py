@@ -33,7 +33,7 @@ except ImportError:
 class TranscriptionService:
     """Обновленный сервис транскрипции"""
     
-    # Максимальный размер файла для Groq API (25 MB)
+    # Максимальный размер файла для Groq API (100 MB)
     GROQ_MAX_FILE_SIZE = 25 * 1024 * 1024
     
     def __init__(self):
@@ -99,6 +99,47 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
+    def _preprocess_for_groq(self, file_path: str) -> str:
+        """Предобработать файл для Groq API: конвертировать в 16KHz моно MP3"""
+        try:
+            if not self._check_ffmpeg():
+                logger.warning("ffmpeg не найден, пропускаем предобработку")
+                return file_path
+            
+            # Создаем временный файл для предобработки
+            temp_mp3 = self.temp_dir / f"{Path(file_path).stem}_preprocessed.mp3"
+            
+            # Конвертируем в MP3 с параметрами для Groq API
+            import subprocess
+            cmd = [
+                "ffmpeg",
+                "-i", file_path,
+                "-ar", "16000",  # Частота дискретизации 16KHz
+                "-ac", "1",      # Моно
+                "-map", "0:a",   # Только аудио поток
+                "-c:a", "mp3",   # MP3 кодек
+                "-b:a", "64k",   # Низкий битрейт для максимального сжатия
+                "-y",            # Перезаписать существующий файл
+                str(temp_mp3)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                original_size = os.path.getsize(file_path)
+                processed_size = os.path.getsize(temp_mp3)
+                original_mb = original_size / (1024 * 1024)
+                processed_mb = processed_size / (1024 * 1024)
+                logger.info(f"Файл предобработан для Groq API: {processed_mb:.1f}MB (было: {original_mb:.1f}MB)")
+                return str(temp_mp3)
+            else:
+                logger.warning(f"Ошибка предобработки файла: {result.stderr}")
+                return file_path
+                
+        except Exception as e:
+            logger.warning(f"Не удалось предобработать файл: {e}")
+            return file_path
+    
     async def _transcribe_with_groq(self, file_path: str, progress_callback=None) -> str:
         """Транскрибация через Groq API"""
         if not self.groq_client:
@@ -107,21 +148,32 @@ class TranscriptionService:
         if not os.path.exists(file_path):
             raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
         
-        # Проверяем размер файла перед отправкой
-        if not self._check_file_size_for_groq(file_path):
-            raise CloudTranscriptionError(
-                f"Файл слишком большой для облачной транскрипции. Максимальный размер: {self.GROQ_MAX_FILE_SIZE / (1024 * 1024)}MB", 
-                file_path
-            )
-        
         try:
             if progress_callback:
                 progress_callback(20, "Подготовка файла для облачной транскрипции...")
             
             logger.info(f"Начало облачной транскрипции файла: {file_path}")
             
-            # Читаем файл и отправляем в Groq
-            with open(file_path, "rb") as file:
+            # Предобрабатываем файл для Groq API
+            processed_file = self._preprocess_for_groq(file_path)
+            
+            # Проверяем размер предобработанного файла
+            if not self._check_file_size_for_groq(processed_file):
+                raise CloudTranscriptionError(
+                    f"Предобработанный файл слишком большой для облачной транскрипции. Максимальный размер: {self.GROQ_MAX_FILE_SIZE / (1024 * 1024)}MB", 
+                    processed_file
+                )
+            
+            # Дополнительная диагностика предобработанного файла
+            try:
+                file_size = os.path.getsize(processed_file)
+                file_size_mb = file_size / (1024 * 1024)
+                logger.info(f"Отправка предобработанного файла в Groq API: {processed_file} (размер: {file_size_mb:.1f}MB)")
+            except Exception as e:
+                logger.warning(f"Не удалось получить размер предобработанного файла: {e}")
+            
+            # Читаем предобработанный файл и отправляем в Groq
+            with open(processed_file, "rb") as file:
                 if progress_callback:
                     progress_callback(40, "Отправка файла в облако...")
                 
@@ -221,9 +273,9 @@ class TranscriptionService:
             
             # Выбираем метод транскрипции в зависимости от настроек
             if settings.transcription_mode == "cloud" and self.groq_client:
-                # Проверяем размер файла для облачной транскрипции
-                if self._check_file_size_for_groq(file_path):
-                    # Облачная транскрипция через Groq
+                # Пробуем облачную транскрипцию с автоматическим fallback
+                try:
+                    # Облачная транскрипция через Groq (проверка размера происходит внутри)
                     if progress_callback:
                         progress_callback(20, "Подготовка к облачной транскрипции...")
                     
@@ -232,11 +284,12 @@ class TranscriptionService:
                     
                     if progress_callback:
                         progress_callback(100, "Облачная транскрипция завершена!")
-                else:
-                    # Файл слишком большой, переключаемся на локальную транскрипцию
-                    logger.info("Файл слишком большой для облачной транскрипции, переключаемся на локальную...")
+                
+                except (CloudTranscriptionError, GroqAPIError) as e:
+                    # При ошибке облачной транскрипции автоматически переключаемся на локальную
+                    logger.warning(f"Ошибка облачной транскрипции, переключаемся на локальную: {e}")
                     if progress_callback:
-                        progress_callback(20, "Файл слишком большой, используем локальную транскрипцию...")
+                        progress_callback(20, "Облачная транскрипция недоступна, используем локальную...")
                     
                     self._load_whisper_model()
                     
@@ -255,7 +308,7 @@ class TranscriptionService:
                     if progress_callback:
                         progress_callback(100, "Локальная транскрипция завершена!")
                     
-                    logger.info(f"Локальная транскрибация завершена. Длина текста: {len(transcription)} символов")
+                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
                     
             elif settings.transcription_mode == "hybrid" and self.groq_client:
                 # Гибридный подход: облачная транскрипция + локальная диаризация
@@ -264,18 +317,19 @@ class TranscriptionService:
                 
                 logger.info("Выполнение гибридной транскрипции: облачная + диаризация...")
                 
-                # Проверяем размер файла для облачной транскрипции
-                if self._check_file_size_for_groq(file_path):
-                    # Сначала выполняем облачную транскрипцию
+                # Пробуем облачную транскрипцию с fallback на локальную
+                try:
+                    # Сначала выполняем облачную транскрипцию (проверка размера происходит внутри)
                     if progress_callback:
                         progress_callback(30, "Облачная транскрипция...")
                     
                     transcription = await self._transcribe_with_groq(file_path, progress_callback)
-                else:
-                    # Файл слишком большой, используем локальную транскрипцию
-                    logger.info("Файл слишком большой для облачной транскрипции, используем локальную...")
+                
+                except (CloudTranscriptionError, GroqAPIError) as e:
+                    # При ошибке облачной транскрипции автоматически переключаемся на локальную
+                    logger.warning(f"Ошибка облачной транскрипции в гибридном режиме, переключаемся на локальную: {e}")
                     if progress_callback:
-                        progress_callback(30, "Локальная транскрипция (файл слишком большой)...")
+                        progress_callback(30, "Облачная транскрипция недоступна, используем локальную...")
                     
                     self._load_whisper_model()
                     
@@ -294,7 +348,7 @@ class TranscriptionService:
                     
                     try:
                         # Используем диаризацию для разделения говорящих
-                        diarization_result = diarization_service.diarize_file(
+                        diarization_result = await diarization_service.diarize_file(
                             file_path, language, progress_callback
                         )
                         

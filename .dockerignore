@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# Логи и временные файлы
+logs/
+temp/
+*.log
+
+# База данных
+*.db
+*.sqlite
+
+# Кэш
+cache/
+.cache/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Документация
+docs/
+README.md
+
+# Тестовые файлы
+tests/
+test_*
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Переменные окружения (копируем только пример)
+.env
