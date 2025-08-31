@@ -1,6 +1,8 @@
+version: '3.8'
+
 services:
   soroka-bot:
-    build: .
+    image: gihar/soroka:latest
     container_name: soroka-bot
     restart: unless-stopped
     environment:
@@ -14,12 +16,12 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
       
-      # Anthropic
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Anthropic (опционально)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       
-      # Yandex GPT
-      - YANDEX_API_KEY=${YANDEX_API_KEY}
-      - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID}
+      # Yandex GPT (опционально)
+      - YANDEX_API_KEY=${YANDEX_API_KEY:-}
+      - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID:-}
       
       # База данных
       - DATABASE_URL=${DATABASE_URL:-sqlite:///bot.db}
@@ -31,18 +33,22 @@ services:
       
       # Транскрипция
       - TRANSCRIPTION_MODE=${TRANSCRIPTION_MODE:-hybrid}
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-whisper-large-v3-turbo}
       
-      # Диаризация
+      # Диаризация (отключена по умолчанию для NAS)
       - ENABLE_DIARIZATION=${ENABLE_DIARIZATION:-false}
       - DIARIZATION_PROVIDER=${DIARIZATION_PROVIDER:-whisperx}
-      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
-      - PICOVOICE_ACCESS_KEY=${PICOVOICE_ACCESS_KEY}
-      - DIARIZATION_DEVICE=${DIARIZATION_DEVICE:-auto}
-      - COMPUTE_TYPE=${COMPUTE_TYPE:-auto}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - PICOVOICE_ACCESS_KEY=${PICOVOICE_ACCESS_KEY:-}
+      - DIARIZATION_DEVICE=${DIARIZATION_DEVICE:-cpu}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8}
       - MAX_SPEAKERS=${MAX_SPEAKERS:-10}
       - MIN_SPEAKERS=${MIN_SPEAKERS:-1}
+      
+      # Настройки matplotlib
+      - MPLCONFIGDIR=/home/bot/.config/matplotlib
+      - PYTHONPATH=/app
     
     volumes:
       # Монтируем директории для персистентности данных
@@ -61,5 +67,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-

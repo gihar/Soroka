@@ -1,11 +1,14 @@
-# Используем официальный образ Python 3.11
+# Универсальный образ Python 3.11 для всех архитектур
 FROM python:3.11-slim
 
-# Устанавливаем системные зависимости
+# Устанавливаем системные зависимости и инструменты сборки
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     curl \
+    build-essential \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем рабочую директорию
@@ -30,7 +33,14 @@ RUN chmod +x install.sh
 
 # Создаем пользователя для безопасности
 RUN useradd --create-home --shell /bin/bash bot && \
-    chown -R bot:bot /app
+    chown -R bot:bot /app && \
+    mkdir -p /home/bot/.config && \
+    chown -R bot:bot /home/bot/.config
+
+# Устанавливаем переменные окружения для matplotlib
+ENV MPLCONFIGDIR=/home/bot/.config/matplotlib
+ENV PYTHONPATH=/app
+
 USER bot
 
 # Открываем порт (если понадобится для веб-хуков)

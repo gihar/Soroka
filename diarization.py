@@ -134,6 +134,9 @@ class DiarizationService:
         
     def _get_device(self) -> str:
         """Определить устройство для вычислений"""
+        if not WHISPERX_AVAILABLE:
+            return "cpu"
+            
         if settings.diarization_device == "cuda" and torch.cuda.is_available():
             return "cuda"
         elif settings.diarization_device == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():

@@ -1,6 +1,8 @@
+version: '3.8'
+
 services:
   soroka-bot:
-    build: .
+    image: gihar/soroka:latest  # Замените на ваш username
     container_name: soroka-bot
     restart: unless-stopped
     environment:
@@ -61,5 +63,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-
