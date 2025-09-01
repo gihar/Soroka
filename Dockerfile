@@ -1,50 +1,53 @@
-# Универсальный образ Python 3.11 для всех архитектур
-FROM python:3.11-slim
+# Этап сборки
+FROM python:3.11-slim as builder
 
-# Устанавливаем системные зависимости и инструменты сборки
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    git \
-    curl \
     build-essential \
     gcc \
     g++ \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем рабочую директорию
-WORKDIR /app
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Копируем файлы зависимостей
 COPY requirements.txt .
-
-# Устанавливаем Python зависимости
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir "numpy<2" && \
     pip install --no-cache-dir -r requirements.txt
 
-# Копируем исходный код
-COPY . .
+# Финальный этап
+FROM python:3.11-slim
 
-# Создаем необходимые директории
-RUN mkdir -p logs temp cache
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Устанавливаем права на выполнение для скриптов
-RUN chmod +x install.sh
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Создаем пользователя для безопасности
-RUN useradd --create-home --shell /bin/bash bot && \
+WORKDIR /app
+
+COPY --chown=1000:1000 src/ ./src/
+COPY --chown=1000:1000 main.py .
+COPY --chown=1000:1000 config.py .
+COPY --chown=1000:1000 database.py .
+COPY --chown=1000:1000 diarization.py .
+COPY --chown=1000:1000 llm_providers.py .
+COPY --chown=1000:1000 install.sh .
+
+RUN mkdir -p logs temp cache && \
+    chmod +x install.sh && \
+    useradd --create-home --shell /bin/bash --uid 1000 bot && \
     chown -R bot:bot /app && \
     mkdir -p /home/bot/.config && \
     chown -R bot:bot /home/bot/.config
 
-# Устанавливаем переменные окружения для matplotlib
 ENV MPLCONFIGDIR=/home/bot/.config/matplotlib
 ENV PYTHONPATH=/app
 
 USER bot
-
-# Открываем порт (если понадобится для веб-хуков)
 EXPOSE 8080
-
-# Команда по умолчанию
 CMD ["python", "main.py"]

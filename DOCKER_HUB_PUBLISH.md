@@ -1,6 +1,6 @@
 # Публикация универсального образа в Docker Hub
 
-Этот документ описывает, как создать и опубликовать универсальный Docker образ, который будет работать на всех архитектурах (ARM64, x86_64, ARMv7).
+Этот документ описывает, как создать и опубликовать универсальный Docker образ, который будет работать на всех архитектурах (ARM64, x86_64).
 
 ## Преимущества универсального образа
 
@@ -8,6 +8,7 @@
 ✅ **Автоматический выбор архитектуры** - Docker сам выберет подходящую версию  
 ✅ **Упрощенное развертывание** - пользователям не нужно думать об архитектуре  
 ✅ **Профессиональный подход** - как у официальных образов Docker  
+✅ **Оптимизированный размер** - использует многоэтапную сборку  
 
 ## Подготовка к публикации
 
@@ -18,9 +19,9 @@ docker login
 ```
 
 ### 2. Настройте имя образа
-Отредактируйте файл `build-multi-platform.sh`:
+Отредактируйте файл `build.sh`:
 ```bash
-IMAGE_NAME="your-dockerhub-username/telegram-bot"  # Замените на ваш username
+IMAGE_NAME="your-dockerhub-username/soroka"  # Замените на ваш username
 ```
 
 ### 3. Убедитесь, что у вас есть Docker Buildx
@@ -30,25 +31,40 @@ docker buildx version
 
 ## Сборка и публикация
 
-### Быстрая публикация
+### Быстрая публикация с универсальным скриптом
 ```bash
-# Сделайте скрипт исполняемым
-chmod +x build-multi-platform.sh
+# Сделайте скрипт исполняемым (если еще не сделано)
+chmod +x build.sh
 
-# Соберите и опубликуйте образ
-./build-multi-platform.sh v1.0.0
+# Соберите и опубликуйте multi-platform образ
+./build.sh -m v1.0.0
+
+# Или с очисткой старых образов
+./build.sh -m -c v1.0.0
 ```
 
-### Ручная сборка
+### Локальная сборка для тестирования
+```bash
+# Локальная оптимизированная сборка
+./build.sh
+
+# Локальная сборка с очисткой
+./build.sh -l -c
+
+# Локальная сборка с версией
+./build.sh -l v1.0.0
+```
+
+### Ручная сборка (альтернатива)
 ```bash
 # Создайте multi-platform builder
 docker buildx create --name multiplatform-builder --use
 
 # Соберите образ для всех платформ
 docker buildx build \
-    --platform linux/amd64,linux/arm64,linux/arm/v7 \
-    --tag your-username/telegram-bot:latest \
-    --tag your-username/telegram-bot:v1.0.0 \
+    --platform linux/amd64,linux/arm64 \
+    --tag your-username/soroka:latest \
+    --tag your-username/soroka:v1.0.0 \
     --push \
     .
 ```
@@ -64,11 +80,11 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Через docker run
 ```bash
 docker run -d \
-    --name telegram-bot \
+    --name soroka-bot \
     -e TELEGRAM_TOKEN=your_token \
     -v $(pwd)/data:/app/data \
     -v $(pwd)/logs:/app/logs \
-    your-username/telegram-bot:latest
+    your-username/soroka:latest
 ```
 
 ## Поддерживаемые платформы
@@ -77,22 +93,21 @@ docker run -d \
 |-----------|-------------|----------|
 | `linux/amd64` | x86_64 | Intel/AMD процессоры |
 | `linux/arm64` | ARM64 | Apple Silicon, ARM64 серверы |
-| `linux/arm/v7` | ARMv7 | Raspberry Pi 3, старые ARM устройства |
 
 ## Проверка образа
 
 ### Проверить доступные платформы
 ```bash
-docker buildx imagetools inspect your-username/telegram-bot:latest
+docker buildx imagetools inspect your-username/soroka:latest
 ```
 
 ### Тестирование на разных архитектурах
 ```bash
 # Тест на ARM64 (Apple Silicon)
-docker run --rm --platform linux/arm64 your-username/telegram-bot:latest python --version
+docker run --rm --platform linux/arm64 your-username/soroka:latest python --version
 
 # Тест на x86_64
-docker run --rm --platform linux/amd64 your-username/telegram-bot:latest python --version
+docker run --rm --platform linux/amd64 your-username/soroka:latest python --version
 ```
 
 ## Версионирование
@@ -132,11 +147,39 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            your-username/telegram-bot:latest
-            your-username/telegram-bot:${{ github.ref_name }}
+            your-username/soroka:latest
+            your-username/soroka:${{ github.ref_name }}
+```
+
+## Универсальный скрипт build.sh
+
+### Опции скрипта
+```bash
+./build.sh [опции] [версия]
+
+Опции:
+  -l, --local      Локальная оптимизированная сборка (по умолчанию)
+  -m, --multi      Multi-platform сборка для Docker Hub
+  -c, --clean      Очистка старых образов перед сборкой
+  -h, --help       Показать справку
+```
+
+### Примеры использования
+```bash
+# Локальная сборка для разработки
+./build.sh
+
+# Multi-platform сборка для продакшена
+./build.sh -m v1.0.0
+
+# Сборка с очисткой
+./build.sh -m -c latest
+
+# Показать справку
+./build.sh --help
 ```
 
 ## Troubleshooting
@@ -150,8 +193,12 @@ jobs:
 - Используйте `docker buildx imagetools inspect` для проверки
 
 ### Медленная сборка
-- Используйте кэширование слоев
+- Используйте кэширование слоев (включено по умолчанию в build.sh)
 - Рассмотрите использование GitHub Actions для автоматической сборки
+
+### Ошибка "Docker Buildx не найден"
+- Установите Docker Desktop или обновите Docker
+- Убедитесь, что buildx доступен: `docker buildx version`
 
 ## Полезные команды
 
@@ -163,8 +210,22 @@ docker images
 docker image prune -a
 
 # Просмотр информации о multi-platform образе
-docker buildx imagetools inspect your-username/telegram-bot:latest
+docker buildx imagetools inspect your-username/soroka:latest
 
 # Тестирование образа локально
-docker run --rm your-username/telegram-bot:latest python -c "print('Hello from universal image!')"
+docker run --rm your-username/soroka:latest python -c "print('Hello from universal image!')"
+
+# Проверка синтаксиса скрипта
+bash -n build.sh
+
+# Локальная сборка с подробным выводом
+./build.sh -l -c
 ```
+
+## Преимущества оптимизированного образа
+
+✅ **Многоэтапная сборка** - меньший размер финального образа  
+✅ **Безопасность** - исключены инструменты сборки из финального образа  
+✅ **Кэширование** - BuildKit inline cache для ускорения сборки  
+✅ **Предсказуемость** - явно указанный UID 1000 для пользователя  
+✅ **Универсальность** - один скрипт для всех задач сборки
