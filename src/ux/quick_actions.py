@@ -8,6 +8,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, 
     InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 )
+from services import TemplateService
 from aiogram.filters import Command
 from loguru import logger
 
@@ -208,7 +209,7 @@ def setup_quick_actions_handlers() -> Router:
             if action == "meeting":
                 await message.answer(
                     "🏢 **Профиль: Деловая встреча**\n\n"
-                    "Отправьте аудио или видео файл встречи.\n"
+                    "Отправьте аудио или видео файл встречи, либо ссылку на файл.\n"
                     "Будет использован шаблон для деловых встреч с автоматическим определением участников.",
                     reply_markup=QuickActionsUI.create_main_menu()
                 )
@@ -245,7 +246,7 @@ def setup_quick_actions_handlers() -> Router:
         """Обработчик кнопки загрузки файла"""
         await message.answer(
             "📤 **Загрузка файла**\n\n"
-            "Отправьте аудио или видео файл любым способом:\n"
+            "Отправьте аудио или видео файл, либо ссылку на файл любым способом:\n"
             "• 🎵 Как аудио сообщение\n"
             "• 🎬 Как видео сообщение\n"
             "• 📎 Как документ\n"
@@ -256,12 +257,36 @@ def setup_quick_actions_handlers() -> Router:
     @router.message(F.text == "📝 Мои шаблоны")
     async def my_templates_button_handler(message: Message):
         """Обработчик кнопки шаблонов"""
-        keyboard = QuickActionsUI.create_template_quick_menu()
-        await message.answer(
-            "📝 **Управление шаблонами**\n\n"
-            "Выберите готовый шаблон или создайте собственный:",
-            reply_markup=keyboard
-        )
+        try:
+            template_service = TemplateService()
+            templates = await template_service.get_all_templates()
+            
+            if not templates:
+                await message.answer("📝 Шаблоны не найдены.")
+                return
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"view_template_{t.id}"
+                )]
+                for t in templates
+            ] + [
+                [InlineKeyboardButton(
+                    text="➕ Добавить шаблон",
+                    callback_data="add_template"
+                )]
+            ])
+            
+            await message.answer(
+                "📝 **Доступные шаблоны:**",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка в my_templates_button_handler: {e}")
+            await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
     
     @router.message(F.text == "⚙️ Настройки")
     async def settings_button_handler(message: Message):
@@ -479,7 +504,7 @@ class UserGuidance:
         """Получить шаги онбординга для новых пользователей"""
         return [
             "👋 Добро пожаловать! Это бот для создания протоколов встреч",
-            "📤 Первый шаг: отправьте аудио или видео файл встречи",
+            "📤 Первый шаг: отправьте аудио или видео файл встречи, либо ссылку на файл",
             "📝 Второй шаг: выберите шаблон протокола из списка",
             "🤖 Третий шаг: выберите ИИ или оставьте автовыбор",
             "⏳ Дождитесь обработки - это займет несколько минут",

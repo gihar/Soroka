@@ -26,8 +26,10 @@ class Database:
                     first_name TEXT,
                     last_name TEXT,
                     preferred_llm TEXT DEFAULT 'openai',
+                    default_template_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (default_template_id) REFERENCES templates (id)
                 )
             """)
             
@@ -60,6 +62,14 @@ class Database:
                     FOREIGN KEY (template_id) REFERENCES templates (id)
                 )
             """)
+            
+            # Миграция: добавляем поле default_template_id если его нет
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN default_template_id INTEGER")
+                logger.info("Добавлено поле default_template_id в таблицу users")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
             
             await db.commit()
             logger.info("База данных инициализирована")
@@ -100,6 +110,30 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM templates ORDER BY is_default DESC, name")
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_user_templates(self, telegram_id: int) -> List[Dict[str, Any]]:
+        """Получить шаблоны пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                return []
+            
+            user_id = user_row['id']
+            
+            # Получаем шаблоны пользователя (созданные им + стандартные)
+            cursor = await db.execute("""
+                SELECT * FROM templates 
+                WHERE created_by = ? OR is_default = 1
+                ORDER BY is_default DESC, name
+            """, (user_id,))
+            
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
     
@@ -205,6 +239,38 @@ class Database:
                 "favorite_templates": [dict(row) for row in template_stats],
                 "daily_activity": [dict(row) for row in daily_activity]
             }
+    
+    async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
+        """Установить шаблон по умолчанию для пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                return False
+            
+            user_id = user_row['id']
+            
+            # Проверяем, что шаблон существует и доступен пользователю
+            cursor = await db.execute("""
+                SELECT id FROM templates 
+                WHERE id = ? AND (created_by = ? OR is_default = 1)
+            """, (template_id, user_id))
+            
+            if not await cursor.fetchone():
+                return False
+            
+            # Обновляем предпочтения пользователя
+            await db.execute("""
+                UPDATE users SET default_template_id = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE telegram_id = ?
+            """, (template_id, telegram_id))
+            
+            await db.commit()
+            return True
 
 
 # Глобальный экземпляр базы данных

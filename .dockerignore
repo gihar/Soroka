@@ -11,6 +11,9 @@ __pycache__
 venv/
 env/
 .venv/
+*.egg-info/
+dist/
+build/
 
 # Логи и временные файлы
 logs/
@@ -24,6 +27,7 @@ temp/
 # Кэш
 cache/
 .cache/
+.pytest_cache/
 
 # Системные файлы
 .DS_Store
@@ -38,15 +42,30 @@ Thumbs.db
 # Документация
 docs/
 README.md
+*.md
 
 # Тестовые файлы
 tests/
 test_*
+*_test.py
 
 # Docker
-Dockerfile
+Dockerfile*
 .dockerignore
-docker-compose.yml
+docker-compose*.yml
 
 # Переменные окружения (копируем только пример)
 .env
+.env.*
+
+# Дополнительные исключения для уменьшения размера
+WARP.md
+DOCKER_HUB_PUBLISH.md
+build-multi-platform.sh
+docker-*.sh
+env_example
+
+# Временные файлы аудио
+temp/*.mp3
+temp/*.m4a
+temp/*.wav

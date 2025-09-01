@@ -77,7 +77,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             logger.info(f"Файл сохранен в состояние: file_id={file_obj.file_id}, file_name={file_name}")
             
             # Показываем шаблоны для выбора
-            await _show_template_selection(message, template_service)
+            await _show_template_selection(message, template_service, state)
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
@@ -123,6 +123,252 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             await message.answer("❌ Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
     
     return router
+
+
+async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_service, processing_service):
+    """Показать выбор LLM для обработки файла"""
+    try:
+        # Получаем данные из состояния
+        state_data = await state.get_data()
+        file_id = state_data.get('file_id')
+        file_path = state_data.get('file_path')
+        file_name = state_data.get('file_name')
+        template_id = state_data.get('template_id')
+        is_external_file = state_data.get('is_external_file', False)
+        
+        # Проверяем наличие файла (либо file_id для Telegram файлов, либо file_path для внешних файлов)
+        if not template_id:
+            await message.answer("❌ Ошибка: шаблон не выбран")
+            return
+            
+        if not file_id and not file_path:
+            await message.answer("❌ Ошибка: файл не найден")
+            return
+        
+        # Получаем доступные LLM провайдеры
+        available_providers = llm_service.get_available_providers()
+        
+        if not available_providers:
+            await message.answer("❌ Нет доступных LLM провайдеров. Проверьте конфигурацию API ключей.")
+            return
+        
+        # Проверяем, есть ли у пользователя сохранённые предпочтения LLM
+        from services import UserService
+        user_service = UserService()
+        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        
+        if user and user.preferred_llm is not None:
+            preferred_llm = user.preferred_llm
+            # Проверяем, что предпочитаемый LLM доступен
+            if preferred_llm in available_providers:
+                # Сохраняем в состояние и сразу начинаем обработку
+                await state.update_data(llm_provider=preferred_llm)
+                
+                await message.answer(
+                    f"🤖 **Используется сохранённый LLM: {available_providers[preferred_llm]}**\n\n"
+                    f"⏳ Начинаю обработку файла...",
+                    parse_mode="Markdown"
+                )
+                
+                # Начинаем обработку файла
+                await _start_file_processing(message, state, processing_service)
+                return
+        
+        # Если предпочтений нет или предпочитаемый LLM недоступен, показываем выбор
+        current_llm = user.preferred_llm if user else 'openai'
+        
+        # Создаем клавиатуру для выбора LLM
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text=f"{'✅ ' if provider_key == current_llm else ''}🤖 {provider_name}",
+                callback_data=f"select_llm_{provider_key}"
+            )]
+            for provider_key, provider_name in available_providers.items()
+        ])
+        
+        # Определяем тип файла для отображения
+        file_type = "внешний файл" if is_external_file else "файл"
+        
+        await message.answer(
+            f"🤖 **Выберите ИИ для обработки:**\n\n"
+            f"Файл: {file_name}\n"
+            f"Тип: {file_type}\n\n"
+            f"Выберите модель искусственного интеллекта:",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при показе выбора LLM: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке доступных ИИ.")
+
+
+async def _start_file_processing(message: Message, state: FSMContext, processing_service):
+    """Начать обработку файла"""
+    from src.models.processing import ProcessingRequest
+    
+    try:
+        # Получаем данные из состояния
+        data = await state.get_data()
+        
+        # Проверяем наличие обязательных данных
+        if not data.get('template_id') or not data.get('llm_provider'):
+            await message.answer(
+                "❌ Ошибка: отсутствуют обязательные данные. Пожалуйста, повторите процесс."
+            )
+            await state.clear()
+            return
+        
+        # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
+        is_external_file = data.get('is_external_file', False)
+        if is_external_file:
+            if not data.get('file_path') or not data.get('file_name'):
+                await message.answer(
+                    "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
+                )
+                await state.clear()
+                return
+        else:
+            if not data.get('file_id') or not data.get('file_name'):
+                await message.answer(
+                    "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
+                )
+                await state.clear()
+                return
+        
+        # Создаем запрос на обработку
+        request = ProcessingRequest(
+            file_id=data.get('file_id') if not is_external_file else None,
+            file_path=data.get('file_path') if is_external_file else None,
+            file_name=data['file_name'],
+            template_id=data['template_id'],
+            llm_provider=data['llm_provider'],
+            user_id=message.from_user.id,
+            language="ru",
+            is_external_file=is_external_file
+        )
+        
+        # Создаем прогресс-трекер
+        from ux.progress_tracker import ProgressFactory
+        from ux.message_builder import MessageBuilder
+        from ux.feedback_system import QuickFeedbackManager, feedback_collector
+        from config import settings
+        
+        progress_tracker = await ProgressFactory.create_file_processing_tracker(
+            message.bot, message.chat.id, settings.enable_diarization
+        )
+        
+        try:
+            # Обрабатываем файл с отображением прогресса
+            result = await processing_service.process_file(request, progress_tracker)
+            
+            await progress_tracker.complete_all()
+            
+            # Показываем результат с улучшенным форматированием
+            result_dict = {
+                "template_used": {"name": result.template_used.get('name', 'Неизвестный')},
+                "llm_provider_used": result.llm_provider_used,
+                "processing_time": result.processing_duration,
+                "file_name": result.transcription_result.transcription[:100] + "..." if len(result.transcription_result.transcription) > 100 else result.transcription_result.transcription,
+                "summary": result.protocol_text,
+                "key_points": [],  # Будет заполнено из протокола
+                "action_items": [],  # Будет заполнено из протокола
+                "sentiment": "neutral",  # По умолчанию
+                "language": "ru",
+                "word_count": len(result.transcription_result.transcription.split()),
+                "speaker_count": len(result.transcription_result.speakers_text) if result.transcription_result.speakers_text else 1,
+                "confidence_score": 0.9  # По умолчанию
+            }
+            
+            # Создаем сообщение с результатом
+            result_message = MessageBuilder.processing_complete_message(result_dict)
+            
+            # Отправляем результат
+            await message.answer(result_message, parse_mode="Markdown")
+            
+            # Проверяем длину протокола и отправляем его
+            protocol_length = len(result.protocol_text)
+            logger.info(f"Длина протокола: {protocol_length} символов")
+            
+            if protocol_length > 4000:
+                # Разбиваем длинный протокол на части
+                await _send_long_protocol(message, result.protocol_text)
+            else:
+                # Отправляем короткий протокол как есть
+                await message.answer(result.protocol_text, parse_mode="Markdown")
+            
+            # Показываем кнопки быстрой обратной связи
+            from ux.feedback_system import feedback_collector
+            feedback_manager = QuickFeedbackManager(feedback_collector)
+            await feedback_manager.request_quick_feedback(message.chat.id, message.bot, result_dict)
+            
+            # Очищаем состояние
+            await state.clear()
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке файла: {e}")
+            await progress_tracker.complete_all()
+            await message.answer(
+                "❌ Произошла ошибка при обработке файла. Попробуйте еще раз или обратитесь к администратору."
+            )
+            await state.clear()
+            
+    except Exception as e:
+        logger.error(f"Ошибка при создании запроса на обработку: {e}")
+        await message.answer("❌ Произошла ошибка при подготовке обработки файла.")
+        await state.clear()
+
+
+async def _send_long_protocol(message: Message, protocol_text: str):
+    """Отправить длинный протокол частями"""
+    try:
+        # Максимальная длина сообщения в Telegram (с запасом)
+        MAX_LENGTH = 4000
+        
+        # Разбиваем протокол на части
+        parts = []
+        current_part = ""
+        
+        # Разбиваем по строкам, чтобы не разрывать слова
+        lines = protocol_text.split('\n')
+        
+        for line in lines:
+            # Проверяем, поместится ли строка в текущую часть
+            if len(current_part) + len(line) + 1 <= MAX_LENGTH:
+                current_part += line + '\n'
+            else:
+                # Если текущая часть не пустая, добавляем её в список частей
+                if current_part.strip():
+                    parts.append(current_part.strip())
+                # Начинаем новую часть
+                current_part = line + '\n'
+        
+        # Добавляем последнюю часть, если она не пустая
+        if current_part.strip():
+            parts.append(current_part.strip())
+        
+        # Отправляем части
+        for i, part in enumerate(parts):
+            if i == 0:
+                # Первая часть
+                part_text = f"📄 **Протокол встречи:**\n\n{part}"
+            else:
+                # Остальные части с номером
+                part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
+            
+            await message.answer(part_text, parse_mode="Markdown")
+            
+            # Небольшая задержка между сообщениями
+            import asyncio
+            await asyncio.sleep(0.5)
+            
+    except Exception as e:
+        logger.error(f"Ошибка при отправке длинного протокола: {e}")
+        # Если не удалось разбить, отправляем как есть (может быть обрезано)
+        try:
+            await message.answer(protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)", parse_mode="Markdown")
+        except:
+            await message.answer("❌ Ошибка при отправке протокола. Попробуйте еще раз.")
 
 
 def _extract_file_info(message: Message) -> tuple:
@@ -180,9 +426,41 @@ def _extract_file_info(message: Message) -> tuple:
     return file_obj, file_name, content_type
 
 
-async def _show_template_selection(message: Message, template_service: TemplateService):
+async def _show_template_selection(message: Message, template_service: TemplateService, state: FSMContext = None):
     """Показать выбор шаблонов"""
     try:
+        # Проверяем, есть ли у пользователя шаблон по умолчанию
+        from services import UserService
+        user_service = UserService()
+        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        
+        # Если у пользователя есть шаблон по умолчанию, автоматически используем его
+        if user and user.default_template_id and state:
+            try:
+                default_template = await template_service.get_template_by_id(user.default_template_id)
+                if default_template:
+                    # Сохраняем шаблон в состоянии
+                    await state.update_data(template_id=default_template.id)
+                    
+                    await message.answer(
+                        f"🚀 **Обработка по выбранному шаблону: {default_template.name}**",
+                        parse_mode="Markdown"
+                    )
+                    
+                    # Показываем выбор LLM
+                    from services import EnhancedLLMService, OptimizedProcessingService
+                    llm_service = EnhancedLLMService()
+                    processing_service = OptimizedProcessingService()
+                    
+                    # Показываем выбор LLM для обработки
+                    await _show_llm_selection_for_file(message, state, llm_service, processing_service)
+                    
+                    return
+            except Exception as e:
+                logger.warning(f"Не удалось получить шаблон по умолчанию: {e}")
+                # Продолжаем с обычным выбором шаблонов
+        
+        # Показываем все доступные шаблоны
         templates = await template_service.get_all_templates()
         
         if not templates:
@@ -270,7 +548,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 )
                 
                 # Показываем шаблоны для выбора
-                await _show_template_selection(message, template_service)
+                await _show_template_selection(message, template_service, state)
                 
             except FileSizeError as e:
                 from ux.message_builder import MessageBuilder

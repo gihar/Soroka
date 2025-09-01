@@ -27,6 +27,26 @@ class TemplateService:
             logger.error(f"Ошибка при получении шаблонов: {e}")
             raise
     
+    async def get_user_templates(self, telegram_id: int) -> List[Template]:
+        """Получить шаблоны пользователя"""
+        try:
+            templates_data = await self.db.get_user_templates(telegram_id)
+            return [Template(**template) for template in templates_data]
+        except Exception as e:
+            logger.error(f"Ошибка при получении шаблонов пользователя {telegram_id}: {e}")
+            raise
+    
+    async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
+        """Установить шаблон по умолчанию для пользователя"""
+        try:
+            result = await self.db.set_user_default_template(telegram_id, template_id)
+            if result:
+                logger.info(f"Установлен шаблон по умолчанию {template_id} для пользователя {telegram_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при установке шаблона по умолчанию для пользователя {telegram_id}: {e}")
+            raise
+    
     async def get_template_by_id(self, template_id: int) -> Template:
         """Получить шаблон по ID"""
         try:
