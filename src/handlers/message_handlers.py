@@ -287,15 +287,22 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             await message.answer(result_message, parse_mode="Markdown")
             
             # Проверяем длину протокола и отправляем его
-            protocol_length = len(result.protocol_text)
-            logger.info(f"Длина протокола: {protocol_length} символов")
-            
-            if protocol_length > 4000:
-                # Разбиваем длинный протокол на части
-                await _send_long_protocol(message, result.protocol_text)
+            if not result.protocol_text:
+                logger.warning("protocol_text пустой или None")
+                await message.answer("❌ Протокол не был сгенерирован")
             else:
-                # Отправляем короткий протокол как есть
-                await message.answer(result.protocol_text, parse_mode="Markdown")
+                protocol_length = len(result.protocol_text)
+                logger.info(f"Длина протокола: {protocol_length} символов")
+                logger.info(f"Тип protocol_text: {type(result.protocol_text)}")
+                
+                if protocol_length > 4000:
+                    logger.info(f"Протокол длинный ({protocol_length} символов), разбиваем на части")
+                    # Разбиваем длинный протокол на части
+                    await _send_long_protocol(message, result.protocol_text)
+                else:
+                    logger.info(f"Протокол короткий ({protocol_length} символов), отправляем как есть")
+                    # Отправляем короткий протокол как есть
+                    await message.answer(result.protocol_text, parse_mode="Markdown")
             
             # Показываем кнопки быстрой обратной связи
             from ux.feedback_system import feedback_collector
@@ -325,14 +332,17 @@ async def _send_long_protocol(message: Message, protocol_text: str):
         # Максимальная длина сообщения в Telegram (с запасом)
         MAX_LENGTH = 4000
         
+        logger.info(f"Начинаем разбивку протокола длиной {len(protocol_text)} символов на части")
+        
         # Разбиваем протокол на части
         parts = []
         current_part = ""
         
         # Разбиваем по строкам, чтобы не разрывать слова
         lines = protocol_text.split('\n')
+        logger.info(f"Разбиваем на {len(lines)} строк")
         
-        for line in lines:
+        for line_num, line in enumerate(lines):
             # Проверяем, поместится ли строка в текущую часть
             if len(current_part) + len(line) + 1 <= MAX_LENGTH:
                 current_part += line + '\n'
@@ -340,34 +350,52 @@ async def _send_long_protocol(message: Message, protocol_text: str):
                 # Если текущая часть не пустая, добавляем её в список частей
                 if current_part.strip():
                     parts.append(current_part.strip())
+                    logger.debug(f"Добавлена часть {len(parts)} длиной {len(current_part.strip())} символов")
                 # Начинаем новую часть
                 current_part = line + '\n'
         
         # Добавляем последнюю часть, если она не пустая
         if current_part.strip():
             parts.append(current_part.strip())
+            logger.debug(f"Добавлена последняя часть {len(parts)} длиной {len(current_part.strip())} символов")
+        
+        logger.info(f"Протокол разбит на {len(parts)} частей")
         
         # Отправляем части
         for i, part in enumerate(parts):
-            if i == 0:
-                # Первая часть
-                part_text = f"📄 **Протокол встречи:**\n\n{part}"
-            else:
-                # Остальные части с номером
-                part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
-            
-            await message.answer(part_text, parse_mode="Markdown")
-            
-            # Небольшая задержка между сообщениями
-            import asyncio
-            await asyncio.sleep(0.5)
+            try:
+                if i == 0:
+                    # Первая часть
+                    part_text = f"📄 **Протокол встречи:**\n\n{part}"
+                else:
+                    # Остальные части с номером
+                    part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
+                
+                logger.debug(f"Отправляем часть {i+1}/{len(parts)} длиной {len(part_text)} символов")
+                await message.answer(part_text, parse_mode="Markdown")
+                
+                # Небольшая задержка между сообщениями
+                import asyncio
+                await asyncio.sleep(0.5)
+                
+            except Exception as part_error:
+                logger.error(f"Ошибка при отправке части {i+1}: {part_error}")
+                # Пытаемся отправить часть без Markdown
+                try:
+                    await message.answer(f"📄 Протокол (часть {i+1}):\n\n{part}")
+                except Exception as fallback_error:
+                    logger.error(f"Не удалось отправить часть {i+1} даже без Markdown: {fallback_error}")
+                    await message.answer(f"❌ Ошибка при отправке части {i+1} протокола")
             
     except Exception as e:
         logger.error(f"Ошибка при отправке длинного протокола: {e}")
         # Если не удалось разбить, отправляем как есть (может быть обрезано)
         try:
-            await message.answer(protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)", parse_mode="Markdown")
-        except:
+            truncated_text = protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)"
+            logger.info(f"Отправляем обрезанный протокол длиной {len(truncated_text)} символов")
+            await message.answer(truncated_text, parse_mode="Markdown")
+        except Exception as fallback_error:
+            logger.error(f"Не удалось отправить даже обрезанный протокол: {fallback_error}")
             await message.answer("❌ Ошибка при отправке протокола. Попробуйте еще раз.")
 
 

@@ -1,71 +1,84 @@
-# Git
+# Git и версионирование
 .git
 .gitignore
+.gitattributes
 
-# Python
-__pycache__
+# Документация
+docs/
+*.md
+README*
+WARP.md
+DOCKER_HUB_PUBLISH.md
+
+# Временные файлы и кэш
+temp/
+cache/
+logs/
+*.log
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-venv/
 env/
+venv/
 .venv/
-*.egg-info/
-dist/
-build/
+ENV/
+env.bak/
+venv.bak/
 
-# Логи и временные файлы
-logs/
-temp/
-*.log
-
-# База данных
-*.db
-*.sqlite
-
-# Кэш
-cache/
-.cache/
-.pytest_cache/
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # Системные файлы
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Docker файлы
+Dockerfile*
+docker-compose*.yml
+.dockerignore
 
-# Документация
-docs/
-README.md
-*.md
+# Скрипты сборки и развертывания
+build.sh
+install.sh
+*.sh
+analyze_image.sh
 
-# Тестовые файлы
+# Тесты
 tests/
-test_*
+test_*.py
 *_test.py
 
-# Docker
-Dockerfile*
-.dockerignore
-docker-compose*.yml
-
-# Переменные окружения (копируем только пример)
+# Конфигурация разработки
 .env
-.env.*
+.env.local
+.env.development
 
-# Дополнительные исключения для уменьшения размера
-WARP.md
-DOCKER_HUB_PUBLISH.md
-build-multi-platform.sh
-docker-*.sh
-env_example
+# База данных
+*.db
+*.sqlite
+*.sqlite3
+bot.db
 
-# Временные файлы аудио
+# Локальные настройки
+config.local.py
+config.dev.py
+
+# Временные аудио/видео файлы
 temp/*.mp3
 temp/*.m4a
+temp/*.mp4
 temp/*.wav
+
+# Кэш и логи
+cache/disk/
+logs/bot.log
+
+# Виртуальное окружение
+venv/
+env_example
