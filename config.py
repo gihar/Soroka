@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # Настройки файлов
     max_file_size: int = Field(20 * 1024 * 1024, description="Максимальный размер файла в байтах")
     telegram_max_file_size: int = Field(20 * 1024 * 1024, description="Максимальный размер файла для Telegram Bot API в байтах")
+    max_external_file_size: int = Field(50 * 1024 * 1024, description="Максимальный размер файла из внешних источников (Google Drive, Яндекс.Диск) в байтах")
     temp_dir: str = Field("temp", description="Директория для временных файлов")
     
     # Логирование
@@ -39,9 +40,16 @@ class Settings(BaseSettings):
     # SSL настройки
     ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
     
+    # Транскрипция
+    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако) или hybrid (гибридный)")
+    groq_api_key: Optional[str] = Field(None, description="API ключ Groq для облачной транскрипции")
+    groq_model: str = Field("whisper-large-v3-turbo", description="Модель Groq для транскрипции")
+    
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")
+    diarization_provider: str = Field("whisperx", description="Провайдер диаризации: whisperx, pyannote, picovoice")
     huggingface_token: Optional[str] = Field(None, description="Токен Hugging Face для моделей диаризации")
+    picovoice_access_key: Optional[str] = Field(None, description="Access Key для Picovoice API")
     diarization_device: str = Field("auto", description="Устройство для диаризации: auto, cpu, mps, cuda")
     compute_type: str = Field("auto", description="Тип вычислений: auto, int8, float16, float32")
     max_speakers: int = Field(10, description="Максимальное количество говорящих")

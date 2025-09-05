@@ -215,9 +215,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             rating_emoji = "⭐" * rating
             await callback.message.edit_text(
                 f"🙏 **Спасибо за оценку!**\n\n"
-                f"Ваша оценка: {rating}/5 {rating_emoji}\n\n"
-                f"💬 Хотите добавить комментарий?\n"
-                f"Просто напишите сообщение с вашими мыслями.",
+                f"Ваша оценка: {rating}/5 {rating_emoji}\n\n",
                 parse_mode="Markdown"
             )
             

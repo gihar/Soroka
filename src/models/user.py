@@ -14,6 +14,7 @@ class UserBase(BaseModel):
     first_name: Optional[str] = Field(None, description="Имя пользователя")
     last_name: Optional[str] = Field(None, description="Фамилия пользователя")
     preferred_llm: Optional[str] = Field(None, description="Предпочитаемый LLM провайдер")
+    default_template_id: Optional[int] = Field(None, description="ID шаблона по умолчанию")
 
 
 class UserCreate(UserBase):

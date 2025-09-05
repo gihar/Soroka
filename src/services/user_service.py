@@ -5,8 +5,8 @@
 from typing import Optional
 from loguru import logger
 
-from models.user import User, UserCreate, UserUpdate
-from exceptions.user import UserNotFoundError, UserCreationError
+from src.models.user import User, UserCreate, UserUpdate
+from src.exceptions.user import UserNotFoundError, UserCreationError
 from database import db
 
 

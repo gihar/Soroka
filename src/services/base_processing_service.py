@@ -6,14 +6,14 @@ import time
 from typing import Dict, Any
 from loguru import logger
 
-from models.processing import ProcessingRequest, ProcessingResult
-from services.transcription_service import TranscriptionService
-from services.enhanced_llm_service import EnhancedLLMService
-from services.user_service import UserService
-from services.template_service import TemplateService
-from services.file_service import FileService
-from exceptions.processing import ProcessingError
-from reliability import (
+from src.models.processing import ProcessingRequest, ProcessingResult
+from src.services.transcription_service import TranscriptionService
+from src.services.enhanced_llm_service import EnhancedLLMService
+from src.services.user_service import UserService
+from src.services.template_service import TemplateService
+from src.services.file_service import FileService
+from src.exceptions.processing import ProcessingError
+from src.reliability import (
     global_rate_limiter, USER_REQUEST_LIMIT,
     get_circuit_breaker, get_fallback_manager
 )

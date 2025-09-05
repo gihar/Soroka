@@ -6,8 +6,8 @@ from typing import List, Dict, Any
 from jinja2 import Environment, BaseLoader, TemplateError
 from loguru import logger
 
-from models.template import Template, TemplateCreate
-from exceptions.template import TemplateNotFoundError, TemplateValidationError
+from src.models.template import Template, TemplateCreate
+from src.exceptions.template import TemplateNotFoundError, TemplateValidationError
 from database import db
 
 
@@ -25,6 +25,37 @@ class TemplateService:
             return [Template(**template) for template in templates_data]
         except Exception as e:
             logger.error(f"Ошибка при получении шаблонов: {e}")
+            raise
+    
+    async def get_user_templates(self, telegram_id: int) -> List[Template]:
+        """Получить шаблоны пользователя"""
+        try:
+            templates_data = await self.db.get_user_templates(telegram_id)
+            return [Template(**template) for template in templates_data]
+        except Exception as e:
+            logger.error(f"Ошибка при получении шаблонов пользователя {telegram_id}: {e}")
+            raise
+    
+    async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
+        """Установить шаблон по умолчанию для пользователя"""
+        try:
+            result = await self.db.set_user_default_template(telegram_id, template_id)
+            if result:
+                logger.info(f"Установлен шаблон по умолчанию {template_id} для пользователя {telegram_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при установке шаблона по умолчанию для пользователя {telegram_id}: {e}")
+            raise
+
+    async def reset_user_default_template(self, telegram_id: int) -> bool:
+        """Сбросить шаблон по умолчанию для пользователя"""
+        try:
+            result = await self.db.reset_user_default_template(telegram_id)
+            if result:
+                logger.info(f"Сброшен шаблон по умолчанию для пользователя {telegram_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при сбросе шаблона по умолчанию для пользователя {telegram_id}: {e}")
             raise
     
     async def get_template_by_id(self, template_id: int) -> Template:
@@ -170,15 +201,14 @@ class TemplateService:
                 "content": """# Резюме встречи
 
 **Участники:** {{ participants }}
-**Дата:** {{ date }}
 
 ## Ключевые моменты
 {{ key_points }}
 
-## Решения
+## Принятые решения
 {{ decisions }}
 
-## Действия
+## Дальнейшие действия
 {{ action_items }}
 
 {% if dialogue_analysis %}

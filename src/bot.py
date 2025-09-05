@@ -81,13 +81,19 @@ class EnhancedTelegramBot:
         )
         self.dp.include_router(command_router)
         
+        # UX обработчики - быстрые действия (ДОЛЖНЫ БЫТЬ РАНЬШЕ message_handlers!)
+        from ux import setup_quick_actions_handlers, setup_feedback_handlers, feedback_collector
+        
+        quick_actions_router = setup_quick_actions_handlers()
+        self.dp.include_router(quick_actions_router)
+        
         # Callback запросы - используем enhanced сервисы
         callback_router = setup_callback_handlers(
             self.user_service, self.template_service, self.llm_service, self.processing_service
         )
         self.dp.include_router(callback_router)
         
-        # Сообщения с файлами - используем enhanced сервисы
+        # Сообщения с файлами - используем enhanced сервисы (ПОСЛЕ quick_actions!)
         message_router = setup_message_handlers(
             self.file_service, self.template_service, self.processing_service
         )
@@ -104,12 +110,6 @@ class EnhancedTelegramBot:
             self.llm_service, self.processing_service
         )
         self.dp.include_router(admin_router)
-        
-        # UX обработчики - быстрые действия и обратная связь
-        from ux import setup_quick_actions_handlers, setup_feedback_handlers, feedback_collector
-        
-        quick_actions_router = setup_quick_actions_handlers()
-        self.dp.include_router(quick_actions_router)
         
         feedback_router = setup_feedback_handlers(feedback_collector)
         self.dp.include_router(feedback_router)
@@ -219,6 +219,20 @@ class EnhancedTelegramBot:
             await self.bot.session.close()
             logger.info("Соединение с ботом закрыто")
             
+            # 3.1. Даем время на очистку всех aiohttp сессий
+            await asyncio.sleep(0.5)
+            
+            # 3.2. Принудительная очистка всех открытых aiohttp сессий
+            try:
+                import gc
+                import aiohttp
+                for obj in gc.get_objects():
+                    if isinstance(obj, aiohttp.ClientSession) and not obj.closed:
+                        await obj.close()
+                        logger.debug("Закрыта открытая aiohttp сессия")
+            except Exception as e:
+                logger.debug(f"Ошибка при принудительной очистке сессий: {e}")
+            
             # 4. Сохраняем статистику
             await self._save_shutdown_stats()
             
@@ -254,9 +268,26 @@ class EnhancedTelegramBot:
         try:
             stats = self.get_system_stats()
             logger.info("Статистика при завершении работы:")
-            logger.info(f"  Всего запросов: {stats['monitoring']['total_requests']}")
-            logger.info(f"  Ошибок: {stats['monitoring']['total_errors']}")
-            logger.info(f"  Среднее время обработки: {stats['monitoring']['average_processing_time']:.3f}s")
+            
+            # Безопасное получение статистики мониторинга
+            monitoring_stats = stats.get('monitoring', {})
+            if isinstance(monitoring_stats, dict):
+                total_requests = monitoring_stats.get('total_requests', 0)
+                total_errors = monitoring_stats.get('total_errors', 0)
+                avg_time = monitoring_stats.get('average_processing_time', 0.0)
+                
+                logger.info(f"  Всего запросов: {total_requests}")
+                logger.info(f"  Ошибок: {total_errors}")
+                logger.info(f"  Среднее время обработки: {avg_time:.3f}s")
+            else:
+                logger.info("  Статистика мониторинга недоступна")
+            
+            # Статистика надежности
+            processing_stats = stats.get('processing', {})
+            if isinstance(processing_stats, dict) and 'error' not in processing_stats:
+                logger.info("  Статистика обработки: Доступна")
+            else:
+                logger.info("  Статистика обработки: Недоступна")
             
         except Exception as e:
             logger.error(f"Ошибка при сохранении статистики: {e}")

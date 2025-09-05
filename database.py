@@ -26,8 +26,10 @@ class Database:
                     first_name TEXT,
                     last_name TEXT,
                     preferred_llm TEXT DEFAULT 'openai',
+                    default_template_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (default_template_id) REFERENCES templates (id)
                 )
             """)
             
@@ -60,6 +62,14 @@ class Database:
                     FOREIGN KEY (template_id) REFERENCES templates (id)
                 )
             """)
+            
+            # Миграция: добавляем поле default_template_id если его нет
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN default_template_id INTEGER")
+                logger.info("Добавлено поле default_template_id в таблицу users")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
             
             await db.commit()
             logger.info("База данных инициализирована")
@@ -103,6 +113,30 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
     
+    async def get_user_templates(self, telegram_id: int) -> List[Dict[str, Any]]:
+        """Получить шаблоны пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                return []
+            
+            user_id = user_row['id']
+            
+            # Получаем шаблоны пользователя (созданные им + стандартные)
+            cursor = await db.execute("""
+                SELECT * FROM templates 
+                WHERE created_by = ? OR is_default = 1
+                ORDER BY is_default DESC, name
+            """, (user_id,))
+            
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
     async def get_template(self, template_id: int) -> Optional[Dict[str, Any]]:
         """Получить шаблон по ID"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -132,6 +166,121 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (user_id, file_name, template_id, llm_provider, transcription_text, result_text))
             await db.commit()
+    
+    async def get_user_stats(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        """Получить статистику пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                return None
+            
+            user_id = user_row['id']
+            
+            # Статистика по файлам
+            cursor = await db.execute("""
+                SELECT 
+                    COUNT(*) as total_files,
+                    COUNT(DISTINCT DATE(created_at)) as active_days,
+                    MIN(created_at) as first_file_date,
+                    MAX(created_at) as last_file_date
+                FROM processing_history 
+                WHERE user_id = ?
+            """, (user_id,))
+            
+            stats_row = await cursor.fetchone()
+            
+            # Статистика по LLM провайдерам
+            cursor = await db.execute("""
+                SELECT llm_provider, COUNT(*) as count
+                FROM processing_history 
+                WHERE user_id = ? AND llm_provider IS NOT NULL
+                GROUP BY llm_provider
+                ORDER BY count DESC
+            """, (user_id,))
+            
+            llm_stats = await cursor.fetchall()
+            
+            # Статистика по шаблонам
+            cursor = await db.execute("""
+                SELECT t.name, COUNT(*) as count
+                FROM processing_history ph
+                JOIN templates t ON ph.template_id = t.id
+                WHERE ph.user_id = ?
+                GROUP BY t.name
+                ORDER BY count DESC
+                LIMIT 5
+            """, (user_id,))
+            
+            template_stats = await cursor.fetchall()
+            
+            # Активность по дням (последние 30 дней)
+            cursor = await db.execute("""
+                SELECT DATE(created_at) as date, COUNT(*) as count
+                FROM processing_history 
+                WHERE user_id = ? AND created_at >= DATE('now', '-30 days')
+                GROUP BY DATE(created_at)
+                ORDER BY date DESC
+                LIMIT 30
+            """, (user_id,))
+            
+            daily_activity = await cursor.fetchall()
+            
+            return {
+                "total_files": stats_row['total_files'] if stats_row else 0,
+                "active_days": stats_row['active_days'] if stats_row else 0,
+                "first_file_date": stats_row['first_file_date'] if stats_row else None,
+                "last_file_date": stats_row['last_file_date'] if stats_row else None,
+                "llm_providers": [dict(row) for row in llm_stats],
+                "favorite_templates": [dict(row) for row in template_stats],
+                "daily_activity": [dict(row) for row in daily_activity]
+            }
+    
+    async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
+        """Установить шаблон по умолчанию для пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                return False
+            
+            user_id = user_row['id']
+            
+            # Проверяем, что шаблон существует и доступен пользователю
+            cursor = await db.execute("""
+                SELECT id FROM templates 
+                WHERE id = ? AND (created_by = ? OR is_default = 1)
+            """, (template_id, user_id))
+            
+            if not await cursor.fetchone():
+                return False
+            
+            # Обновляем предпочтения пользователя
+            await db.execute("""
+                UPDATE users SET default_template_id = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE telegram_id = ?
+            """, (template_id, telegram_id))
+            
+            await db.commit()
+            return True
+
+    async def reset_user_default_template(self, telegram_id: int) -> bool:
+        """Сбросить шаблон по умолчанию для пользователя (установить NULL)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                UPDATE users SET default_template_id = NULL, updated_at = CURRENT_TIMESTAMP 
+                WHERE telegram_id = ?
+            """, (telegram_id,))
+            await db.commit()
+            return cursor.rowcount > 0
 
 
 # Глобальный экземпляр базы данных

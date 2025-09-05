@@ -118,17 +118,11 @@ class LLMHealthCheck(HealthCheck):
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )
-            elif provider_count < 2:
-                return HealthCheckResult(
-                    status=HealthStatus.DEGRADED,
-                    message=f"Доступен только {provider_count} LLM провайдер",
-                    response_time=response_time,
-                    details={"available_providers": available_providers}
-                )
             else:
+                # 1 или более провайдеров - это нормально
                 return HealthCheckResult(
                     status=HealthStatus.HEALTHY,
-                    message=f"Доступно {provider_count} LLM провайдеров",
+                    message=f"Доступно {provider_count} LLM провайдер{'ов' if provider_count > 1 else ''}",
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )

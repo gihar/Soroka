@@ -40,6 +40,21 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             logger.error(f"Ошибка в add_template_callback: {e}")
             await callback.answer("❌ Произошла ошибка")
     
+    @router.callback_query(F.data == "create_template")
+    async def create_template_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик создания шаблона из меню настроек"""
+        try:
+            await state.set_state(TemplateStates.waiting_for_name)
+            await callback.message.edit_text(
+                "📝 **Создание нового шаблона**\n\n"
+                "Введите название шаблона:",
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в create_template_callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
     @router.message(TemplateStates.waiting_for_name)
     async def template_name_handler(message: Message, state: FSMContext):
         """Обработчик ввода названия шаблона"""

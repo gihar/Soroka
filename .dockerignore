@@ -1,0 +1,84 @@
+# Git и версионирование
+.git
+.gitignore
+.gitattributes
+
+# Документация
+docs/
+*.md
+README*
+WARP.md
+DOCKER_HUB_PUBLISH.md
+
+# Временные файлы и кэш
+temp/
+cache/
+logs/
+*.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Docker файлы
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Скрипты сборки и развертывания
+build.sh
+install.sh
+*.sh
+analyze_image.sh
+
+# Тесты
+tests/
+test_*.py
+*_test.py
+
+# Конфигурация разработки
+.env
+.env.local
+.env.development
+
+# База данных
+*.db
+*.sqlite
+*.sqlite3
+bot.db
+
+# Локальные настройки
+config.local.py
+config.dev.py
+
+# Временные аудио/видео файлы
+temp/*.mp3
+temp/*.m4a
+temp/*.mp4
+temp/*.wav
+
+# Кэш и логи
+cache/disk/
+logs/bot.log
+
+# Виртуальное окружение
+venv/
+env_example

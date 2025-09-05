@@ -9,9 +9,20 @@ from pathlib import Path
 from loguru import logger
 from config import settings
 
+# Устанавливаем переменные окружения для подавления предупреждений
+os.environ["PYTORCH_LIGHTNING_UPGRADE"] = "0"
+os.environ["PYTHONWARNINGS"] = "ignore::UserWarning"
+
 # Подавляем предупреждения для библиотек ML
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+# Подавляем специфичные предупреждения о версиях
+warnings.filterwarnings("ignore", message=".*Lightning automatically upgraded.*")
+warnings.filterwarnings("ignore", message=".*Model was trained with.*")
+warnings.filterwarnings("ignore", message=".*Bad things might happen.*")
+warnings.filterwarnings("ignore", message=".*torch.*")
+warnings.filterwarnings("ignore", message=".*pyannote.audio.*")
 
 try:
     import whisperx
@@ -27,6 +38,23 @@ try:
 except ImportError:
     PYANNOTE_AVAILABLE = False
     logger.warning("Pyannote.audio не установлен. Резервный вариант диаризации недоступен.")
+
+try:
+    import pvfalcon
+    FALCON_AVAILABLE = True
+except ImportError:
+    FALCON_AVAILABLE = False
+    logger.warning("pvfalcon библиотека не установлена.")
+
+try:
+    from src.services.picovoice_service import picovoice_service
+    PICOVOICE_AVAILABLE = True
+except ImportError:
+    PICOVOICE_AVAILABLE = False
+    logger.warning("Picovoice сервис недоступен.")
+
+# Picovoice доступен только если и библиотека, и сервис доступны
+PICOVOICE_AVAILABLE = PICOVOICE_AVAILABLE and FALCON_AVAILABLE
 
 
 class DiarizationResult:
@@ -106,6 +134,9 @@ class DiarizationService:
         
     def _get_device(self) -> str:
         """Определить устройство для вычислений"""
+        if not WHISPERX_AVAILABLE:
+            return "cpu"
+            
         if settings.diarization_device == "cuda" and torch.cuda.is_available():
             return "cuda"
         elif settings.diarization_device == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
@@ -234,19 +265,29 @@ class DiarizationService:
             self.pyannote_pipeline = None
             raise
     
-    def diarize_with_whisperx(self, file_path: str, language: str = "ru") -> DiarizationResult:
+    def diarize_with_whisperx(self, file_path: str, language: str = "ru", 
+                              progress_callback=None) -> DiarizationResult:
         """Транскрипция с WhisperX + диаризация с pyannote.audio"""
         try:
             # Загружаем модели WhisperX (только для транскрипции)
             self._load_whisperx_models(language)
             
+            if progress_callback:
+                progress_callback(35, "Загрузка аудио файла...")
+            
             # Загружаем аудио
             logger.info(f"Загрузка аудио файла: {file_path}")
             audio = whisperx.load_audio(file_path)
             
+            if progress_callback:
+                progress_callback(45, "Транскрипция с WhisperX...")
+            
             # Транскрибация
             logger.info("Выполнение транскрипции с WhisperX...")
             result = self.whisperx_model.transcribe(audio, batch_size=16)
+            
+            if progress_callback:
+                progress_callback(65, "Выравнивание текста...")
             
             # Выравнивание (alignment)
             logger.info("Выполнение выравнивания...")
@@ -259,6 +300,9 @@ class DiarizationService:
                 return_char_alignments=False
             )
             
+            if progress_callback:
+                progress_callback(75, "Диаризация говорящих...")
+            
             # Диаризация с pyannote.audio
             logger.info("Выполнение диаризации с pyannote.audio...")
             self._load_pyannote_pipeline()
@@ -267,8 +311,14 @@ class DiarizationService:
             if self.pyannote_pipeline is None:
                 raise RuntimeError("Pipeline pyannote.audio не был загружен")
             
+            # Проверяем, нужна ли конвертация файла
+            actual_file_path = file_path
+            if file_path.endswith('.tmp') or not os.path.splitext(file_path)[1]:
+                logger.info("Файл имеет неопределенное расширение, конвертируем в WAV")
+                actual_file_path = self._convert_audio_format(file_path, "wav")
+            
             # Выполняем диаризацию
-            diarization = self.pyannote_pipeline(file_path)
+            diarization = self.pyannote_pipeline(actual_file_path)
             
             # Проверяем результат диаризации
             if diarization is None:
@@ -319,13 +369,20 @@ class DiarizationService:
             
             logger.info(f"Диаризация завершена. Найдено говорящих: {len(speakers_list)}")
             
+            # Очищаем временный конвертированный файл если он был создан
+            if 'actual_file_path' in locals() and actual_file_path != file_path:
+                self._cleanup_converted_file(actual_file_path, file_path)
+            
             return DiarizationResult(result.get("segments", []), speakers_list)
             
         except Exception as e:
             logger.error(f"Ошибка при диаризации с WhisperX + pyannote: {e}")
+            # Очищаем временный файл в случае ошибки
+            if 'actual_file_path' in locals() and actual_file_path != file_path:
+                self._cleanup_converted_file(actual_file_path, file_path)
             raise
     
-    def diarize_with_pyannote(self, file_path: str) -> DiarizationResult:
+    def diarize_with_pyannote(self, file_path: str, progress_callback=None) -> DiarizationResult:
         """Диаризация с помощью pyannote.audio (резервный вариант)"""
         try:
             self._load_pyannote_pipeline()
@@ -336,8 +393,20 @@ class DiarizationService:
             
             logger.info(f"Выполнение диаризации с pyannote.audio: {file_path}")
             
+            if progress_callback:
+                progress_callback(40, "Подготовка файла...")
+            
+            # Проверяем, нужна ли конвертация файла
+            actual_file_path = file_path
+            if file_path.endswith('.tmp') or not os.path.splitext(file_path)[1]:
+                logger.info("Файл имеет неопределенное расширение, конвертируем в WAV")
+                actual_file_path = self._convert_audio_format(file_path, "wav")
+            
+            if progress_callback:
+                progress_callback(60, "Выполнение диаризации...")
+            
             # Выполняем диаризацию
-            diarization = self.pyannote_pipeline(file_path)
+            diarization = self.pyannote_pipeline(actual_file_path)
             
             # Проверяем результат диаризации
             if diarization is None:
@@ -360,10 +429,52 @@ class DiarizationService:
             
             logger.info(f"Диаризация pyannote завершена. Найдено говорящих: {len(speakers_list)}")
             
+            # Очищаем временный конвертированный файл если он был создан
+            if actual_file_path != file_path:
+                self._cleanup_converted_file(actual_file_path, file_path)
+            
             return DiarizationResult(segments, speakers_list)
             
         except Exception as e:
             logger.error(f"Ошибка при диаризации с pyannote.audio: {e}")
+            # Очищаем временный файл в случае ошибки
+            if 'actual_file_path' in locals() and actual_file_path != file_path:
+                self._cleanup_converted_file(actual_file_path, file_path)
+            raise
+    
+    async def diarize_with_picovoice(self, file_path: str, progress_callback=None) -> DiarizationResult:
+        """Диаризация с помощью Picovoice API"""
+        try:
+            if not PICOVOICE_AVAILABLE:
+                raise RuntimeError("Picovoice сервис недоступен")
+            
+            logger.info(f"Выполнение диаризации с Picovoice: {file_path}")
+            
+            if progress_callback:
+                progress_callback(10, "Инициализация Picovoice...")
+            
+            # Выполняем диаризацию через Picovoice
+            diarization_data = await picovoice_service.diarize_file(file_path, progress_callback)
+            
+            if diarization_data is None:
+                raise RuntimeError("Picovoice диаризация вернула None")
+            
+            # Преобразуем DiarizationData в DiarizationResult
+            segments = []
+            for segment in diarization_data.segments:
+                segments.append({
+                    "start": segment.get("start", 0),
+                    "end": segment.get("end", 0),
+                    "speaker": segment.get("speaker", "SPEAKER_UNKNOWN"),
+                    "text": segment.get("text", "")
+                })
+            
+            logger.info(f"Диаризация Picovoice завершена. Найдено говорящих: {diarization_data.total_speakers}")
+            
+            return DiarizationResult(segments, diarization_data.speakers)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при диаризации с Picovoice: {e}")
             raise
     
     def _convert_audio_format(self, input_path: str, output_format: str = "wav") -> str:
@@ -423,7 +534,8 @@ class DiarizationService:
         unsupported_formats = ['.m4a', '.mp4', '.aac', '.m4p']
         return file_ext in unsupported_formats
 
-    def diarize_file(self, file_path: str, language: str = "ru") -> Optional[DiarizationResult]:
+    async def diarize_file(self, file_path: str, language: str = "ru", 
+                     progress_callback=None) -> Optional[DiarizationResult]:
         """Основной метод диаризации файла"""
         if not settings.enable_diarization:
             logger.info("Диаризация отключена в настройках")
@@ -433,6 +545,7 @@ class DiarizationService:
             raise FileNotFoundError(f"Файл не найден: {file_path}")
         
         logger.info(f"Начало диаризации файла: {file_path}")
+        logger.info(f"Выбранный провайдер диаризации: {settings.diarization_provider}")
         
         # Проверяем, нужна ли конвертация
         original_path = file_path
@@ -446,33 +559,71 @@ class DiarizationService:
                 logger.info(f"Используем конвертированный файл: {file_path}")
         
         try:
-            # Пробуем сначала WhisperX
-            if WHISPERX_AVAILABLE:
-                logger.info("Использование WhisperX для диаризации")
-                result = self.diarize_with_whisperx(file_path, language)
-                return result
+            # Выбираем провайдера диаризации
+            if settings.diarization_provider == "picovoice":
+                if PICOVOICE_AVAILABLE:
+                    logger.info("Использование Picovoice для диаризации")
+                    if progress_callback:
+                        progress_callback(20, "Инициализация Picovoice...")
+                    
+                    result = await self.diarize_with_picovoice(file_path, progress_callback)
+                    return result
+                else:
+                    logger.warning("Picovoice недоступен, переключаемся на WhisperX")
+                    settings.diarization_provider = "whisperx"
             
-            # Если WhisperX недоступен, пробуем pyannote
-            elif PYANNOTE_AVAILABLE:
-                logger.info("WhisperX недоступен, использование pyannote.audio")
-                result = self.diarize_with_pyannote(file_path)
-                return result
+            if settings.diarization_provider == "whisperx":
+                if WHISPERX_AVAILABLE:
+                    logger.info("Использование WhisperX для диаризации")
+                    if progress_callback:
+                        progress_callback(20, "Инициализация WhisperX...")
+                    
+                    result = self.diarize_with_whisperx(file_path, language, progress_callback)
+                    return result
+                else:
+                    logger.warning("WhisperX недоступен, переключаемся на pyannote")
+                    settings.diarization_provider = "pyannote"
             
-            else:
-                logger.error("Ни одна библиотека диаризации не доступна")
-                return None
+            if settings.diarization_provider == "pyannote":
+                if PYANNOTE_AVAILABLE:
+                    logger.info("Использование pyannote.audio для диаризации")
+                    if progress_callback:
+                        progress_callback(30, "Инициализация pyannote.audio...")
+                    
+                    result = self.diarize_with_pyannote(file_path, progress_callback)
+                    return result
+                else:
+                    logger.error("pyannote.audio недоступен")
+            
+            # Если ни один провайдер не доступен
+            logger.error("Ни одна библиотека диаризации не доступна")
+            return None
                 
         except Exception as e:
-            logger.error(f"Ошибка при диаризации: {e}")
+            logger.error(f"Ошибка при диаризации с {settings.diarization_provider}: {e}")
             
-            # Пробуем резервный вариант
-            if WHISPERX_AVAILABLE and PYANNOTE_AVAILABLE:
+            # Пробуем резервные варианты
+            fallback_providers = []
+            
+            if settings.diarization_provider != "whisperx" and WHISPERX_AVAILABLE:
+                fallback_providers.append(("whisperx", self.diarize_with_whisperx))
+            
+            if settings.diarization_provider != "pyannote" and PYANNOTE_AVAILABLE:
+                fallback_providers.append(("pyannote", self.diarize_with_pyannote))
+            
+            if settings.diarization_provider != "picovoice" and PICOVOICE_AVAILABLE:
+                fallback_providers.append(("picovoice", self.diarize_with_picovoice))
+            
+            for provider_name, provider_func in fallback_providers:
                 try:
-                    logger.info("Пробуем резервный вариант диаризации...")
-                    result = self.diarize_with_pyannote(file_path)
+                    logger.info(f"Пробуем резервный вариант диаризации: {provider_name}")
+                    if provider_name == "picovoice":
+                        result = await provider_func(file_path, progress_callback)
+                    else:
+                        result = provider_func(file_path, language, progress_callback)
                     return result
                 except Exception as e2:
-                    logger.error(f"Резервный вариант также не сработал: {e2}")
+                    logger.error(f"Резервный вариант {provider_name} также не сработал: {e2}")
             
             return None
             
@@ -502,3 +653,8 @@ class DiarizationService:
 
 # Глобальный экземпляр сервиса
 diarization_service = DiarizationService()
+
+# Глобальная функция для удобства использования
+async def diarize_file(file_path: str, language: str = "ru", progress_callback=None):
+    """Глобальная функция для диаризации файла"""
+    return await diarization_service.diarize_file(file_path, language, progress_callback)
