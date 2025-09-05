@@ -1,5 +1,5 @@
 """
-Бот с улучшенной системой надежности и обработки ошибок
+Бот с улучшенной системой надежности и защитой от OOM
 """
 
 import asyncio
@@ -20,6 +20,15 @@ from reliability.middleware import (
     health_check_middleware
 )
 
+# Импорты OOM защиты
+try:
+    from src.performance.oom_protection import get_oom_protection
+    from src.performance.memory_management import memory_optimizer
+    OOM_PROTECTION_AVAILABLE = True
+except ImportError:
+    OOM_PROTECTION_AVAILABLE = False
+    logger.warning("OOM Protection недоступна")
+
 # Импорты новой архитектуры
 from services import (
     UserService, TemplateService, FileService, 
@@ -34,11 +43,18 @@ from exceptions import BotException
 
 
 class EnhancedTelegramBot:
-    """Бот с улучшенной системой надежности"""
+    """Бот с улучшенной системой надежности и защитой от OOM"""
     
     def __init__(self):
         self.bot = Bot(token=settings.telegram_token)
         self.dp = Dispatcher(storage=MemoryStorage())
+        
+        # OOM защита
+        if OOM_PROTECTION_AVAILABLE:
+            self.oom_protection = get_oom_protection()
+            self._setup_oom_callbacks()
+        else:
+            self.oom_protection = None
         
         # Инициализация сервисов
         self.user_service = UserService()
@@ -72,6 +88,54 @@ class EnhancedTelegramBot:
         self.dp.callback_query.middleware(error_handling_middleware)
         
         logger.info("Middleware для надежности настроены")
+    
+    def _setup_oom_callbacks(self):
+        """Настройка callbacks для OOM защиты"""
+        if not self.oom_protection:
+            return
+        
+        # Callback для предупреждений о памяти
+        def memory_warning_callback():
+            logger.warning("⚠️ Высокое использование памяти - запуск мягкой очистки")
+            # Можно добавить уведомление администратора
+        
+        # Callback для критических ситуаций
+        def memory_critical_callback():
+            logger.critical("🚨 Критическое использование памяти - запуск агрессивной очистки")
+            # Можно добавить экстренное уведомление
+        
+        # Callback для очистки ресурсов бота
+        def bot_cleanup_callback(cleanup_type: str):
+            logger.info(f"🧹 Очистка ресурсов бота: {cleanup_type}")
+            
+            if cleanup_type == "aggressive":
+                # Очищаем кэш сервисов
+                if hasattr(self.processing_service, 'optimize_cache'):
+                    asyncio.create_task(self.processing_service.optimize_cache())
+                
+                # Очищаем временные файлы
+                self._cleanup_temp_files()
+        
+        # Регистрируем callbacks
+        self.oom_protection.add_warning_callback(memory_warning_callback)
+        self.oom_protection.add_critical_callback(memory_critical_callback)
+        self.oom_protection.add_cleanup_callback(bot_cleanup_callback)
+        
+        logger.info("OOM Protection callbacks настроены")
+    
+    def _cleanup_temp_files(self):
+        """Очистка временных файлов"""
+        try:
+            import shutil
+            temp_dir = "temp"
+            if os.path.exists(temp_dir):
+                for filename in os.listdir(temp_dir):
+                    file_path = os.path.join(temp_dir, filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                        logger.debug(f"Удален временный файл: {filename}")
+        except Exception as e:
+            logger.error(f"Ошибка при очистке временных файлов: {e}")
     
     def _setup_handlers(self):
         """Настройка всех обработчиков"""
@@ -155,7 +219,12 @@ class EnhancedTelegramBot:
             await health_checker.start_monitoring()
             logger.info("Мониторинг здоровья запущен")
             
-            # 5. Проверяем доступность компонентов
+            # 5. Запускаем мониторинг памяти
+            if OOM_PROTECTION_AVAILABLE:
+                memory_optimizer.start_optimization()
+                logger.info("Мониторинг памяти запущен")
+            
+            # 6. Проверяем доступность компонентов
             await self._perform_startup_checks()
             
             # 6. Запускаем бота

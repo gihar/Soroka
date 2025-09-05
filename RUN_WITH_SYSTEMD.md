@@ -22,6 +22,13 @@ TimeoutStopSec=20
 # WatchdogSec=30s
 # Type=notify
 
+# Защита от OOM Killer - ограничения ресурсов:
+MemoryMax=2G
+MemoryHigh=1.5G
+MemorySwapMax=1G
+# Ограничение CPU (опционально):
+# CPUQuota=200%
+
 # Логи в journald:
 StandardOutput=journal
 StandardError=journal

@@ -1,5 +1,5 @@
 """
-Обновленный сервис транскрипции
+Обновленный сервис транскрипции с защитой от OOM
 """
 
 import os
@@ -7,12 +7,14 @@ import tempfile
 import whisper
 import httpx
 import shutil
+import psutil
 from typing import Optional, Dict, Any
 from pathlib import Path
 from loguru import logger
 
 from src.models.processing import TranscriptionResult, DiarizationData
 from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError
+from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
 
 try:
@@ -31,9 +33,9 @@ except ImportError:
 
 
 class TranscriptionService:
-    """Обновленный сервис транскрипции"""
+    """Обновленный сервис транскрипции с защитой от OOM"""
     
-    # Максимальный размер файла для Groq API (100 MB)
+    # Максимальный размер файла для Groq API (25 MB)
     GROQ_MAX_FILE_SIZE = 25 * 1024 * 1024
     
     def __init__(self):
@@ -42,6 +44,9 @@ class TranscriptionService:
         self.temp_dir = Path(settings.temp_dir)
         self.temp_dir.mkdir(exist_ok=True)
         
+        # OOM защита
+        self.oom_protection = get_oom_protection()
+        
         # Инициализация Groq клиента
         if GROQ_AVAILABLE and settings.groq_api_key:
             try:
@@ -49,11 +54,21 @@ class TranscriptionService:
                 logger.info("Groq клиент инициализирован")
             except Exception as e:
                 logger.warning(f"Ошибка при инициализации Groq клиента: {e}")
+        
+        # Настраиваем callbacks для очистки памяти
+        self.oom_protection.add_cleanup_callback(self._cleanup_models)
     
+    @oom_protected(estimated_memory_mb=200)  # Whisper модели занимают ~200MB
     def _load_whisper_model(self, model_size: str = "base"):
-        """Загрузить модель Whisper"""
+        """Загрузить модель Whisper с защитой от OOM"""
         if self.whisper_model is None:
             logger.info(f"Загрузка модели Whisper: {model_size}")
+            
+            # Проверяем доступную память перед загрузкой
+            memory_status = self.oom_protection.get_memory_status()
+            if memory_status["system"]["percent"] > 80:
+                logger.warning(f"Высокое использование памяти при загрузке модели: {memory_status['system']['percent']:.1f}%")
+            
             try:
                 self.whisper_model = whisper.load_model(model_size)
                 logger.info("Модель Whisper загружена")
@@ -61,18 +76,35 @@ class TranscriptionService:
                 logger.error(f"Ошибка при загрузке модели Whisper: {e}")
                 raise TranscriptionError(f"Не удалось загрузить модель Whisper: {e}")
     
+    def _cleanup_models(self, cleanup_type: str = "soft"):
+        """Очистка моделей для освобождения памяти"""
+        if cleanup_type == "aggressive" and self.whisper_model is not None:
+            logger.info("Принудительная очистка модели Whisper")
+            self.whisper_model = None
+            import gc
+            gc.collect()
+    
     def _check_file_size_for_groq(self, file_path: str) -> bool:
         """Проверить, подходит ли файл для облачной транскрипции по размеру"""
         try:
             file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            # Проверяем лимит Groq API
             is_suitable = file_size <= self.GROQ_MAX_FILE_SIZE
             
             if not is_suitable:
-                file_size_mb = file_size / (1024 * 1024)
                 max_size_mb = self.GROQ_MAX_FILE_SIZE / (1024 * 1024)
                 logger.warning(f"Файл слишком большой для облачной транскрипции: {file_size_mb:.1f}MB (максимум: {max_size_mb}MB)")
+                return False
             
-            return is_suitable
+            # Дополнительная проверка с учетом доступной памяти
+            can_process, reason = self.oom_protection.can_process_file(file_size_mb)
+            if not can_process:
+                logger.warning(f"Файл не может быть обработан из-за нехватки памяти: {reason}")
+                return False
+            
+            return True
         except Exception as e:
             logger.error(f"Ошибка при проверке размера файла {file_path}: {e}")
             return False
@@ -246,7 +278,24 @@ class TranscriptionService:
     
     async def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
                                    progress_callback=None) -> TranscriptionResult:
-        """Транскрибировать файл с диаризацией"""
+        """Транскрибировать файл с диаризацией и защитой от OOM"""
+        
+        # Проверяем размер файла и доступную память
+        try:
+            file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            # Проверяем, можно ли обработать файл
+            can_process, reason = self.oom_protection.can_process_file(file_size_mb)
+            if not can_process:
+                raise TranscriptionError(f"Файл не может быть обработан: {reason}", file_path)
+            
+            logger.info(f"Обработка файла {file_path} размером {file_size_mb:.1f}MB")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при проверке файла {file_path}: {e}")
+            raise TranscriptionError(f"Не удалось проверить файл: {e}", file_path)
+        
         # Для облачной транскрипции ffmpeg не нужен
         if settings.transcription_mode == "local" and not self._check_ffmpeg():
             raise TranscriptionError(

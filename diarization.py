@@ -1,13 +1,22 @@
 """
-Модуль диаризации аудио и видео файлов
+Модуль диаризации аудио и видео файлов с защитой от OOM
 """
 
 import os
 import warnings
+import gc
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 from loguru import logger
 from config import settings
+
+# Импортируем OOM защиту
+try:
+    from src.performance.oom_protection import oom_protected, get_oom_protection
+    OOM_PROTECTION_AVAILABLE = True
+except ImportError:
+    OOM_PROTECTION_AVAILABLE = False
+    logger.warning("OOM Protection недоступна")
 
 # Устанавливаем переменные окружения для подавления предупреждений
 os.environ["PYTORCH_LIGHTNING_UPGRADE"] = "0"
@@ -121,7 +130,7 @@ class DiarizationResult:
 
 
 class DiarizationService:
-    """Сервис для диаризации аудио и видео"""
+    """Сервис для диаризации аудио и видео с защитой от OOM"""
     
     def __init__(self):
         self.whisperx_model = None
@@ -130,7 +139,34 @@ class DiarizationService:
         self.diarize_model = None
         self.pyannote_pipeline = None
         self.device = self._get_device()
+        
+        # OOM защита
+        if OOM_PROTECTION_AVAILABLE:
+            self.oom_protection = get_oom_protection()
+            self.oom_protection.add_cleanup_callback(self._cleanup_models)
+        else:
+            self.oom_protection = None
+        
         logger.info(f"DiarizationService инициализирован с устройством: {self.device}")
+    
+    def _cleanup_models(self, cleanup_type: str = "soft"):
+        """Очистка моделей для освобождения памяти"""
+        if cleanup_type == "aggressive":
+            logger.info("Принудительная очистка моделей диаризации")
+            
+            # Очищаем все модели
+            self.whisperx_model = None
+            self.align_model = None
+            self.align_metadata = None
+            self.diarize_model = None
+            self.pyannote_pipeline = None
+            
+            # Принудительная сборка мусора
+            gc.collect()
+            
+            # Очищаем кэш CUDA если доступен
+            if WHISPERX_AVAILABLE and torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
     def _get_device(self) -> str:
         """Определить устройство для вычислений"""
