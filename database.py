@@ -272,6 +272,16 @@ class Database:
             await db.commit()
             return True
 
+    async def reset_user_default_template(self, telegram_id: int) -> bool:
+        """Сбросить шаблон по умолчанию для пользователя (установить NULL)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                UPDATE users SET default_template_id = NULL, updated_at = CURRENT_TIMESTAMP 
+                WHERE telegram_id = ?
+            """, (telegram_id,))
+            await db.commit()
+            return cursor.rowcount > 0
+
 
 # Глобальный экземпляр базы данных
 db = Database()

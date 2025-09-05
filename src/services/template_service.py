@@ -46,6 +46,17 @@ class TemplateService:
         except Exception as e:
             logger.error(f"Ошибка при установке шаблона по умолчанию для пользователя {telegram_id}: {e}")
             raise
+
+    async def reset_user_default_template(self, telegram_id: int) -> bool:
+        """Сбросить шаблон по умолчанию для пользователя"""
+        try:
+            result = await self.db.reset_user_default_template(telegram_id)
+            if result:
+                logger.info(f"Сброшен шаблон по умолчанию для пользователя {telegram_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при сбросе шаблона по умолчанию для пользователя {telegram_id}: {e}")
+            raise
     
     async def get_template_by_id(self, template_id: int) -> Template:
         """Получить шаблон по ID"""

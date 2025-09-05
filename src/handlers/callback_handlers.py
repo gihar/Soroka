@@ -505,29 +505,26 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
     async def reset_default_template_callback(callback: CallbackQuery):
         """Обработчик сброса шаблона по умолчанию"""
         try:
-            # Сбрасываем шаблон по умолчанию (устанавливаем NULL)
-            import aiosqlite
-            async with aiosqlite.connect(db.db_path) as conn:
-                await conn.execute("""
-                    UPDATE users SET default_template_id = NULL, updated_at = CURRENT_TIMESTAMP 
-                    WHERE telegram_id = ?
-                """, (callback.from_user.id,))
-                await conn.commit()
+            # Сбрасываем шаблон по умолчанию через template_service
+            success = await template_service.reset_user_default_template(callback.from_user.id)
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-            
-            await callback.message.edit_text(
-                "🔄 **Шаблон по умолчанию сброшен**\n\n"
-                "Теперь бот будет спрашивать выбор шаблона при каждой обработке файла.\n\n"
-                "Вы можете установить новый шаблон по умолчанию в любое время.",
-                reply_markup=keyboard
-            )
-            await callback.answer()
+            if success:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="⬅️ Назад к настройкам",
+                        callback_data="back_to_settings"
+                    )]
+                ])
+                
+                await callback.message.edit_text(
+                    "🔄 **Шаблон по умолчанию сброшен**\n\n"
+                    "Теперь бот будет спрашивать выбор шаблона при каждой обработке файла.\n\n"
+                    "Вы можете установить новый шаблон по умолчанию в любое время.",
+                    reply_markup=keyboard
+                )
+                await callback.answer()
+            else:
+                await callback.answer("❌ Не удалось сбросить шаблон по умолчанию")
             
         except Exception as e:
             logger.error(f"Ошибка в reset_default_template_callback: {e}")
