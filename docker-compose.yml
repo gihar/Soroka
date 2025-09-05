@@ -3,6 +3,8 @@ services:
     build: .
     container_name: soroka-bot
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       # Основные настройки
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
