@@ -34,7 +34,7 @@ class ProgressTracker:
         self.current_stage: Optional[str] = None
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
-        self.update_interval = 10  # Увеличили интервал до 10 секунд
+        self.update_interval = 5  # Интервал обновления 5 секунд
         self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
         self._spinner_index = 0
         
