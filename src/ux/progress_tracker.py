@@ -34,7 +34,9 @@ class ProgressTracker:
         self.current_stage: Optional[str] = None
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
-        self.update_interval = 5  # Увеличили интервал до 5 секунд
+        self.update_interval = 10  # Увеличили интервал до 10 секунд
+        self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
+        self._spinner_index = 0
         
     def add_stage(self, stage_id: str, name: str, emoji: str, description: str):
         """Добавить этап обработки"""
@@ -177,9 +179,8 @@ class ProgressTracker:
             if stage.is_completed:
                 text += f"✅ {stage.emoji} {stage.name}\n"
             elif stage.is_active:
-                # Упрощенный прогресс-бар
-                progress_bar = "▰▰▰▰▰▰▰▰▰▰"  # Статичный прогресс-бар
-                text += f"🔄 {stage.emoji} {stage.name} {progress_bar}\n"
+                spinner = self._spinner_frames[self._spinner_index]
+                text += f"🔄 {stage.emoji} {stage.name} {spinner}\n"
                 text += f"   _{stage.description}_\n"
             else:
                 text += f"⏳ {stage.emoji} {stage.name}\n"
@@ -197,6 +198,7 @@ class ProgressTracker:
             while self.current_stage:
                 await asyncio.sleep(self.update_interval)
                 if self.current_stage:  # Проверяем еще раз после сна
+                    self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
                     await self.update_display()
         except asyncio.CancelledError:
             pass
