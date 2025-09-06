@@ -216,6 +216,58 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             logger.error(f"Ошибка в export_stats_handler: {e}")
             await message.answer(f"❌ Ошибка при экспорте: {e}")
     
+    @router.message(Command("transcription_mode"))
+    async def transcription_mode_handler(message: Message):
+        """Обработчик команды /transcription_mode - переключение режима транскрипции"""
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+        
+        try:
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+            
+            # Создаем клавиатуру для выбора режима
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'local' else ''}🏠 Локальная (Whisper)",
+                    callback_data="set_transcription_mode_local"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'cloud' else ''}☁️ Облачная (Groq)",
+                    callback_data="set_transcription_mode_cloud"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'hybrid' else ''}🔄 Гибридная (Groq + диаризация)",
+                    callback_data="set_transcription_mode_hybrid"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'speechmatics' else ''}🎯 Speechmatics",
+                    callback_data="set_transcription_mode_speechmatics"
+                )]
+            ])
+            
+            current_mode = settings.transcription_mode
+            mode_descriptions = {
+                "local": "Локальная транскрипция через Whisper",
+                "cloud": "Облачная транскрипция через Groq API",
+                "hybrid": "Гибридная: облачная транскрипция + локальная диаризация",
+                "speechmatics": "Транскрипция и диаризация через Speechmatics API"
+            }
+            
+            current_description = mode_descriptions.get(current_mode, "Неизвестный режим")
+            
+            await message.answer(
+                f"🎙️ **Текущий режим транскрипции:** {current_mode}\n"
+                f"📝 **Описание:** {current_description}\n\n"
+                f"Выберите новый режим:",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка в transcription_mode_handler: {e}")
+            await message.answer(f"❌ Ошибка при получении режимов транскрипции: {e}")
+    
     @router.message(Command("admin_help"))
     async def admin_help_handler(message: Message):
         """Обработчик команды /admin_help - справка по административным командам"""
@@ -238,6 +290,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
 **Управление:**
 • `/reset_reliability` - сброс компонентов надежности
+• `/transcription_mode` - переключение режима транскрипции
 
 **Справка:**
 • `/admin_help` - эта справка

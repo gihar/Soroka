@@ -41,9 +41,15 @@ class Settings(BaseSettings):
     ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
     
     # Транскрипция
-    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако) или hybrid (гибридный)")
+    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако), hybrid (гибридный) или speechmatics")
     groq_api_key: Optional[str] = Field(None, description="API ключ Groq для облачной транскрипции")
     groq_model: str = Field("whisper-large-v3-turbo", description="Модель Groq для транскрипции")
+    
+    # Speechmatics
+    speechmatics_api_key: Optional[str] = Field(None, description="API ключ Speechmatics для транскрипции и диаризации")
+    speechmatics_language: str = Field("ru", description="Язык для Speechmatics API")
+    speechmatics_domain: Optional[str] = Field(None, description="Домен для Speechmatics (finance, medical и т.д.)")
+    speechmatics_operating_point: str = Field("standard", description="Операционная точка Speechmatics: standard или enhanced")
     
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")

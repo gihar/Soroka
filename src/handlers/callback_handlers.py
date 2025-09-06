@@ -127,6 +127,36 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в select_llm_callback: {e}")
             await callback.answer("❌ Произошла ошибка при выборе LLM")
     
+    @router.callback_query(F.data.startswith("set_transcription_mode_"))
+    async def set_transcription_mode_callback(callback: CallbackQuery):
+        """Обработчик переключения режима транскрипции"""
+        try:
+            mode = callback.data.replace("set_transcription_mode_", "")
+            
+            # Обновляем настройки
+            from config import settings
+            settings.transcription_mode = mode
+            
+            mode_names = {
+                "local": "Локальная (Whisper)",
+                "cloud": "Облачная (Groq)",
+                "hybrid": "Гибридная (Groq + диаризация)",
+                "speechmatics": "Speechmatics"
+            }
+            
+            mode_name = mode_names.get(mode, mode)
+            
+            await callback.message.edit_text(
+                f"✅ **Режим транскрипции изменен на:** {mode_name}\n\n"
+                f"Новый режим будет использоваться для всех последующих обработок файлов.",
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в set_transcription_mode_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при изменении режима транскрипции")
+    
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
         """Обработчик просмотра шаблона"""

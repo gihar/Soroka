@@ -48,6 +48,15 @@ class GroqAPIError(CloudTranscriptionError):
         self.details.update({"api_error": api_error})
 
 
+class SpeechmaticsAPIError(CloudTranscriptionError):
+    """Ошибка Speechmatics API"""
+    
+    def __init__(self, message: str, file_path: str = None, api_error: str = None):
+        super().__init__(message, file_path, "speechmatics")
+        self.error_code = "SPEECHMATICS_API_ERROR"
+        self.details.update({"api_error": api_error})
+
+
 class LLMError(BotException):
     """Ошибка работы с LLM"""
     

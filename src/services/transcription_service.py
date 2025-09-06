@@ -13,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.models.processing import TranscriptionResult, DiarizationData
-from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError
+from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError, SpeechmaticsAPIError
 from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
 
@@ -30,6 +30,13 @@ try:
 except ImportError:
     DIARIZATION_AVAILABLE = False
     logger.warning("Модуль диаризации недоступен")
+
+try:
+    from .speechmatics_service import speechmatics_service
+    SPEECHMATICS_AVAILABLE = True
+except ImportError:
+    SPEECHMATICS_AVAILABLE = False
+    logger.warning("Speechmatics сервис недоступен")
 
 
 class TranscriptionService:
@@ -54,6 +61,12 @@ class TranscriptionService:
                 logger.info("Groq клиент инициализирован")
             except Exception as e:
                 logger.warning(f"Ошибка при инициализации Groq клиента: {e}")
+        
+        # Инициализация Speechmatics сервиса
+        if SPEECHMATICS_AVAILABLE and speechmatics_service.is_available():
+            logger.info("Speechmatics сервис доступен")
+        else:
+            logger.warning("Speechmatics сервис недоступен")
         
         # Настраиваем callbacks для очистки памяти
         self.oom_protection.add_cleanup_callback(self._cleanup_models)
@@ -276,6 +289,45 @@ class TranscriptionService:
             else:
                 raise CloudTranscriptionError(str(e), file_path)
     
+    async def _transcribe_with_speechmatics(self, file_path: str, language: str = "ru", 
+                                          enable_diarization: bool = False,
+                                          progress_callback=None) -> tuple[str, dict]:
+        """Транскрипция через Speechmatics API"""
+        if not SPEECHMATICS_AVAILABLE or not speechmatics_service.is_available():
+            raise CloudTranscriptionError("Speechmatics сервис недоступен", file_path)
+        
+        if not os.path.exists(file_path):
+            raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
+        
+        try:
+            if progress_callback:
+                progress_callback(20, "Подготовка к транскрипции через Speechmatics...")
+            
+            logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
+            
+            # Выполняем транскрипцию через Speechmatics
+            result = await speechmatics_service.transcribe_file(
+                file_path=file_path,
+                language=language,
+                enable_diarization=enable_diarization,
+                progress_callback=progress_callback
+            )
+            
+            # Возвращаем текст и информацию о сжатии (Speechmatics не сжимает файлы)
+            compression_info = {
+                "compressed": False,
+                "original_size_mb": 0,
+                "compressed_size_mb": 0,
+                "compression_ratio": 0,
+                "compression_saved_mb": 0
+            }
+            
+            return result.transcription, compression_info
+            
+        except Exception as e:
+            logger.error(f"Ошибка при транскрипции через Speechmatics {file_path}: {e}")
+            raise CloudTranscriptionError(str(e), file_path)
+    
     async def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
                                    progress_callback=None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией и защитой от OOM"""
@@ -370,7 +422,54 @@ class TranscriptionService:
                     logger.warning(f"Ошибка при диаризации, переходим к обычной транскрипции: {e}")
             
             # Выбираем метод транскрипции в зависимости от настроек
-            if settings.transcription_mode == "cloud" and self.groq_client:
+            if settings.transcription_mode == "speechmatics" and SPEECHMATICS_AVAILABLE and speechmatics_service.is_available():
+                # Транскрипция через Speechmatics API
+                try:
+                    if progress_callback:
+                        progress_callback(20, "Подготовка к транскрипции через Speechmatics...")
+                    
+                    logger.info("Выполнение транскрипции через Speechmatics...")
+                    
+                    # Выполняем транскрипцию через Speechmatics
+                    result = await speechmatics_service.transcribe_file(
+                        file_path=file_path,
+                        language=language,
+                        enable_diarization=settings.enable_diarization,
+                        progress_callback=progress_callback
+                    )
+                    
+                    if progress_callback:
+                        progress_callback(100, "Транскрипция через Speechmatics завершена!")
+                    
+                    logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
+                    return result
+                    
+                except (CloudTranscriptionError, SpeechmaticsAPIError) as e:
+                    # При ошибке Speechmatics переключаемся на локальную транскрипцию
+                    logger.warning(f"Ошибка транскрипции через Speechmatics, переключаемся на локальную: {e}")
+                    if progress_callback:
+                        progress_callback(20, "Speechmatics недоступен, используем локальную транскрипцию...")
+                    
+                    self._load_whisper_model()
+                    
+                    if progress_callback:
+                        progress_callback(40, "Выполнение локальной транскрипции...")
+                    
+                    whisper_result = self._transcribe_with_progress(
+                        file_path, language, progress_callback
+                    )
+                    
+                    if progress_callback:
+                        progress_callback(90, "Обработка результатов...")
+                    
+                    transcription = whisper_result["text"].strip()
+                    
+                    if progress_callback:
+                        progress_callback(100, "Локальная транскрипция завершена!")
+                    
+                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
+                    
+            elif settings.transcription_mode == "cloud" and self.groq_client:
                 # Пробуем облачную транскрипцию с автоматическим fallback
                 try:
                     # Облачная транскрипция через Groq (проверка размера происходит внутри)

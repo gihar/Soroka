@@ -76,3 +76,8 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+
+# Documentation temporary files
+docs/*.tmp
+docs/*.temp
+docs/*.bak

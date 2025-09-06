@@ -63,12 +63,18 @@ SSL_VERIFY=false
 # ТРАНСКРИПЦИЯ
 # =============================================================================
 
-# Режим транскрипции: local, cloud, hybrid
+# Режим транскрипции: local, cloud, hybrid, speechmatics
 TRANSCRIPTION_MODE=hybrid
 
 # Groq API для облачной транскрипции
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=whisper-large-v3-turbo
+
+# Speechmatics API для профессиональной транскрипции
+SPEECHMATICS_API_KEY=your_speechmatics_api_key_here
+SPEECHMATICS_LANGUAGE=ru
+SPEECHMATICS_DOMAIN=
+SPEECHMATICS_OPERATING_POINT=standard
 
 # =============================================================================
 # ДИАРИЗАЦИЯ (РАЗДЕЛЕНИЕ ГОВОРЯЩИХ)
@@ -135,7 +141,7 @@ MAX_QUEUE_SIZE=10
 # ПРОДАКШЕН
 # LOG_LEVEL=WARNING
 # ENABLE_DIARIZATION=true
-# TRANSCRIPTION_MODE=hybrid
+# TRANSCRIPTION_MODE=speechmatics
 # SSL_VERIFY=true
 
 # ТЕСТИРОВАНИЕ
