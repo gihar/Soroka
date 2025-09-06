@@ -155,6 +155,43 @@ class Database:
             """, (name, content, description, created_by, is_default))
             await db.commit()
             return cursor.lastrowid
+
+    async def delete_template(self, telegram_id: int, template_id: int) -> bool:
+        """Удалить шаблон, если он принадлежит пользователю и не является базовым"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            # Получаем ID пользователя
+            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+            user_row = await cursor.fetchone()
+            if not user_row:
+                return False
+            user_id = user_row["id"]
+
+            # Проверяем, что шаблон существует, не базовый и принадлежит пользователю
+            cursor = await db.execute(
+                "SELECT id, is_default, created_by FROM templates WHERE id = ?",
+                (template_id,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            if row["is_default"]:
+                return False
+            # Разрешим удаление, если шаблон привязан к текущему пользователю
+            # с учетом старых записей, где created_by мог содержать telegram_id
+            if row["created_by"] not in (user_id, telegram_id):
+                return False
+
+            # Сбрасываем default_template_id у пользователей, где он ссылается на удаляемый шаблон
+            await db.execute(
+                "UPDATE users SET default_template_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE default_template_id = ?",
+                (template_id,)
+            )
+
+            # Удаляем шаблон
+            cursor = await db.execute("DELETE FROM templates WHERE id = ?", (template_id,))
+            await db.commit()
+            return cursor.rowcount > 0
     
     async def save_processing_result(self, user_id: int, file_name: str, template_id: int,
                                    llm_provider: str, transcription_text: str, result_text: str):

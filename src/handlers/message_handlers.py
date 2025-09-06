@@ -5,6 +5,7 @@
 import re
 import os
 from aiogram import Router, F
+from aiogram.filters import StateFilter
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from loguru import logger
@@ -83,7 +84,8 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             logger.error(f"Ошибка в media_handler: {e}")
             await message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
     
-    @router.message(F.content_type == 'text')
+    # Обрабатываем текст только когда пользователь НЕ в FSM-состоянии
+    @router.message(StateFilter(None), F.content_type == 'text')
     async def text_handler(message: Message, state: FSMContext):
         """Обработчик текстовых сообщений (для URL)"""
         try:

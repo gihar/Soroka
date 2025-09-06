@@ -9,6 +9,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 )
 from services import TemplateService
+from config import settings
 from aiogram.filters import Command
 from loguru import logger
 
@@ -127,16 +128,6 @@ class QuickActionsUI:
             ],
             [
                 InlineKeyboardButton(
-                    text="👥 Диаризация",
-                    callback_data="settings_diarization"
-                ),
-                InlineKeyboardButton(
-                    text="🎵 Качество аудио",
-                    callback_data="settings_audio_quality"
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     text="📝 Шаблон по умолчанию",
                     callback_data="settings_default_template"
                 )
@@ -244,6 +235,7 @@ def setup_quick_actions_handlers() -> Router:
     @router.message(F.text == "📤 Загрузить файл")
     async def upload_file_button_handler(message: Message):
         """Обработчик кнопки загрузки файла"""
+        max_mb = settings.telegram_max_file_size // (1024 * 1024)
         await message.answer(
             "📤 **Загрузка файла**\n\n"
             "Отправьте аудио или видео файл, либо ссылку на файл любым способом:\n"
@@ -251,7 +243,8 @@ def setup_quick_actions_handlers() -> Router:
             "• 🎬 Как видео сообщение\n"
             "• 📎 Как документ\n"
             "• 🎤 Голосовое сообщение\n\n"
-            "💡 Максимальный размер: 20MB"
+            f"💡 Максимальный размер: {max_mb}MB.\n"
+            "Если файл превышает максимальный размер, отправьте, пожалуйста, ссылку на него (например, Google Drive или Яндекс.Диск) с доступом на скачивание."
         )
     
     @router.message(F.text == "📝 Мои шаблоны")

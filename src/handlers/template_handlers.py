@@ -16,7 +16,6 @@ from exceptions import TemplateValidationError
 class TemplateStates(StatesGroup):
     """Состояния для создания шаблонов"""
     waiting_for_name = State()
-    waiting_for_description = State()
     waiting_for_content = State()
     preview_template = State()
 
@@ -70,34 +69,9 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
                 return
             
             await state.update_data(template_name=name)
-            await state.set_state(TemplateStates.waiting_for_description)
-            
-            await message.answer(
-                f"✅ Название сохранено: **{name}**\n\n"
-                "Теперь введите описание шаблона (или отправьте \"-\" чтобы пропустить):",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Ошибка в template_name_handler: {e}")
-            await message.answer("❌ Произошла ошибка. Попробуйте еще раз.")
-    
-    @router.message(TemplateStates.waiting_for_description)
-    async def template_description_handler(message: Message, state: FSMContext):
-        """Обработчик ввода описания шаблона"""
-        try:
-            description = message.text.strip()
-            
-            if description == "-":
-                description = None
-            elif len(description) > 500:
-                await message.answer("❌ Описание слишком длинное (максимум 500 символов). Попробуйте еще раз:")
-                return
-            
-            await state.update_data(template_description=description)
+            # Упрощенный сценарий: сразу переходим к содержимому шаблона
             await state.set_state(TemplateStates.waiting_for_content)
-            
-            desc_text = f"**{description}**" if description else "*Без описания*"
-            
+
             example_template = """# Пример шаблона
 
 ## Информация о встрече
@@ -109,9 +83,9 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
 
 ## Следующие шаги
 {{ next_steps }}"""
-            
+
             await message.answer(
-                f"✅ Описание сохранено: {desc_text}\n\n"
+                f"✅ Название сохранено: **{name}**\n\n"
                 "Теперь введите содержимое шаблона в формате Markdown.\n\n"
                 "**Доступные переменные:**\n"
                 "• `{{ participants }}` - участники встречи\n"
@@ -136,8 +110,10 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
                 parse_mode="Markdown"
             )
         except Exception as e:
-            logger.error(f"Ошибка в template_description_handler: {e}")
+            logger.error(f"Ошибка в template_name_handler: {e}")
             await message.answer("❌ Произошла ошибка. Попробуйте еще раз.")
+    
+    # Шаг описания удалён в упрощённом сценарии
     
     @router.message(TemplateStates.waiting_for_content)
     async def template_content_handler(message: Message, state: FSMContext):
@@ -173,11 +149,21 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         try:
             data = await state.get_data()
             
+            # Привязываем шаблон к внутреннему ID пользователя (а не Telegram ID)
+            from services import UserService
+            user_service = UserService()
+            user = await user_service.get_or_create_user(
+                telegram_id=callback.from_user.id,
+                username=callback.from_user.username,
+                first_name=callback.from_user.first_name,
+                last_name=callback.from_user.last_name
+            )
+
             template_create = TemplateCreate(
                 name=data['template_name'],
                 content=data['template_content'],
                 description=data.get('template_description'),
-                created_by=callback.from_user.id
+                created_by=user.id
             )
             
             created_template = await template_service.create_template(template_create)

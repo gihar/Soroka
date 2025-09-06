@@ -97,6 +97,17 @@ class TemplateService:
         except Exception as e:
             logger.error(f"Ошибка при создании шаблона {template_data.name}: {e}")
             raise
+
+    async def delete_template(self, telegram_id: int, template_id: int) -> bool:
+        """Удалить шаблон пользователя (если не базовый)"""
+        try:
+            result = await self.db.delete_template(telegram_id, template_id)
+            if result:
+                logger.info(f"Пользователь {telegram_id} удалил шаблон {template_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка при удалении шаблона {template_id}: {e}")
+            return False
     
     def validate_template_content(self, content: str) -> None:
         """Валидировать содержимое шаблона"""

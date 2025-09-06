@@ -163,6 +163,16 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         try:
             template_id = int(callback.data.replace("view_template_", ""))
             template = await template_service.get_template_by_id(template_id)
+            # Проверяем права удаления: владелец и не базовый шаблон
+            try:
+                user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+                owned_ids = set()
+                if user:
+                    owned_ids.add(user.id)
+                owned_ids.add(callback.from_user.id)  # поддержка legacy-шаблонов
+                can_delete = (not template.is_default) and (template.created_by in owned_ids)
+            except Exception:
+                can_delete = False
             
             text = f"📝 **{template.name}**\n\n"
             if template.description:
@@ -170,12 +180,18 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             text += f"```\n{template.content}\n```"
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="🔙 Назад к списку шаблонов",
-                    callback_data="back_to_templates"
-                )]
-            ])
+            # Кнопки: удалить показываем только владельцу
+            rows = []
+            if can_delete:
+                rows.append([InlineKeyboardButton(
+                    text="🗑 Удалить шаблон",
+                    callback_data=f"delete_template_{template.id}"
+                )])
+            rows.append([InlineKeyboardButton(
+                text="🔙 Назад к списку шаблонов",
+                callback_data="back_to_templates"
+            )])
+            keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
             
             await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
             await callback.answer()
@@ -183,6 +199,57 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         except Exception as e:
             logger.error(f"Ошибка в view_template_callback: {e}")
             await callback.answer("❌ Произошла ошибка при просмотре шаблона")
+
+    @router.callback_query(F.data.startswith("delete_template_"))
+    async def delete_template_prompt_callback(callback: CallbackQuery):
+        """Показываем подтверждение удаления"""
+        try:
+            template_id = int(callback.data.replace("delete_template_", ""))
+            template = await template_service.get_template_by_id(template_id)
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
+                    InlineKeyboardButton(text="↩️ Отмена", callback_data=f"view_template_{template_id}")
+                ]
+            ])
+            await callback.message.edit_text(
+                f"Вы уверены, что хотите удалить шаблон:\n\n• {template.name}",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в delete_template_prompt_callback: {e}")
+            await callback.answer("❌ Не удалось показать подтверждение удаления")
+
+    @router.callback_query(F.data.startswith("confirm_delete_template_"))
+    async def confirm_delete_template_callback(callback: CallbackQuery):
+        """Удаление шаблона после подтверждения"""
+        try:
+            template_id = int(callback.data.replace("confirm_delete_template_", ""))
+            success = await template_service.delete_template(callback.from_user.id, template_id)
+
+            if success:
+                # Показываем обновленный список
+                templates = await template_service.get_all_templates()
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                        callback_data=f"view_template_{t.id}"
+                    )] for t in templates
+                ] + [[InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_template")]])
+
+                await callback.message.edit_text(
+                    "🗑 Шаблон удалён.\n\n📝 **Доступные шаблоны:**",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+                await callback.answer()
+            else:
+                await callback.answer("❌ Не удалось удалить шаблон")
+        except Exception as e:
+            logger.error(f"Ошибка в confirm_delete_template_callback: {e}")
+            await callback.answer("❌ Ошибка при удалении шаблона")
     
     @router.callback_query(F.data == "back_to_templates")
     async def back_to_templates_callback(callback: CallbackQuery):
@@ -249,75 +316,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в settings_preferred_llm_callback: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке настроек")
     
-    @router.callback_query(F.data == "settings_diarization")
-    async def settings_diarization_callback(callback: CallbackQuery):
-        """Обработчик настройки диаризации"""
-        try:
-            from config import settings
-            
-            # Создаем клавиатуру для настройки диаризации
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="✅ Включить диаризацию" if not settings.enable_diarization else "❌ Отключить диаризацию",
-                    callback_data="toggle_diarization"
-                )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-            
-            status_text = "✅ Включена" if settings.enable_diarization else "❌ Отключена"
-            provider_text = f"Провайдер: {settings.diarization_provider}" if settings.enable_diarization else ""
-            
-            await callback.message.edit_text(
-                "👥 **Настройки диаризации**\n\n"
-                f"**Статус:** {status_text}\n"
-                f"{provider_text}\n\n"
-                "Диаризация позволяет определять разных говорящих в аудио:",
-                reply_markup=keyboard
-            )
-            await callback.answer()
-            
-        except Exception as e:
-            logger.error(f"Ошибка в settings_diarization_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке настроек")
     
-    @router.callback_query(F.data == "settings_audio_quality")
-    async def settings_audio_quality_callback(callback: CallbackQuery):
-        """Обработчик настройки качества аудио"""
-        try:
-            from config import settings
-            
-            # Создаем клавиатуру для настройки качества аудио
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="🎵 Высокое качество (медленнее)",
-                    callback_data="set_audio_quality_high"
-                )],
-                [InlineKeyboardButton(
-                    text="⚡ Быстрая обработка (ниже качество)",
-                    callback_data="set_audio_quality_fast"
-                )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-            
-            await callback.message.edit_text(
-                "🎵 **Настройки качества аудио**\n\n"
-                "Выберите приоритет:\n\n"
-                "• **Высокое качество** - лучшая точность, медленнее\n"
-                "• **Быстрая обработка** - быстрее, качество ниже\n\n"
-                "Текущие настройки:",
-                reply_markup=keyboard
-            )
-            await callback.answer()
-            
-        except Exception as e:
-            logger.error(f"Ошибка в settings_audio_quality_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке настроек")
     
     @router.callback_query(F.data == "settings_default_template")
     async def settings_default_template_callback(callback: CallbackQuery):
@@ -424,33 +423,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в back_to_settings_callback: {e}")
             await callback.answer("❌ Произошла ошибка при возврате к настройкам")
     
-    @router.callback_query(F.data == "toggle_diarization")
-    async def toggle_diarization_callback(callback: CallbackQuery):
-        """Обработчик переключения диаризации"""
-        try:
-            from config import settings
-            
-            # TODO: Реализовать изменение настройки диаризации
-            # Пока просто показываем текущий статус
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-            
-            await callback.message.edit_text(
-                "👥 **Диаризация**\n\n"
-                "Функция изменения настроек диаризации находится в разработке.\n\n"
-                "Текущий статус: " + ("✅ Включена" if settings.enable_diarization else "❌ Отключена"),
-                reply_markup=keyboard
-            )
-            await callback.answer()
-            
-        except Exception as e:
-            logger.error(f"Ошибка в toggle_diarization_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при изменении настроек")
+    
     
     @router.callback_query(F.data.startswith("set_default_template_"))
     async def set_default_template_callback(callback: CallbackQuery):
@@ -501,35 +474,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в set_default_template_callback: {e}")
             await callback.answer("❌ Произошла ошибка при установке шаблона")
     
-    @router.callback_query(F.data.startswith("set_audio_quality_"))
-    async def set_audio_quality_callback(callback: CallbackQuery):
-        """Обработчик установки качества аудио"""
-        try:
-            quality = callback.data.replace("set_audio_quality_", "")
-            
-            # TODO: Реализовать изменение качества аудио
-            # await user_service.set_audio_quality(callback.from_user.id, quality)
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-            
-            quality_text = "высокое качество" if quality == "high" else "быстрая обработка"
-            
-            await callback.message.edit_text(
-                "🎵 **Качество аудио**\n\n"
-                "Функция изменения качества аудио находится в разработке.\n\n"
-                f"Выбрано: {quality_text}",
-                reply_markup=keyboard
-            )
-            await callback.answer()
-            
-        except Exception as e:
-            logger.error(f"Ошибка в set_audio_quality_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при изменении настроек")
+    
     
     @router.callback_query(F.data == "reset_default_template")
     async def reset_default_template_callback(callback: CallbackQuery):
