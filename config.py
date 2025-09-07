@@ -3,7 +3,7 @@
 """
 
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, validator
 from typing import Optional
 
 
@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     speechmatics_language: str = Field("ru", description="Язык для Speechmatics API")
     speechmatics_domain: Optional[str] = Field(None, description="Домен для Speechmatics (finance, medical и т.д.)")
     speechmatics_operating_point: str = Field("standard", description="Операционная точка Speechmatics: standard или enhanced")
+    
+    @validator('speechmatics_operating_point')
+    def validate_speechmatics_operating_point(cls, v):
+        """Валидация operating_point для Speechmatics"""
+        valid_points = ['standard', 'enhanced']
+        if v not in valid_points:
+            raise ValueError(f"speechmatics_operating_point должен быть одним из: {', '.join(valid_points)}")
+        return v
     
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")

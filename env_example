@@ -74,6 +74,7 @@ GROQ_MODEL=whisper-large-v3-turbo
 SPEECHMATICS_API_KEY=your_speechmatics_api_key_here
 SPEECHMATICS_LANGUAGE=ru
 SPEECHMATICS_DOMAIN=
+# Операционная точка Speechmatics: standard (быстро) или enhanced (точнее)
 SPEECHMATICS_OPERATING_POINT=standard
 
 # =============================================================================
