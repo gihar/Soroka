@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     max_speakers: int = Field(10, description="Максимальное количество говорящих")
     min_speakers: int = Field(1, description="Минимальное количество говорящих")
     
+    # Очистка файлов
+    enable_cleanup: bool = Field(True, description="Включить автоматическую очистку временных файлов")
+    cleanup_interval_minutes: int = Field(30, description="Интервал очистки файлов в минутах")
+    temp_file_max_age_hours: int = Field(2, description="Максимальный возраст временных файлов в часах")
+    cache_max_age_hours: int = Field(24, description="Максимальный возраст кэш файлов в часах")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -29,6 +29,14 @@ except ImportError:
     OOM_PROTECTION_AVAILABLE = False
     logger.warning("OOM Protection недоступна")
 
+# Импорт сервиса очистки
+try:
+    from src.services.cleanup_service import cleanup_service
+    CLEANUP_SERVICE_AVAILABLE = True
+except ImportError:
+    CLEANUP_SERVICE_AVAILABLE = False
+    logger.warning("Cleanup Service недоступна")
+
 # Импорты новой архитектуры
 from services import (
     UserService, TemplateService, FileService, 
@@ -139,6 +147,12 @@ class EnhancedTelegramBot:
     
     def _setup_handlers(self):
         """Настройка всех обработчиков"""
+        # Административные обработчики - ПЕРВЫМИ для приоритета
+        admin_router = setup_admin_handlers(
+            self.llm_service, self.processing_service
+        )
+        self.dp.include_router(admin_router)
+        
         # Команды
         command_router = setup_command_handlers(
             self.user_service, self.template_service, self.llm_service
@@ -168,12 +182,6 @@ class EnhancedTelegramBot:
             self.template_service
         )
         self.dp.include_router(template_router)
-        
-        # Административные обработчики
-        admin_router = setup_admin_handlers(
-            self.llm_service, self.processing_service
-        )
-        self.dp.include_router(admin_router)
         
         feedback_router = setup_feedback_handlers(feedback_collector)
         self.dp.include_router(feedback_router)
@@ -224,10 +232,17 @@ class EnhancedTelegramBot:
                 memory_optimizer.start_optimization()
                 logger.info("Мониторинг памяти запущен")
             
-            # 6. Проверяем доступность компонентов
+            # 6. Запускаем сервис очистки файлов
+            if CLEANUP_SERVICE_AVAILABLE and settings.enable_cleanup:
+                await cleanup_service.start_cleanup()
+                logger.info("Сервис очистки файлов запущен")
+            elif not settings.enable_cleanup:
+                logger.info("Сервис очистки файлов отключен в настройках")
+            
+            # 7. Проверяем доступность компонентов
             await self._perform_startup_checks()
             
-            # 6. Запускаем бота
+            # 8. Запускаем бота
             logger.info("Бот с системой надежности запущен и готов к работе")
             await self.dp.start_polling(self.bot)
             
@@ -277,21 +292,26 @@ class EnhancedTelegramBot:
         try:
             logger.info("Начало graceful shutdown...")
             
-            # 1. Останавливаем мониторинг здоровья
+            # 1. Останавливаем сервис очистки файлов
+            if CLEANUP_SERVICE_AVAILABLE:
+                await cleanup_service.stop_cleanup()
+                logger.info("Сервис очистки файлов остановлен")
+            
+            # 2. Останавливаем мониторинг здоровья
             await health_checker.stop_monitoring()
             logger.info("Мониторинг здоровья остановлен")
             
-            # 2. Даем время завершить текущие операции
+            # 3. Даем время завершить текущие операции
             await asyncio.sleep(1)
             
-            # 3. Закрываем соединение с ботом
+            # 4. Закрываем соединение с ботом
             await self.bot.session.close()
             logger.info("Соединение с ботом закрыто")
             
-            # 3.1. Даем время на очистку всех aiohttp сессий
+            # 4.1. Даем время на очистку всех aiohttp сессий
             await asyncio.sleep(0.5)
             
-            # 3.2. Принудительная очистка всех открытых aiohttp сессий
+            # 4.2. Принудительная очистка всех открытых aiohttp сессий
             try:
                 import gc
                 import aiohttp
@@ -302,7 +322,7 @@ class EnhancedTelegramBot:
             except Exception as e:
                 logger.debug(f"Ошибка при принудительной очистке сессий: {e}")
             
-            # 4. Сохраняем статистику
+            # 5. Сохраняем статистику
             await self._save_shutdown_stats()
             
             logger.info("Graceful shutdown завершен")

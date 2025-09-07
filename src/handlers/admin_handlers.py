@@ -13,6 +13,13 @@ from services.enhanced_llm_service import EnhancedLLMService
 from services.optimized_processing_service import OptimizedProcessingService
 from config import settings
 
+# Импорт сервиса очистки
+try:
+    from src.services.cleanup_service import cleanup_service
+    CLEANUP_SERVICE_AVAILABLE = True
+except ImportError:
+    CLEANUP_SERVICE_AVAILABLE = False
+
 
 def setup_admin_handlers(llm_service: EnhancedLLMService, 
                         processing_service: OptimizedProcessingService) -> Router:
@@ -25,6 +32,14 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
     def is_admin(user_id: int) -> bool:
         """Проверить, является ли пользователь администратором"""
         return user_id in ADMIN_IDS if ADMIN_IDS else True  # Если админы не настроены, разрешаем всем
+    
+    def escape_markdown(text: str) -> str:
+        """Экранировать специальные символы Markdown"""
+        # Экранируем символы, которые могут вызвать проблемы в Markdown
+        escape_chars = ['*', '_', '`', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in escape_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
     
     @router.message(Command("status"))
     async def status_handler(message: Message):
@@ -292,6 +307,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 • `/reset_reliability` - сброс компонентов надежности
 • `/transcription_mode` - переключение режима транскрипции
 
+**Очистка файлов:**
+• `/cleanup` - статистика файлов и настройки очистки
+• `/cleanup_force` - принудительная очистка всех временных файлов
+
 **Справка:**
 • `/admin_help` - эта справка
 
@@ -384,5 +403,75 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         except Exception as e:
             logger.error(f"Ошибка в optimize_handler: {e}")
             await message.answer(f"❌ Ошибка при оптимизации: {e}")
+    
+    @router.message(Command("cleanup"))
+    async def cleanup_handler(message: Message):
+        """Обработчик команды /cleanup - управление очисткой файлов"""
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+        
+        if not CLEANUP_SERVICE_AVAILABLE:
+            await message.answer("❌ Сервис очистки недоступен.")
+            return
+        
+        try:
+            # Получаем статистику
+            stats = cleanup_service.get_cleanup_stats()
+            
+            # Формируем отчет
+            report = (
+                "📁 Статистика файлов\n\n"
+                f"📂 Временные файлы: {stats['temp_files']} ({stats['temp_size_mb']:.1f}MB)\n"
+                f"🗂️ Кэш файлы: {stats['cache_files']} ({stats['cache_size_mb']:.1f}MB)\n\n"
+                f"⏰ Старые временные файлы: {stats['old_temp_files']}\n"
+                f"⏰ Старые кэш файлы: {stats['old_cache_files']}\n\n"
+                f"⚙️ Настройки:\n"
+                f"• Интервал очистки: {settings.cleanup_interval_minutes} мин\n"
+                f"• Макс. возраст временных файлов: {settings.temp_file_max_age_hours} ч\n"
+                f"• Макс. возраст кэш файлов: {settings.cache_max_age_hours} ч\n"
+                f"• Автоочистка: {'✅' if settings.enable_cleanup else '❌'}\n\n"
+                "Используйте /cleanup_force для принудительной очистки"
+            )
+            
+            await message.answer(report)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в cleanup_handler: {e}")
+            await message.answer(f"❌ Ошибка при получении статистики: {e}")
+    
+    @router.message(Command("cleanup_force"))
+    async def cleanup_force_handler(message: Message):
+        """Обработчик команды /cleanup_force - принудительная очистка"""
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+        
+        if not CLEANUP_SERVICE_AVAILABLE:
+            await message.answer("❌ Сервис очистки недоступен.")
+            return
+        
+        try:
+            status_msg = await message.answer("🧹 Выполняю принудительную очистку...")
+            
+            # Выполняем принудительную очистку
+            cleaned_count = await cleanup_service.force_cleanup_all()
+            
+            # Получаем обновленную статистику
+            stats = cleanup_service.get_cleanup_stats()
+            
+            report = (
+                "✅ Принудительная очистка завершена\n\n"
+                f"🗑️ Удалено файлов: {cleaned_count}\n\n"
+                f"📊 Текущее состояние:\n"
+                f"• Временные файлы: {stats['temp_files']} ({stats['temp_size_mb']:.1f}MB)\n"
+                f"• Кэш файлы: {stats['cache_files']} ({stats['cache_size_mb']:.1f}MB)"
+            )
+            
+            await status_msg.edit_text(report)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в cleanup_force_handler: {e}")
+            await message.answer(f"❌ Ошибка при принудительной очистке: {e}")
     
     return router

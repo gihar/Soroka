@@ -101,6 +101,11 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 # Пропускаем - пусть обрабатывает другой роутер
                 return
             
+            # Исключаем команды - они должны обрабатываться в command_handlers или admin_handlers
+            if text.startswith('/'):
+                # Пропускаем команды - пусть обрабатывает другой роутер
+                return
+            
             # Проверяем, содержит ли сообщение URL
             if not _contains_url(text):
                 await message.answer(

@@ -184,11 +184,19 @@ class HealthCheckMiddleware(BaseMiddleware):
         
         # Если система нездорова, уведомляем пользователя
         if not self.system_healthy and isinstance(event, Message):
-            # Не блокируем полностью, но предупреждаем
-            await event.answer(
-                "⚠️ Система работает в ограниченном режиме. "
-                "Обработка может занять больше времени."
-            )
+            # Исключаем административные команды из предупреждений
+            admin_commands = [
+                '/status', '/health', '/stats', '/export_stats', '/reset_reliability',
+                '/transcription_mode', '/admin_help', '/performance', '/optimize',
+                '/cleanup', '/cleanup_force'
+            ]
+            
+            if event.text and event.text.strip() not in admin_commands:
+                # Не блокируем полностью, но предупреждаем
+                await event.answer(
+                    "⚠️ Система работает в ограниченном режиме. "
+                    "Обработка может занять больше времени."
+                )
         
         return await handler(event, data)
 
