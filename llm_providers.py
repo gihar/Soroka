@@ -6,7 +6,7 @@ import json
 import asyncio
 import httpx
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from loguru import logger
 from config import settings
 
@@ -26,6 +26,75 @@ class LLMProvider(ABC):
     def is_available(self) -> bool:
         """Проверить доступность провайдера"""
         pass
+
+
+# -------------------------------------------------------------
+# Унифицированные билдеры промптов для всех провайдеров
+# -------------------------------------------------------------
+def _build_system_prompt() -> str:
+    """Строгая системная политика для получения профессионального протокола."""
+    return (
+        "Ты — профессиональный протоколист. Действуешь как строгий экстрактор фактов из "
+        "стенограммы встречи. Не придумывай и не интерпретируй. Если факт отсутствует "
+        "или неочевиден — используй \"Не указано\". Пиши кратко и официально-деловым стилем. "
+        "Сохраняй термины и формулировки из стенограммы, допускается только лёгкая нормализация. "
+        "Отвечай строго валидным JSON-объектом без комментариев, без пояснений и без обрамления."
+    )
+
+
+def _build_user_prompt(
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Формирует пользовательский промпт с контекстом и требованиями к формату."""
+    # Блок контекста (с учётом диаризации)
+    if diarization_data and diarization_data.get("formatted_transcript"):
+        transcription_text = (
+            "Транскрипция с разделением говорящих:\n"
+            f"{diarization_data['formatted_transcript']}\n\n"
+            "Дополнительная информация:\n"
+            f"- Количество говорящих: {diarization_data.get('total_speakers', 'неизвестно')}\n"
+            f"- Список говорящих: {', '.join(diarization_data.get('speakers', []))}\n\n"
+            "Исходная транскрипция (для справки):\n"
+            f"{transcription}\n"
+        )
+    else:
+        transcription_text = (
+            "Транскрипция:\n"
+            f"{transcription}\n\n"
+            "Примечание: Диаризация (разделение говорящих) недоступна для этой записи.\n"
+        )
+
+    variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
+
+    # Основной пользовательский промпт
+    user_prompt = (
+        "Контекст для извлечения:\n"
+        f"{transcription_text}\n"
+        "Переменные для извлечения (ключ: описание):\n"
+        f"{variables_str}\n\n"
+        "Требования к формату:\n"
+        "- Верни только валидный JSON-объект.\n"
+        "- Используй строго эти ключи; дополнительные не добавляй.\n"
+        "- Сохраняй порядок ключей как в списке переменных.\n"
+        "- Значение каждого ключа — строка (UTF-8), без вложенных JSON и без Markdown.\n"
+        "- Для перечислений — один пункт на строку, начинай с '- ' (дефис и пробел), без нумерации, без завершающей точки.\n"
+        "- Сохраняй факты и формулировки из транскрипции; не добавляй роли, даты, суммы, сроки, если они явно не упомянуты.\n"
+        "- Убирай дубликаты, объединяй совпадающие пункты; порядок — по порядку упоминания в тексте.\n"
+        "- Если данные отсутствуют или неоднозначны — 'Не указано'.\n\n"
+        "Пример корректного ответа:\n"
+        "{\n"
+        "  \"participants\": \"Иван Иванов; Мария Петрова\",\n"
+        "  \"decisions\": \"- Увеличить бюджет на маркетинг\\n- Утвердить новую стратегию\",\n"
+        "  \"action_items\": \"- Подготовить презентацию — Ответственный: Мария Петрова\\n- Согласовать бюджет — Ответственный: Иван Иванов\"\n"
+        "}\n\n"
+        "Недопустимо:\n"
+        "- Любой текст вне JSON\n"
+        "- Вложенный JSON в значениях\n"
+        "- Придуманные роли/сроки/суммы, если их нет в тексте\n"
+    )
+    return user_prompt
 
 
 class OpenAIProvider(LLMProvider):
@@ -52,82 +121,22 @@ class OpenAIProvider(LLMProvider):
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
         
-        variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
-        
-        # Формируем промпт с учетом диаризации
-        if diarization_data and diarization_data.get("formatted_transcript"):
-            transcription_text = f"""
-Транскрипция с разделением говорящих:
-{diarization_data["formatted_transcript"]}
-
-Дополнительная информация:
-- Количество говорящих: {diarization_data.get("total_speakers", "неизвестно")}
-- Список говорящих: {", ".join(diarization_data.get("speakers", []))}
-
-Исходная транскрипция (для справки):
-{transcription}
-"""
-        else:
-            transcription_text = f"""
-Транскрипция:
-{transcription}
-
-Примечание: Диаризация (разделение говорящих) недоступна для этой записи.
-"""
-        
-        prompt = f"""Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в предоставленной транскрипции.
-
-КРИТИЧЕСКИ ВАЖНО:
-- НЕ добавляй информацию, которой нет в транскрипции
-- НЕ делай предположений о ролях, датах или контексте
-- НЕ выдумывай детали, которые не упомянуты явно
-- Если информация неясна или отсутствует - используй "Не указано"
-
-ИНСТРУКЦИИ ПО АНАЛИЗУ:
-1. Внимательно прочитай транскрипцию
-2. Найди информацию для каждой переменной
-3. Извлеки ТОЛЬКО то, что явно упомянуто
-4. Отформатируй для вставки в протокол
-
-ТРАНСКРИПЦИЯ ДЛЯ АНАЛИЗА:
-{transcription_text}
-
-ПЕРЕМЕННЫЕ ДЛЯ ИЗВЛЕЧЕНИЯ:
-{variables_str}
-
-ТРЕБОВАНИЯ К ФОРМАТУ:
-- Возвращай валидный JSON
-- Значения - готовый текст для протокола
-- Используй маркированные списки (•) для перечислений
-- НЕ вкладывай JSON-объекты в значения
-
-ПРАВИЛЬНЫЙ ПРИМЕР:
-{{
-    "participants": "Иван Иванов, Мария Петрова",
-    "decisions": "• Увеличить бюджет на маркетинг\n• Утвердить новую стратегию",
-    "action_items": "• Подготовить презентацию - Мария Петрова\n• Согласовать бюджет - Иван Иванов"
-}}
-
-НЕПРАВИЛЬНЫЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК):
-❌ Добавление несуществующих ролей: "Иван Иванов (руководитель)"
-❌ Выдумывание дат: "до 20.01.2024" (если дата не упомянута)
-❌ Предположения: "решение принято коллегиально" (если не указано)
-❌ Вложенный JSON: {{"decision": "Увеличить бюджет"}}
-
-Верни результат в формате JSON:"""
+        # Унифицированные системный и пользовательский промпты
+        system_prompt = _build_system_prompt()
+        user_prompt = _build_user_prompt(transcription, template_variables, diarization_data)
         
         try:
             # Диагностика запроса (без утечки полной транскрипции)
             base_url = settings.openai_base_url or "https://api.openai.com/v1"
             sys_msg = "Ты - строгий аналитик протоколов встреч..."
-            user_len = len(prompt)
+            user_len = len(user_prompt)
             transcript_len = len(transcription)
             vars_count = len(template_variables)
             logger.info(
                 f"OpenAI запрос: model={settings.openai_model}, base_url={base_url}, "
                 f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
             )
-            _snippet = prompt[:400].replace("\n", " ")
+            _snippet = user_prompt[:400].replace("\n", " ")
             logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
 
             logger.info(f"Отправляем запрос в OpenAI с моделью {settings.openai_model}")
@@ -137,10 +146,10 @@ class OpenAIProvider(LLMProvider):
                     self.client.chat.completions.create,
                     model=settings.openai_model,
                     messages=[
-                        {"role": "system", "content": "Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в транскрипции. НЕ добавляй информацию, которой нет в тексте. НЕ делай предположений. Отвечай только валидным JSON."},
-                        {"role": "user", "content": prompt}
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.3,
+                    temperature=0.1,
                     response_format={"type": "json_object"}
                 )
             response = await _call_openai()
@@ -195,69 +204,9 @@ class AnthropicProvider(LLMProvider):
         if not self.is_available():
             raise ValueError("Anthropic API не настроен")
         
-        variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
-        
-        # Формируем промпт с учетом диаризации
-        if diarization_data and diarization_data.get("formatted_transcript"):
-            transcription_text = f"""
-Транскрипция с разделением говорящих:
-{diarization_data["formatted_transcript"]}
-
-Дополнительная информация:
-- Количество говорящих: {diarization_data.get("total_speakers", "неизвестно")}
-- Список говорящих: {", ".join(diarization_data.get("speakers", []))}
-
-Исходная транскрипция (для справки):
-{transcription}
-"""
-        else:
-            transcription_text = f"""
-Транскрипция:
-{transcription}
-
-Примечание: Диаризация (разделение говорящих) недоступна для этой записи.
-"""
-        
-        prompt = f"""Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в предоставленной транскрипции.
-
-КРИТИЧЕСКИ ВАЖНО:
-- НЕ добавляй информацию, которой нет в транскрипции
-- НЕ делай предположений о ролях, датах или контексте
-- НЕ выдумывай детали, которые не упомянуты явно
-- Если информация неясна или отсутствует - используй "Не указано"
-
-ИНСТРУКЦИИ ПО АНАЛИЗУ:
-1. Внимательно прочитай транскрипцию
-2. Найди информацию для каждой переменной
-3. Извлеки ТОЛЬКО то, что явно упомянуто
-4. Отформатируй для вставки в протокол
-
-ТРАНСКРИПЦИЯ ДЛЯ АНАЛИЗА:
-{transcription_text}
-
-ПЕРЕМЕННЫЕ ДЛЯ ИЗВЛЕЧЕНИЯ:
-{variables_str}
-
-ТРЕБОВАНИЯ К ФОРМАТУ:
-- Возвращай валидный JSON
-- Значения - готовый текст для протокола
-- Используй маркированные списки (•) для перечислений
-- НЕ вкладывай JSON-объекты в значения
-
-ПРАВИЛЬНЫЙ ПРИМЕР:
-{{
-    "participants": "Иван Иванов, Мария Петрова",
-    "decisions": "• Увеличить бюджет на маркетинг\n• Утвердить новую стратегию",
-    "action_items": "• Подготовить презентацию - Мария Петрова\n• Согласовать бюджет - Иван Иванов"
-}}
-
-НЕПРАВИЛЬНЫЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК):
-❌ Добавление несуществующих ролей: "Иван Иванов (руководитель)"
-❌ Выдумывание дат: "до 20.01.2024" (если дата не упомянута)
-❌ Предположения: "решение принято коллегиально" (если не указано)
-❌ Вложенный JSON: {{"decision": "Увеличить бюджет"}}
-
-Верни результат в формате JSON:"""
+        # Унифицированные системный и пользовательский промпты
+        system_prompt = _build_system_prompt()
+        prompt = _build_user_prompt(transcription, template_variables, diarization_data)
         
         try:
             base_url = "Anthropic SDK"
@@ -276,6 +225,8 @@ class AnthropicProvider(LLMProvider):
                     self.client.messages.create,
                     model="claude-3-haiku-20240307",
                     max_tokens=2000,
+                    temperature=0.1,
+                    system=system_prompt,
                     messages=[
                         {"role": "user", "content": prompt}
                     ]
@@ -320,69 +271,9 @@ class YandexGPTProvider(LLMProvider):
         if not self.is_available():
             raise ValueError("Yandex GPT API не настроен")
         
-        variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
-        
-        # Формируем промпт с учетом диаризации
-        if diarization_data and diarization_data.get("formatted_transcript"):
-            transcription_text = f"""
-Транскрипция с разделением говорящих:
-{diarization_data["formatted_transcript"]}
-
-Дополнительная информация:
-- Количество говорящих: {diarization_data.get("total_speakers", "неизвестно")}
-- Список говорящих: {", ".join(diarization_data.get("speakers", []))}
-
-Исходная транскрипция (для справки):
-{transcription}
-"""
-        else:
-            transcription_text = f"""
-Транскрипция:
-{transcription}
-
-Примечание: Диаризация (разделение говорящих) недоступна для этой записи.
-"""
-        
-        prompt = f"""Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в предоставленной транскрипции.
-
-КРИТИЧЕСКИ ВАЖНО:
-- НЕ добавляй информацию, которой нет в транскрипции
-- НЕ делай предположений о ролях, датах или контексте
-- НЕ выдумывай детали, которые не упомянуты явно
-- Если информация неясна или отсутствует - используй "Не указано"
-
-ИНСТРУКЦИИ ПО АНАЛИЗУ:
-1. Внимательно прочитай транскрипцию
-2. Найди информацию для каждой переменной
-3. Извлеки ТОЛЬКО то, что явно упомянуто
-4. Отформатируй для вставки в протокол
-
-ТРАНСКРИПЦИЯ ДЛЯ АНАЛИЗА:
-{transcription_text}
-
-ПЕРЕМЕННЫЕ ДЛЯ ИЗВЛЕЧЕНИЯ:
-{variables_str}
-
-ТРЕБОВАНИЯ К ФОРМАТУ:
-- Возвращай валидный JSON
-- Значения - готовый текст для протокола
-- Используй маркированные списки (•) для перечислений
-- НЕ вкладывай JSON-объекты в значения
-
-ПРАВИЛЬНЫЙ ПРИМЕР:
-{{
-    "participants": "Иван Иванов, Мария Петрова",
-    "decisions": "• Увеличить бюджет на маркетинг\n• Утвердить новую стратегию",
-    "action_items": "• Подготовить презентацию - Мария Петрова\n• Согласовать бюджет - Иван Иванов"
-}}
-
-НЕПРАВИЛЬНЫЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК):
-❌ Добавление несуществующих ролей: "Иван Иванов (руководитель)"
-❌ Выдумывание дат: "до 20.01.2024" (если дата не упомянута)
-❌ Предположения: "решение принято коллегиально" (если не указано)
-❌ Вложенный JSON: {{"decision": "Увеличить бюджет"}}
-
-Верни результат в формате JSON:"""
+        # Унифицированные системный и пользовательский промпты
+        system_prompt = _build_system_prompt()
+        prompt = _build_user_prompt(transcription, template_variables, diarization_data)
         
         headers = {
             "Authorization": f"Api-Key {self.api_key}",
@@ -393,13 +284,13 @@ class YandexGPTProvider(LLMProvider):
             "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
             "completionOptions": {
                 "stream": False,
-                "temperature": 0.3,
+                "temperature": 0.1,
                 "maxTokens": 2000
             },
             "messages": [
                 {
                     "role": "system",
-                    "text": "Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в транскрипции. НЕ добавляй информацию, которой нет в тексте. НЕ делай предположений. Отвечай только валидным JSON."
+                    "text": system_prompt
                 },
                 {
                     "role": "user", 
