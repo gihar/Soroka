@@ -13,7 +13,7 @@ RuntimeWarning: coroutine 'ProgressTracker.update_stage_progress' was never awai
 
 Проблема заключалась в том, что асинхронные колбэки прогресса вызывались из синхронного контекста (thread pool), где нет активного event loop.
 
-**Проблемный код:**
+**Проблемный код (устаревший API с текстом подэтапа):**
 ```python
 def progress_callback(percent, message):
     if progress_tracker:
@@ -31,8 +31,8 @@ def progress_callback(percent, message):
 ### Новый thread-safe колбэк
 
 ```python
-def progress_callback(percent, message):
-    """Thread-safe колбэк для обновления прогресса транскрипции"""
+def progress_callback(percent):
+    """Thread-safe колбэк для обновления прогресса транскрипции (упрощённый API)"""
     if progress_tracker:
         try:
             # Получаем текущий event loop
@@ -41,12 +41,12 @@ def progress_callback(percent, message):
                 # Планируем выполнение в основном потоке
                 asyncio.run_coroutine_threadsafe(
                     progress_tracker.update_stage_progress(
-                        "transcription", percent, message
+                        "transcription", percent
                     ), loop
                 )
         except RuntimeError:
             # Если нет активного event loop, просто логируем
-            logger.debug(f"Progress update: {percent}% - {message}")
+            logger.debug(f"Progress update: {percent}%")
         except Exception as e:
             logger.warning(f"Ошибка при обновлении прогресса: {e}")
 ```
@@ -80,7 +80,7 @@ future = asyncio.run_coroutine_threadsafe(
 Если обновление прогресса через UI невозможно, система переключается на логирование:
 
 ```python
-logger.debug(f"Progress update: {percent}% - {message}")
+logger.debug(f"Progress update: {percent}%")
 ```
 
 ## Результат
@@ -114,14 +114,13 @@ logger.debug(f"Progress update: {percent}% - {message}")
 
 ## Обратная совместимость
 
-- ✅ Все существующие функции работают без изменений
-- ✅ Прогресс-трекер продолжает работать как раньше
-- ✅ Добавлена только thread-safety без изменения API
+- ⚠️ Упрощён API прогресса: удалён текст подэтапов. Используются только проценты и (опционально) `compression_info`.
+- ✅ Thread-safety добавлен без изменений логики обработки
 
 ## Мониторинг
 
 В логах теперь можно увидеть:
-- `DEBUG`: Progress update: X% - сообщение (когда используется fallback)
+- `DEBUG`: Progress update: X% (когда используется fallback)
 - `WARNING`: Ошибка при обновлении прогресса (при неожиданных исключениях)
 
 Эти сообщения информационные и не означают ошибки в работе системы.

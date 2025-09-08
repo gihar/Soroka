@@ -42,6 +42,11 @@ class FallbackManager:
             "cache_used": 0,
             "failures": 0
         }
+        # Информация о последнем выполнении (для корректных логов вызывающей стороны)
+        self.last_execution: Dict[str, Any] = {
+            "mode": None,            # primary | fallback | cache | error
+            "fallback_name": None
+        }
     
     def set_primary(self, handler: Callable):
         """Установить основной обработчик"""
@@ -92,6 +97,7 @@ class FallbackManager:
             cached_result = self.get_cached_result(cache_key)
             if cached_result is not None:
                 self.stats["cache_used"] += 1
+                self.last_execution = {"mode": "cache", "fallback_name": "cache"}
                 return cached_result
         
         # Пытаемся выполнить основной обработчик
@@ -111,6 +117,7 @@ class FallbackManager:
                     self.cache_result(cache_key, result)
                 
                 logger.debug(f"Основной обработчик '{self.name}' выполнен успешно")
+                self.last_execution = {"mode": "primary", "fallback_name": None}
                 return result
                 
             except Exception as e:
@@ -136,6 +143,7 @@ class FallbackManager:
             if cached_result is not None:
                 self.stats["cache_used"] += 1
                 logger.info(f"Использован кеш как fallback для '{self.name}'")
+                self.last_execution = {"mode": "cache", "fallback_name": "cache"}
                 return cached_result
         
         # Пытаемся fallback опции по порядку приоритета
@@ -165,6 +173,7 @@ class FallbackManager:
                     self.cache_result(cache_key, result, ttl=300)  # Короткий TTL для fallback
                 
                 logger.info(f"Fallback '{fallback.name}' для '{self.name}' выполнен успешно")
+                self.last_execution = {"mode": "fallback", "fallback_name": fallback.name}
                 return result
                 
             except Exception as fallback_error:
@@ -176,6 +185,7 @@ class FallbackManager:
         original_error = exception or Exception("Основной обработчик недоступен")
         
         logger.error(f"Все fallback опции исчерпаны для '{self.name}': {original_error}")
+        self.last_execution = {"mode": "error", "fallback_name": None}
         raise Exception(f"Все варианты выполнения исчерпаны для '{self.name}': {original_error}")
     
     def get_stats(self) -> Dict[str, Any]:
@@ -216,20 +226,32 @@ async def cached_response_fallback(cache_key: str = None, *args, **kwargs) -> st
     return "📄 Показываем последний сохраненный результат."
 
 
+def _simplified_extraction_handler(provider=None, transcription: str = "", template_variables: Dict[str, Any] | None = None,
+                                  diarization_data: Dict[str, Any] | None = None, *args, **kwargs) -> Dict[str, str]:
+    """Обработчик fallback: упрощённое извлечение из транскрипта"""
+    return _simple_text_extraction(transcription or "")
+
+
+def _template_only_handler(provider=None, transcription: str = "", template_variables: Dict[str, Any] | None = None,
+                           diarization_data: Dict[str, Any] | None = None, *args, **kwargs) -> Dict[str, str]:
+    """Обработчик fallback: только шаблонные поля без анализа"""
+    return _template_only_response()
+
+
 def create_llm_fallback_manager() -> FallbackManager:
     """Создать fallback менеджер для LLM"""
     manager = FallbackManager("llm_service", FallbackStrategy.GRACEFUL_DEGRADATION)
     
-    # Добавляем fallback опции с приоритетами
+    # Добавляем fallback опции с приоритетами (с совместимой сигнатурой)
     manager.add_fallback(
         "simplified_extraction",
-        lambda transcript, **kwargs: _simple_text_extraction(transcript),
+        _simplified_extraction_handler,
         priority=10
     )
     
     manager.add_fallback(
         "template_only",
-        lambda **kwargs: _template_only_response(),
+        _template_only_handler,
         priority=5
     )
     

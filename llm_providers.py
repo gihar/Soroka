@@ -3,6 +3,7 @@
 """
 
 import json
+import asyncio
 import httpx
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
@@ -34,9 +35,9 @@ class OpenAIProvider(LLMProvider):
         self.client = None
         if settings.openai_api_key:
             openai.api_key = settings.openai_api_key
-            # Создаем HTTP клиент с настройками SSL
+            # Создаем HTTP клиент с настройками SSL и таймаутом 30с
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=30.0)
             self.client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
@@ -116,15 +117,33 @@ class OpenAIProvider(LLMProvider):
 Верни результат в формате JSON:"""
         
         try:
-            logger.info(f"Отправляем запрос в OpenAI с моделью {settings.openai_model}")
-            response = self.client.chat.completions.create(
-                model=settings.openai_model,
-                messages=[
-                    {"role": "system", "content": "Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в транскрипции. НЕ добавляй информацию, которой нет в тексте. НЕ делай предположений. Отвечай только валидным JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
+            # Диагностика запроса (без утечки полной транскрипции)
+            base_url = settings.openai_base_url or "https://api.openai.com/v1"
+            sys_msg = "Ты - строгий аналитик протоколов встреч..."
+            user_len = len(prompt)
+            transcript_len = len(transcription)
+            vars_count = len(template_variables)
+            logger.info(
+                f"OpenAI запрос: model={settings.openai_model}, base_url={base_url}, "
+                f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
             )
+            _snippet = prompt[:400].replace("\n", " ")
+            logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
+
+            logger.info(f"Отправляем запрос в OpenAI с моделью {settings.openai_model}")
+            # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
+            async def _call_openai():
+                return await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=settings.openai_model,
+                    messages=[
+                        {"role": "system", "content": "Ты - строгий аналитик протоколов встреч. Твоя задача - извлечь ТОЛЬКО информацию, которая явно присутствует в транскрипции. НЕ добавляй информацию, которой нет в тексте. НЕ делай предположений. Отвечай только валидным JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    response_format={"type": "json_object"}
+                )
+            response = await _call_openai()
             logger.info("Получен ответ от OpenAI API")
             
             content = response.choices[0].message.content
@@ -134,11 +153,20 @@ class OpenAIProvider(LLMProvider):
                 raise ValueError("Получен пустой ответ от OpenAI API")
             
             try:
+                # Пытаемся распарсить как JSON напрямую (ожидается при response_format=json_object)
                 return json.loads(content)
             except json.JSONDecodeError as e:
-                logger.error(f"Ошибка парсинга JSON ответа от OpenAI: {e}")
-                logger.error(f"Содержимое ответа: {content}")
-                raise ValueError(f"Некорректный JSON в ответе от OpenAI: {e}")
+                # Мягкий парсер: пытаемся вырезать JSON из текста (как у Anthropic)
+                logger.warning(f"Некорректный JSON (прямая загрузка). Пытаемся извлечь из текста: {e}")
+                start_idx = content.find('{')
+                end_idx = content.rfind('}') + 1
+                json_str = content[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError as e2:
+                    logger.error(f"Ошибка парсинга JSON ответа от OpenAI (после извлечения): {e2}")
+                    logger.error(f"Содержимое ответа: {content}")
+                    raise ValueError(f"Некорректный JSON в ответе от OpenAI: {e2}")
             
         except Exception as e:
             logger.error(f"Ошибка при работе с OpenAI API: {e}")
@@ -151,9 +179,9 @@ class AnthropicProvider(LLMProvider):
     def __init__(self):
         self.client = None
         if settings.anthropic_api_key:
-            # Создаем HTTP клиент с настройками SSL
+            # Создаем HTTP клиент с настройками SSL и таймаутом 30с
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=30.0)
             self.client = Anthropic(
                 api_key=settings.anthropic_api_key,
                 http_client=http_client
@@ -232,13 +260,27 @@ class AnthropicProvider(LLMProvider):
 Верни результат в формате JSON:"""
         
         try:
-            response = self.client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=2000,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            base_url = "Anthropic SDK"
+            user_len = len(prompt)
+            transcript_len = len(transcription)
+            vars_count = len(template_variables)
+            logger.info(
+                f"Anthropic запрос: model=claude-3-haiku-20240307, base={base_url}, "
+                f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
             )
+            _a_snippet = prompt[:400].replace("\n", " ")
+            logger.debug(f"Anthropic prompt (фрагмент 400): {_a_snippet}...")
+            # Выполняем синхронный вызов клиента Anthropic в отдельном потоке
+            async def _call_anthropic():
+                return await asyncio.to_thread(
+                    self.client.messages.create,
+                    model="claude-3-haiku-20240307",
+                    max_tokens=2000,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+            response = await _call_anthropic()
             
             content = response.content[0].text
             logger.info(f"Получен ответ от Anthropic (длина: {len(content) if content else 0}): {content[:200] if content else 'None'}...")

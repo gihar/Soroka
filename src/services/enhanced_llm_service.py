@@ -10,7 +10,7 @@ from src.models.llm import LLMRequest, LLMResponse, LLMProviderType
 from src.exceptions.processing import LLMError
 from src.reliability import (
     RetryManager, LLM_RETRY_CONFIG,
-    CircuitBreaker, FAST_RECOVERY_CONFIG,
+    CircuitBreaker, DEFAULT_CIRCUIT_BREAKER_CONFIG,
     RateLimiter, global_rate_limiter, OPENAI_API_LIMIT, ANTHROPIC_API_LIMIT,
     FallbackManager, create_llm_fallback_manager
 )
@@ -40,10 +40,11 @@ class EnhancedLLMService:
         }
         
         # Circuit breakers для каждого провайдера
+        # Используем базовую конфигурацию с таймаутом 30с
         self.circuit_breakers = {
-            "openai": CircuitBreaker("openai_llm", FAST_RECOVERY_CONFIG),
-            "anthropic": CircuitBreaker("anthropic_llm", FAST_RECOVERY_CONFIG),
-            "yandex": CircuitBreaker("yandex_llm", FAST_RECOVERY_CONFIG)
+            "openai": CircuitBreaker("openai_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG),
+            "anthropic": CircuitBreaker("anthropic_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG),
+            "yandex": CircuitBreaker("yandex_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG)
         }
         
         # Rate limiters для каждого провайдера
@@ -124,7 +125,13 @@ class EnhancedLLMService:
                 llm_model_used=request.model
             )
             
-            logger.info(f"Протокол успешно сгенерирован с провайдером: {provider}")
+            exec_info = getattr(self.fallback_manager, 'last_execution', {})
+            if exec_info.get('mode') == 'fallback':
+                logger.info(f"Возвращён результат через fallback: {exec_info.get('fallback_name')}")
+            elif exec_info.get('mode') == 'cache':
+                logger.info("Возвращён результат из кеша fallback-менеджера")
+            else:
+                logger.info(f"Протокол успешно сгенерирован с провайдером: {provider}")
             return response
             
         except Exception as e:
@@ -166,8 +173,13 @@ class EnhancedLLMService:
                     provider, transcription, template_variables, diarization_data,
                     cache_key=cache_key
                 )
-                
-                logger.info(f"Успешно сгенерирован протокол с провайдером: {provider}")
+                exec_info = getattr(self.fallback_manager, 'last_execution', {})
+                if exec_info.get('mode') == 'fallback':
+                    logger.info(f"Возвращён результат через fallback: {exec_info.get('fallback_name')}")
+                elif exec_info.get('mode') == 'cache':
+                    logger.info("Возвращён результат из кеша fallback-менеджера")
+                else:
+                    logger.info(f"Успешно сгенерирован протокол с провайдером: {provider}")
                 return result
                 
             except Exception as e:

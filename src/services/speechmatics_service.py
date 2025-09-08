@@ -5,6 +5,7 @@
 import os
 import tempfile
 from typing import Optional, Dict, Any, List
+import asyncio
 from pathlib import Path
 from loguru import logger
 from config import settings
@@ -147,7 +148,7 @@ class SpeechmaticsService:
         
         try:
             if progress_callback:
-                progress_callback(10, "Подготовка к транскрипции через Speechmatics...")
+                progress_callback(10)
             
             logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
             
@@ -155,53 +156,47 @@ class SpeechmaticsService:
             config = self._prepare_transcription_config(language, enable_diarization)
             
             if progress_callback:
-                progress_callback(20, "Отправка файла в Speechmatics...")
+                progress_callback(20)
             
-            # Открываем клиент и выполняем транскрипцию
-            with BatchClient(self.settings) as client:
-                try:
+            # Выполняем синхронные вызовы Speechmatics в отдельном потоке, чтобы не блокировать event loop
+            def _speechmatics_run_sync():
+                with BatchClient(self.settings) as client:
                     # Отправляем задачу
                     job_id = client.submit_job(
                         audio=file_path,
                         transcription_config=config,
                     )
-                    
                     if progress_callback:
-                        progress_callback(40, f"Задача отправлена (ID: {job_id}), ожидание завершения...")
-                    
+                        progress_callback(40)
                     logger.info(f"Задача отправлена в Speechmatics, ID: {job_id}")
-                    
                     # Ждем завершения с форматом json-v2 для получения полной информации
                     transcript = client.wait_for_completion(
                         job_id, 
                         transcription_format="json-v2"
                     )
-                    
-                    if progress_callback:
-                        progress_callback(90, "Обработка результатов...")
-                    
-                    # Обрабатываем результат
-                    result = self._process_transcript_result(transcript, enable_diarization)
-                    
-                    if progress_callback:
-                        progress_callback(100, "Транскрипция через Speechmatics завершена!")
-                    
-                    logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
-                    
-                    return result
-                    
-                except HTTPStatusError as e:
-                    if e.response.status_code == 401:
-                        raise SpeechmaticsAPIError("Неверный API ключ Speechmatics", file_path, str(e))
-                    elif e.response.status_code == 400:
-                        error_detail = e.response.json().get("detail", str(e))
-                        raise SpeechmaticsAPIError(f"Ошибка запроса Speechmatics: {error_detail}", file_path, str(e))
-                    elif e.response.status_code == 413:
-                        raise SpeechmaticsAPIError("Файл слишком большой для Speechmatics API", file_path, str(e))
-                    elif e.response.status_code == 429:
-                        raise SpeechmaticsAPIError("Превышен лимит запросов Speechmatics API", file_path, str(e))
-                    else:
-                        raise SpeechmaticsAPIError(f"Ошибка Speechmatics API: {e}", file_path, str(e))
+                    return transcript
+
+            try:
+                transcript = await asyncio.to_thread(_speechmatics_run_sync)
+                if progress_callback:
+                    progress_callback(90)
+                result = self._process_transcript_result(transcript, enable_diarization)
+                if progress_callback:
+                    progress_callback(100)
+                logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
+                return result
+            except HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    raise SpeechmaticsAPIError("Неверный API ключ Speechmatics", file_path, str(e))
+                elif e.response.status_code == 400:
+                    error_detail = e.response.json().get("detail", str(e))
+                    raise SpeechmaticsAPIError(f"Ошибка запроса Speechmatics: {error_detail}", file_path, str(e))
+                elif e.response.status_code == 413:
+                    raise SpeechmaticsAPIError("Файл слишком большой для Speechmatics API", file_path, str(e))
+                elif e.response.status_code == 429:
+                    raise SpeechmaticsAPIError("Превышен лимит запросов Speechmatics API", file_path, str(e))
+                else:
+                    raise SpeechmaticsAPIError(f"Ошибка Speechmatics API: {e}", file_path, str(e))
                         
         except Exception as e:
             logger.error(f"Ошибка при транскрипции через Speechmatics {file_path}: {e}")

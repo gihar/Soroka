@@ -35,13 +35,19 @@ class ProgressTracker:
         self.current_stage: Optional[str] = None
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
-        self.update_interval = 5  # Интервал обновления 5 секунд
+        # Интервал автообновления (под спиннер и легкие изменения UI)
+        # Поддерживаем частоту ~1–2 сек, чтобы анимация казалась живой,
+        # но без излишней нагрузки на Telegram API
+        self.update_interval = 1.2
         self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
         self._spinner_index = 0
         # Поля для дедупликации и троттлинга обновлений сообщения
         self._last_text: str = ""
         self._last_edit_at: datetime = datetime.min
+        # Минимальный интервал между редактированиями сообщения
         self._min_edit_interval_seconds: float = 1.0
+        # Блокировка для последовательного редактирования сообщения
+        self._edit_lock = asyncio.Lock()
         
     def add_stage(self, stage_id: str, name: str, emoji: str, description: str):
         """Добавить этап обработки"""
@@ -137,8 +143,8 @@ class ProgressTracker:
             logger.error(f"Ошибка отображения информации о сжатии: {e}")
             await self.update_display()
     
-    async def update_stage_progress(self, stage_id: str, progress_percent: float = None, 
-                                   progress_text: str = "", compression_info: dict = None):
+    async def update_stage_progress(self, stage_id: str, progress_percent: float = None,
+                                   compression_info: dict = None):
         """Обновить прогресс конкретного этапа"""
         if stage_id not in self.stages or stage_id != self.current_stage:
             return
@@ -156,12 +162,13 @@ class ProgressTracker:
                     p = 100.0
                 self.stages[stage_id].progress = p
 
-        # Обрабатываем специальный callback для завершения сжатия
-        if progress_text == "compression_complete" and compression_info:
-            logger.info(f"Получен callback сжатия: {compression_info}")
+        # Если передана информация о сжатии — показываем её при существенной экономии
+        if compression_info and compression_info.get("compressed", False):
+            logger.info(f"Получена информация о сжатии: {compression_info}")
             await self._show_compression_info(compression_info)
-        else:
-            await self.update_display()
+            return
+
+        await self.update_display()
     
     async def complete_all(self):
         """Завершить все этапы"""
@@ -184,24 +191,38 @@ class ProgressTracker:
     async def update_display(self, final: bool = False, force: bool = False):
         """Обновить отображение прогресса"""
         try:
-            text = self._format_progress_text(final)
+            # Исключаем гонки между параллельными вызовами
+            async with self._edit_lock:
+                # Планируем следующий кадр спиннера, но применяем его только при реальном редактировании
+                planned_index = None
+                if not final and any(s.is_active for s in self.stages.values()):
+                    planned_index = (self._spinner_index + 1) % len(self._spinner_frames)
 
-            # Дедупликация текста: пропускаем, если текст не изменился
-            if text == self._last_text:
-                return
+                text = self._format_progress_text(final, spinner_index=planned_index)
 
-            # Троттлинг: не обновлять чаще, чем раз в _min_edit_interval (кроме финального сообщения)
-            now = datetime.now()
-            if not final and not force and (now - self._last_edit_at).total_seconds() < self._min_edit_interval_seconds:
-                return
+                # Дедупликация текста: пропускаем, если текст не изменился
+                if text == self._last_text:
+                    return
 
-            await self.message.edit_text(text, parse_mode="Markdown")
-            self._last_text = text
-            self._last_edit_at = now
+                # Троттлинг: не обновлять чаще, чем раз в _min_edit_interval (кроме финального сообщения)
+                now = datetime.now()
+                if not final and not force and (now - self._last_edit_at).total_seconds() < self._min_edit_interval_seconds:
+                    return
+
+                await self.message.edit_text(text, parse_mode="Markdown")
+                self._last_text = text
+                self._last_edit_at = now
+                # Фиксируем смену кадра спиннера только если действительно отредактировали сообщение
+                if planned_index is not None:
+                    self._spinner_index = planned_index
         except Exception as e:
+            # Тихо игнорируем частый случай: сообщение не изменилось
+            if "message is not modified" in str(e).lower():
+                logger.debug("Пропущено обновление: текст не изменился")
+                return
             logger.error(f"Ошибка обновления прогресса: {e}")
     
-    def _format_progress_text(self, final: bool = False) -> str:
+    def _format_progress_text(self, final: bool = False, spinner_index: Optional[int] = None) -> str:
         """Сформировать упрощенный текст с прогрессом"""
         if final:
             total_time = datetime.now() - self.start_time
@@ -233,22 +254,12 @@ class ProgressTracker:
 
                 text += f"✅ {stage.emoji} {stage.name}{duration_text}\n"
             elif stage.is_active:
-                spinner = self._spinner_frames[self._spinner_index]
-                # Заголовок активного этапа
-                if stage.progress is not None:
-                    text += f"🔄 {stage.emoji} {stage.name} {spinner} {stage.progress:.0f}%\n"
-                else:
-                    text += f"🔄 {stage.emoji} {stage.name} {spinner}\n"
+                idx = self._spinner_index if spinner_index is None else spinner_index
+                spinner = self._spinner_frames[idx]
+                # Заголовок активного этапа (без процентов)
+                text += f"🔄 {stage.emoji} {stage.name} {spinner}\n"
+                # Краткое описание этапа (без прогресс-бара)
                 text += f"   _{stage.description}_\n"
-                # Мини-прогресс-бар на 10 сегментов
-                if stage.progress is not None:
-                    filled = int(stage.progress / 10)
-                    if filled < 0:
-                        filled = 0
-                    if filled > 10:
-                        filled = 10
-                    bar = "▓" * filled + "░" * (10 - filled)
-                    text += f"   [{bar}]\n"
             else:
                 text += f"⏳ {stage.emoji} {stage.name}\n"
         
@@ -265,8 +276,9 @@ class ProgressTracker:
             while self.current_stage:
                 await asyncio.sleep(self.update_interval)
                 if self.current_stage:  # Проверяем еще раз после сна
-                    self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
-                    await self.update_display()
+                    # Сдвиг спиннера и редактирование производятся внутри update_display
+                    # Форсируем редактирование, чтобы анимация крутилась даже при частых апдейтах прогресса
+                    await self.update_display(force=True)
         except asyncio.CancelledError:
             pass
         except Exception as e:

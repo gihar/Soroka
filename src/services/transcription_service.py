@@ -3,6 +3,7 @@
 """
 
 import os
+import asyncio
 import tempfile
 import whisper
 import httpx
@@ -213,14 +214,14 @@ class TranscriptionService:
         
         try:
             if progress_callback:
-                progress_callback(20, "Подготовка файла для облачной транскрипции...")
+                progress_callback(20)
             
             logger.info(f"Начало облачной транскрипции файла: {file_path}")
             
             # Предобрабатываем файл для Groq API
             logger.info(f"Начинаем предобработку файла: {file_path}")
             if progress_callback:
-                progress_callback(25, "Сжатие файла для ускорения обработки...")
+                progress_callback(25)
             
             processed_file, compression_info = self._preprocess_for_groq(file_path)
             logger.info(f"Предобработка завершена. Результат: {compression_info}")
@@ -231,7 +232,7 @@ class TranscriptionService:
                 if progress_callback:
                     # Вызываем callback с информацией о сжатии
                     try:
-                        progress_callback(100, "compression_complete", compression_info)
+                        progress_callback(100, compression_info)
                         # Помечаем как показанную
                         compression_info["shown_during_processing"] = True
                         logger.info("Callback сжатия успешно вызван")
@@ -255,24 +256,28 @@ class TranscriptionService:
             except Exception as e:
                 logger.warning(f"Не удалось получить размер предобработанного файла: {e}")
             
-            # Читаем предобработанный файл и отправляем в Groq
-            with open(processed_file, "rb") as file:
-                if progress_callback:
-                    progress_callback(40, "Отправка файла в облако...")
-                
-                transcription = self.groq_client.audio.transcriptions.create(
-                    file=(os.path.basename(file_path), file.read()),
+            # Читаем предобработанный файл и отправляем в Groq (в отдельном потоке, чтобы не блокировать event loop)
+            if progress_callback:
+                progress_callback(40)
+
+            def _groq_call_sync(path: str):
+                with open(path, "rb") as f:
+                    data = f.read()
+                return self.groq_client.audio.transcriptions.create(
+                    file=(os.path.basename(path), data),
                     model=settings.groq_model,
                     response_format="verbose_json",
                 )
-                
-                if progress_callback:
-                    progress_callback(90, "Получение результатов...")
-                
-                result_text = transcription.text
-                logger.info(f"Облачная транскрипция завершена. Длина текста: {len(result_text)} символов")
-                
-                return result_text, compression_info
+
+            transcription = await asyncio.to_thread(_groq_call_sync, processed_file)
+
+            if progress_callback:
+                progress_callback(90)
+
+            result_text = transcription.text
+            logger.info(f"Облачная транскрипция завершена. Длина текста: {len(result_text)} символов")
+
+            return result_text, compression_info
                 
         except Exception as e:
             logger.error(f"Ошибка при облачной транскрипции файла {file_path}: {e}")
@@ -301,7 +306,7 @@ class TranscriptionService:
         
         try:
             if progress_callback:
-                progress_callback(20, "Подготовка к транскрипции через Speechmatics...")
+                progress_callback(20)
             
             logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
             
@@ -389,7 +394,7 @@ class TranscriptionService:
                 # Транскрипция через Speechmatics API
                 try:
                     if progress_callback:
-                        progress_callback(20, "Подготовка к транскрипции через Speechmatics...")
+                        progress_callback(20)
                     
                     logger.info("Выполнение транскрипции через Speechmatics...")
                     
@@ -402,7 +407,7 @@ class TranscriptionService:
                     )
                     
                     if progress_callback:
-                        progress_callback(100, "Транскрипция через Speechmatics завершена!")
+                        progress_callback(100)
                     
                     logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
                     if settings.enable_diarization and result.diarization:
@@ -414,24 +419,24 @@ class TranscriptionService:
                     # При ошибке Speechmatics переключаемся на локальную транскрипцию
                     logger.warning(f"Ошибка транскрипции через Speechmatics, переключаемся на локальную: {e}")
                     if progress_callback:
-                        progress_callback(20, "Speechmatics недоступен, используем локальную транскрипцию...")
+                        progress_callback(20)
                     
                     self._load_whisper_model()
                     
                     if progress_callback:
-                        progress_callback(40, "Выполнение локальной транскрипции...")
+                        progress_callback(40)
                     
-                    whisper_result = self._transcribe_with_progress(
+                    whisper_result = await self._transcribe_with_progress(
                         file_path, language, progress_callback
                     )
                     
                     if progress_callback:
-                        progress_callback(90, "Обработка результатов...")
+                        progress_callback(90)
                     
                     transcription = whisper_result["text"].strip()
                     
                     if progress_callback:
-                        progress_callback(100, "Локальная транскрипция завершена!")
+                        progress_callback(100)
                     
                     logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
                     
@@ -466,36 +471,36 @@ class TranscriptionService:
                 try:
                     # Облачная транскрипция через Groq (проверка размера происходит внутри)
                     if progress_callback:
-                        progress_callback(20, "Подготовка к облачной транскрипции...")
+                        progress_callback(20)
                     
                     logger.info("Выполнение облачной транскрипции через Groq...")
                     transcription, compression_info = await self._transcribe_with_groq(file_path, progress_callback)
                     
                     if progress_callback:
-                        progress_callback(100, "Облачная транскрипция завершена!")
+                        progress_callback(100)
                 
                 except (CloudTranscriptionError, GroqAPIError) as e:
                     # При ошибке облачной транскрипции автоматически переключаемся на локальную
                     logger.warning(f"Ошибка облачной транскрипции, переключаемся на локальную: {e}")
                     if progress_callback:
-                        progress_callback(20, "Облачная транскрипция недоступна, используем локальную...")
+                        progress_callback(20)
                     
                     self._load_whisper_model()
                     
                     if progress_callback:
-                        progress_callback(40, "Выполнение локальной транскрипции...")
+                        progress_callback(40)
                     
-                    whisper_result = self._transcribe_with_progress(
+                    whisper_result = await self._transcribe_with_progress(
                         file_path, language, progress_callback
                     )
                     
                     if progress_callback:
-                        progress_callback(90, "Обработка результатов...")
+                        progress_callback(90)
                     
                     transcription = whisper_result["text"].strip()
                     
                     if progress_callback:
-                        progress_callback(100, "Локальная транскрипция завершена!")
+                        progress_callback(100)
                     
                     logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
                     
@@ -528,7 +533,7 @@ class TranscriptionService:
             elif settings.transcription_mode == "hybrid" and self.groq_client:
                 # Гибридный подход: облачная транскрипция + локальная диаризация
                 if progress_callback:
-                    progress_callback(20, "Подготовка к гибридной обработке...")
+                    progress_callback(20)
                 
                 logger.info("Выполнение гибридной транскрипции: облачная + диаризация...")
                 
@@ -536,7 +541,7 @@ class TranscriptionService:
                 try:
                     # Сначала выполняем облачную транскрипцию (проверка размера происходит внутри)
                     if progress_callback:
-                        progress_callback(30, "Облачная транскрипция...")
+                        progress_callback(30)
                     
                     transcription, compression_info = await self._transcribe_with_groq(file_path, progress_callback)
                 
@@ -544,11 +549,11 @@ class TranscriptionService:
                     # При ошибке облачной транскрипции автоматически переключаемся на локальную
                     logger.warning(f"Ошибка облачной транскрипции в гибридном режиме, переключаемся на локальную: {e}")
                     if progress_callback:
-                        progress_callback(30, "Облачная транскрипция недоступна, используем локальную...")
+                        progress_callback(30)
                     
                     self._load_whisper_model()
                     
-                    whisper_result = self._transcribe_with_progress(
+                    whisper_result = await self._transcribe_with_progress(
                         file_path, language, progress_callback
                     )
                     
@@ -557,7 +562,7 @@ class TranscriptionService:
                 # Затем применяем диаризацию к уже полученному тексту
                 if DIARIZATION_AVAILABLE and settings.enable_diarization:
                     if progress_callback:
-                        progress_callback(70, "Применение диаризации к тексту...")
+                        progress_callback(70)
                     
                     logger.info("Применение диаризации к тексту...")
                     
@@ -569,7 +574,7 @@ class TranscriptionService:
                         
                         if diarization_result:
                             if progress_callback:
-                                progress_callback(90, "Обработка результатов диаризации...")
+                                progress_callback(90)
                             
                             # Обновляем результат с диаризацией
                             result.diarization = diarization_result.to_dict()
@@ -580,7 +585,7 @@ class TranscriptionService:
                             logger.info(f"Гибридная обработка завершена. Найдено говорящих: {len(diarization_result.speakers)}")
                             
                             if progress_callback:
-                                progress_callback(100, "Гибридная обработка завершена!")
+                                progress_callback(100)
                             
                             result.transcription = transcription
                             return result
@@ -590,34 +595,34 @@ class TranscriptionService:
                         # Продолжаем без диаризации
                 
                 if progress_callback:
-                    progress_callback(100, "Гибридная обработка завершена!")
+                    progress_callback(100)
                 
                 logger.info(f"Гибридная транскрибация завершена. Длина текста: {len(transcription)} символов")
                 
             else:
                 # Fallback к обычной транскрипции через Whisper
                 if progress_callback:
-                    progress_callback(20, "Загрузка модели Whisper...")
+                    progress_callback(20)
                 
                 self._load_whisper_model()
                 
                 if progress_callback:
-                    progress_callback(40, "Выполнение транскрипции...")
+                    progress_callback(40)
                 
                 logger.info("Выполнение стандартной транскрипции...")
                 
                 # Создаем обертку для отслеживания прогресса
-                whisper_result = self._transcribe_with_progress(
+                whisper_result = await self._transcribe_with_progress(
                     file_path, language, progress_callback
                 )
                 
                 if progress_callback:
-                    progress_callback(90, "Обработка результатов...")
+                    progress_callback(90)
                 
                 transcription = whisper_result["text"].strip()
                 
                 if progress_callback:
-                    progress_callback(100, "Транскрипция завершена!")
+                    progress_callback(100)
                 
                 logger.info(f"Стандартная транскрибация завершена. Длина текста: {len(transcription)} символов")
             
@@ -627,7 +632,7 @@ class TranscriptionService:
                 try:
                     logger.info("Применение диаризации к результатам локальной транскрипции...")
                     if progress_callback:
-                        progress_callback(95, "Применение диаризации...")
+                        progress_callback(95)
                     
                     diarization_result = await diarization_service.diarize_file(
                         file_path, language, progress_callback
@@ -662,9 +667,8 @@ class TranscriptionService:
                 )
             raise TranscriptionError(str(e), file_path)
     
-    def _transcribe_with_progress(self, file_path: str, language: str, progress_callback=None):
-        """Транскрипция с имитацией прогресса"""
-        import time
+    async def _transcribe_with_progress(self, file_path: str, language: str, progress_callback=None):
+        """Транскрипция с имитацией прогресса (не блокирует event loop)"""
         import threading
         
         # Создаем результат для хранения
@@ -689,12 +693,12 @@ class TranscriptionService:
         if progress_callback:
             current_progress = 40
             while thread.is_alive() and current_progress < 85:
-                time.sleep(2)  # Обновляем каждые 2 секунды
+                await asyncio.sleep(2)  # Не блокируем event loop
                 current_progress += 5
-                progress_callback(current_progress, "Транскрибация в процессе...")
+                progress_callback(current_progress)
         
-        # Ждем завершения
-        thread.join()
+        # Ждем завершения в отдельном потоке, чтобы не блокировать event loop
+        await asyncio.to_thread(thread.join)
         
         if result_container["error"]:
             raise result_container["error"]

@@ -309,21 +309,21 @@ class DiarizationService:
             self._load_whisperx_models(language)
             
             if progress_callback:
-                progress_callback(35, "Загрузка аудио файла...")
+                progress_callback(35)
             
             # Загружаем аудио
             logger.info(f"Загрузка аудио файла: {file_path}")
             audio = whisperx.load_audio(file_path)
             
             if progress_callback:
-                progress_callback(45, "Транскрипция с WhisperX...")
+                progress_callback(45)
             
             # Транскрибация
             logger.info("Выполнение транскрипции с WhisperX...")
             result = self.whisperx_model.transcribe(audio, batch_size=16)
             
             if progress_callback:
-                progress_callback(65, "Выравнивание текста...")
+                progress_callback(65)
             
             # Выравнивание (alignment)
             logger.info("Выполнение выравнивания...")
@@ -337,7 +337,7 @@ class DiarizationService:
             )
             
             if progress_callback:
-                progress_callback(75, "Диаризация говорящих...")
+                progress_callback(75)
             
             # Диаризация с pyannote.audio
             logger.info("Выполнение диаризации с pyannote.audio...")
@@ -430,7 +430,7 @@ class DiarizationService:
             logger.info(f"Выполнение диаризации с pyannote.audio: {file_path}")
             
             if progress_callback:
-                progress_callback(40, "Подготовка файла...")
+                progress_callback(40)
             
             # Проверяем, нужна ли конвертация файла
             actual_file_path = file_path
@@ -439,7 +439,7 @@ class DiarizationService:
                 actual_file_path = self._convert_audio_format(file_path, "wav")
             
             if progress_callback:
-                progress_callback(60, "Выполнение диаризации...")
+                progress_callback(60)
             
             # Выполняем диаризацию
             diarization = self.pyannote_pipeline(actual_file_path)
@@ -487,7 +487,7 @@ class DiarizationService:
             logger.info(f"Выполнение диаризации с Picovoice: {file_path}")
             
             if progress_callback:
-                progress_callback(10, "Инициализация Picovoice...")
+                progress_callback(10)
             
             # Выполняем диаризацию через Picovoice
             diarization_data = await picovoice_service.diarize_file(file_path, progress_callback)
@@ -600,7 +600,7 @@ class DiarizationService:
                 if PICOVOICE_AVAILABLE:
                     logger.info("Использование Picovoice для диаризации")
                     if progress_callback:
-                        progress_callback(20, "Инициализация Picovoice...")
+                        progress_callback(20)
                     
                     result = await self.diarize_with_picovoice(file_path, progress_callback)
                     return result
@@ -612,7 +612,7 @@ class DiarizationService:
                 if WHISPERX_AVAILABLE:
                     logger.info("Использование WhisperX для диаризации")
                     if progress_callback:
-                        progress_callback(20, "Инициализация WhisperX...")
+                        progress_callback(20)
                     
                     result = self.diarize_with_whisperx(file_path, language, progress_callback)
                     return result
@@ -624,7 +624,7 @@ class DiarizationService:
                 if PYANNOTE_AVAILABLE:
                     logger.info("Использование pyannote.audio для диаризации")
                     if progress_callback:
-                        progress_callback(30, "Инициализация pyannote.audio...")
+                        progress_callback(30)
                     
                     result = self.diarize_with_pyannote(file_path, progress_callback)
                     return result

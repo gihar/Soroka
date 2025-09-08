@@ -42,9 +42,7 @@ class OptimizedProcessingService(BaseProcessingService):
         )
         
         try:
-            # Начинаем отслеживание прогресса
-            if progress_tracker:
-                await progress_tracker.start_stage("validation")
+            # Начинаем отслеживание прогресса (первый видимый этап — "preparation")
             
             # Проверяем кэш полного результата
             cache_key = self._generate_result_cache_key(request)
@@ -194,7 +192,7 @@ class OptimizedProcessingService(BaseProcessingService):
             start_time = time.time()
             
             # Создаем thread-safe колбэк для обновления прогресса
-            def progress_callback(percent, message, compression_info=None):
+            def progress_callback(percent, compression_info=None):
                 """Thread-safe колбэк для обновления прогресса транскрипции"""
                 if progress_tracker:
                     try:
@@ -204,12 +202,12 @@ class OptimizedProcessingService(BaseProcessingService):
                             # Планируем выполнение в основном потоке
                             asyncio.run_coroutine_threadsafe(
                                 progress_tracker.update_stage_progress(
-                                    "transcription", percent, message, compression_info
+                                    "transcription", percent, compression_info
                                 ), loop
                             )
                     except RuntimeError:
                         # Если нет активного event loop, просто логируем
-                        logger.debug(f"Progress update: {percent}% - {message}")
+                        logger.debug(f"Progress update: {percent}%")
                     except Exception as e:
                         logger.warning(f"Ошибка при обновлении прогресса: {e}")
             
@@ -432,25 +430,35 @@ class OptimizedProcessingService(BaseProcessingService):
     
     def _format_protocol(self, template: Any, llm_result: Any, 
                         transcription_result: Any) -> str:
-        """Быстрое форматирование протокола"""
-        # Используем кэшированное форматирование если возможно
-        try:
-            from jinja2 import Template as Jinja2Template
-            
-            # Получаем содержимое шаблона правильно
-            if hasattr(template, 'content'):
-                template_content = template.content
-            elif isinstance(template, dict):
-                template_content = template.get('content', '')
-            else:
-                template_content = str(template)
-            
-            jinja_template = Jinja2Template(template_content)
-            return jinja_template.render(**llm_result)
-        except Exception as e:
-            logger.error(f"Ошибка форматирования протокола: {e}")
-            # Fallback на простое форматирование
+        """Форматирование протокола с мягкой обработкой типов результата LLM"""
+        from jinja2 import Template as Jinja2Template
+        
+        # Если LLM вернул строку — считаем это готовым текстом протокола
+        if isinstance(llm_result, str):
+            text = llm_result.strip()
+            if text:
+                return text
+            # Пустая строка — падаем на простой формат
             return f"# Протокол\n\n{transcription_result.transcription}"
+        
+        # Получаем содержимое шаблона
+        if hasattr(template, 'content'):
+            template_content = template.content
+        elif isinstance(template, dict):
+            template_content = template.get('content', '')
+        else:
+            template_content = str(template)
+        
+        # Если есть маппинг — используем Jinja2 для подстановки
+        try:
+            if isinstance(llm_result, dict):
+                jinja_template = Jinja2Template(template_content)
+                return jinja_template.render(**llm_result)
+        except Exception as e:
+            logger.warning(f"Ошибка Jinja при форматировании протокола: {e}")
+        
+        # Fallback: возвращаем базовый текст транскрипции
+        return f"# Протокол\n\n{transcription_result.transcription}"
     
     async def get_performance_stats(self) -> Dict[str, Any]:
         """Получить статистику производительности"""

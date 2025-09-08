@@ -108,7 +108,7 @@ class PicovoiceService:
             logger.info(f"Начало диаризации через Picovoice Falcon: {file_path}")
             
             if progress_callback:
-                progress_callback(10, "Инициализация Picovoice Falcon...")
+                progress_callback(10)
             
             # Получаем экземпляр Falcon
             falcon = self._get_falcon_instance()
@@ -117,26 +117,26 @@ class PicovoiceService:
                 return None
             
             if progress_callback:
-                progress_callback(30, "Подготовка аудио файла...")
+                progress_callback(30)
             
             # Конвертируем файл если нужно
             converted_path = await self._convert_audio_for_picovoice(file_path)
             
             if progress_callback:
-                progress_callback(50, "Выполнение диаризации...")
+                progress_callback(50)
             
             # Выполняем диаризацию
             logger.info("Запуск диаризации с Picovoice Falcon...")
             segments = falcon.process_file(converted_path)
             
             if progress_callback:
-                progress_callback(90, "Обработка результатов...")
+                progress_callback(90)
             
             # Преобразуем результат в наш формат
             diarization_data = self._parse_falcon_result(segments)
             
             if progress_callback:
-                progress_callback(100, "Диаризация Picovoice Falcon завершена!")
+                progress_callback(100)
             
             logger.info(f"Диаризация Picovoice Falcon успешна. Найдено говорящих: {diarization_data.total_speakers}")
             return diarization_data
