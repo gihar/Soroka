@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     yandex_api_key: Optional[str] = Field(None, description="API ключ Yandex GPT")
     yandex_folder_id: Optional[str] = Field(None, description="ID папки Yandex Cloud")
     
+    # LLM Таймауты
+    llm_timeout_seconds: float = Field(30.0, description="Общий таймаут ожидания ответа от LLM (в секундах)")
+    
     # База данных
     database_url: str = Field("sqlite:///bot.db", description="URL базы данных")
     

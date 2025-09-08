@@ -104,9 +104,9 @@ class OpenAIProvider(LLMProvider):
         self.client = None
         if settings.openai_api_key:
             openai.api_key = settings.openai_api_key
-            # Создаем HTTP клиент с настройками SSL и таймаутом 30с
+            # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify, timeout=30.0)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
             self.client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
@@ -188,9 +188,9 @@ class AnthropicProvider(LLMProvider):
     def __init__(self):
         self.client = None
         if settings.anthropic_api_key:
-            # Создаем HTTP клиент с настройками SSL и таймаутом 30с
+            # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify, timeout=30.0)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
             self.client = Anthropic(
                 api_key=settings.anthropic_api_key,
                 http_client=http_client
@@ -305,7 +305,7 @@ class YandexGPTProvider(LLMProvider):
                     "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
                     headers=headers,
                     json=data,
-                    timeout=60.0
+                    timeout=settings.llm_timeout_seconds
                 )
                 response.raise_for_status()
                 

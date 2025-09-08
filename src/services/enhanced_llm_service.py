@@ -10,10 +10,11 @@ from src.models.llm import LLMRequest, LLMResponse, LLMProviderType
 from src.exceptions.processing import LLMError
 from src.reliability import (
     RetryManager, LLM_RETRY_CONFIG,
-    CircuitBreaker, DEFAULT_CIRCUIT_BREAKER_CONFIG,
+    CircuitBreaker, CircuitBreakerConfig, DEFAULT_CIRCUIT_BREAKER_CONFIG,
     RateLimiter, global_rate_limiter, OPENAI_API_LIMIT, ANTHROPIC_API_LIMIT,
     FallbackManager, create_llm_fallback_manager
 )
+from config import settings
 from llm_providers import llm_manager
 
 
@@ -40,11 +41,17 @@ class EnhancedLLMService:
         }
         
         # Circuit breakers для каждого провайдера
-        # Используем базовую конфигурацию с таймаутом 30с
+        # Используем конфигурацию на основе базовой, но с таймаутом из настроек
+        cb_config = CircuitBreakerConfig(
+            failure_threshold=DEFAULT_CIRCUIT_BREAKER_CONFIG.failure_threshold,
+            recovery_timeout=DEFAULT_CIRCUIT_BREAKER_CONFIG.recovery_timeout,
+            success_threshold=DEFAULT_CIRCUIT_BREAKER_CONFIG.success_threshold,
+            timeout=settings.llm_timeout_seconds,
+        )
         self.circuit_breakers = {
-            "openai": CircuitBreaker("openai_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG),
-            "anthropic": CircuitBreaker("anthropic_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG),
-            "yandex": CircuitBreaker("yandex_llm", DEFAULT_CIRCUIT_BREAKER_CONFIG)
+            "openai": CircuitBreaker("openai_llm", cb_config),
+            "anthropic": CircuitBreaker("anthropic_llm", cb_config),
+            "yandex": CircuitBreaker("yandex_llm", cb_config),
         }
         
         # Rate limiters для каждого провайдера
