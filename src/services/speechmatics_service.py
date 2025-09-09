@@ -133,8 +133,7 @@ class SpeechmaticsService:
         return config
     
     async def transcribe_file(self, file_path: str, language: str = None, 
-                            enable_diarization: bool = False, 
-                            progress_callback=None) -> TranscriptionResult:
+                            enable_diarization: bool = False) -> TranscriptionResult:
         """Транскрибировать файл через Speechmatics API"""
         
         if not self.settings:
@@ -147,16 +146,10 @@ class SpeechmaticsService:
             raise CloudTranscriptionError("Файл слишком большой для Speechmatics API", file_path)
         
         try:
-            if progress_callback:
-                progress_callback(10)
-            
             logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
             
             # Подготавливаем конфигурацию
             config = self._prepare_transcription_config(language, enable_diarization)
-            
-            if progress_callback:
-                progress_callback(20)
             
             # Выполняем синхронные вызовы Speechmatics в отдельном потоке, чтобы не блокировать event loop
             def _speechmatics_run_sync():
@@ -166,8 +159,6 @@ class SpeechmaticsService:
                         audio=file_path,
                         transcription_config=config,
                     )
-                    if progress_callback:
-                        progress_callback(40)
                     logger.info(f"Задача отправлена в Speechmatics, ID: {job_id}")
                     # Ждем завершения с форматом json-v2 для получения полной информации
                     transcript = client.wait_for_completion(
@@ -178,11 +169,7 @@ class SpeechmaticsService:
 
             try:
                 transcript = await asyncio.to_thread(_speechmatics_run_sync)
-                if progress_callback:
-                    progress_callback(90)
                 result = self._process_transcript_result(transcript, enable_diarization)
-                if progress_callback:
-                    progress_callback(100)
                 logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
                 return result
             except HTTPStatusError as e:
@@ -275,14 +262,12 @@ class SpeechmaticsService:
         
         return result
     
-    async def transcribe_with_diarization(self, file_path: str, language: str = None, 
-                                        progress_callback=None) -> TranscriptionResult:
+    async def transcribe_with_diarization(self, file_path: str, language: str = None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией через Speechmatics"""
         return await self.transcribe_file(
             file_path=file_path,
             language=language,
-            enable_diarization=True,
-            progress_callback=progress_callback
+            enable_diarization=True
         )
     
     def is_available(self) -> bool:

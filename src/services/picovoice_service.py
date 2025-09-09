@@ -94,7 +94,7 @@ class PicovoiceService:
     
 
     
-    async def diarize_file(self, file_path: str, progress_callback=None) -> Optional[DiarizationData]:
+    async def diarize_file(self, file_path: str) -> Optional[DiarizationData]:
         """Выполнить диаризацию файла через Picovoice Falcon"""
         if not self.access_key:
             logger.error("Picovoice Access Key не настроен")
@@ -107,36 +107,21 @@ class PicovoiceService:
         try:
             logger.info(f"Начало диаризации через Picovoice Falcon: {file_path}")
             
-            if progress_callback:
-                progress_callback(10)
-            
             # Получаем экземпляр Falcon
             falcon = self._get_falcon_instance()
             if not falcon:
                 logger.error("Не удалось инициализировать Picovoice Falcon")
                 return None
             
-            if progress_callback:
-                progress_callback(30)
-            
             # Конвертируем файл если нужно
             converted_path = await self._convert_audio_for_picovoice(file_path)
-            
-            if progress_callback:
-                progress_callback(50)
             
             # Выполняем диаризацию
             logger.info("Запуск диаризации с Picovoice Falcon...")
             segments = falcon.process_file(converted_path)
             
-            if progress_callback:
-                progress_callback(90)
-            
             # Преобразуем результат в наш формат
             diarization_data = self._parse_falcon_result(segments)
-            
-            if progress_callback:
-                progress_callback(100)
             
             logger.info(f"Диаризация Picovoice Falcon успешна. Найдено говорящих: {diarization_data.total_speakers}")
             return diarization_data

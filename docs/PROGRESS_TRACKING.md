@@ -64,62 +64,9 @@ def _create_progress_bar_from_percent(self, percent: float) -> str:
     return f"[{bar}] {percentage}%"
 ```
 
-### 4. Система колбэков прогресса
+### 4. Отслеживание прогресса
 
-#### TranscriptionService
-
-```python
-def transcribe_with_diarization(self, file_path: str, language: str = "ru", 
-                               progress_callback=None) -> TranscriptionResult:
-    # ...
-    if progress_callback:
-        progress_callback(10)
-    
-    diarization_result = diarization_service.diarize_file(
-        file_path, language, progress_callback
-    )
-    
-    if progress_callback:
-        progress_callback(90)
-```
-
-#### DiarizationService
-
-```python
-def diarize_with_whisperx(self, file_path: str, language: str = "ru", 
-                          progress_callback=None) -> DiarizationResult:
-    if progress_callback:
-        progress_callback(35)
-    
-    audio = whisperx.load_audio(file_path)
-    
-    if progress_callback:
-        progress_callback(45)
-    
-    result = self.whisperx_model.transcribe(audio, batch_size=16)
-    
-    if progress_callback:
-        progress_callback(65)
-    
-    # ... и так далее
-```
-
-#### OptimizedProcessingService
-
-```python
-def progress_callback(percent):
-    """Колбэк для обновления прогресса транскрипции (упрощённый API)"""
-    if progress_tracker:
-        asyncio.create_task(
-            progress_tracker.update_stage_progress(
-                "transcription", percent
-            )
-        )
-
-transcription_result = await thread_manager.run_in_thread(
-    self._run_transcription_sync, file_path, request.language, progress_callback
-)
-```
+Поддержка колбэков прогресса удалена. Текущая версия не передаёт прогресс наружу, интерфейс отображает только конечные статусы этапов.
 
 ## Этапы прогресса обработки
 
@@ -238,17 +185,13 @@ transcription_result = await thread_manager.run_in_thread(
    - Функция `_create_progress_bar_from_percent()`
 
 2. **`src/services/transcription_service.py`**
-   - Параметр `progress_callback` в `transcribe_with_diarization()`
-   - Новая функция `_transcribe_with_progress()` с имитацией прогресса
-   - Вызовы колбэков на ключевых этапах
+   - Удалены колбэки прогресса и имитация прогресса
 
 3. **`diarization.py`**
-   - Параметр `progress_callback` во всех функциях диаризации
-   - Обновления прогресса передаются числами без текстов подэтапов
+   - Удалены параметры и вызовы колбэков прогресса
 
 4. **`src/services/optimized_processing_service.py`**
-   - Создание и передача колбэка прогресса
-   - Обновленная функция `_run_transcription_sync()`
+   - Удалена передача колбэка прогресса
 
 ## Тестирование
 
@@ -261,6 +204,5 @@ transcription_result = await thread_manager.run_in_thread(
 
 ## Backward Compatibility
 
-- ⚠️ Обновлён API прогресса: удалены тексты подэтапов. Вызовы колбэков следует переделать на `progress_callback(percent)` и `update_stage_progress(stage_id, percent, compression_info=None)`.
-- ✅ Колбэки по‑прежнему опциональны (`progress_callback=None`)
-- ✅ Fallback при отсутствии колбэков сохраняется
+- ⚠️ API прогресса удалён: вызовы `progress_callback(...)` больше не поддерживаются.
+- ✅ На логику обработки это не влияет; UI может показывать только статусы этапов.

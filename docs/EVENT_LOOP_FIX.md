@@ -13,43 +13,15 @@ RuntimeWarning: coroutine 'ProgressTracker.update_stage_progress' was never awai
 
 Проблема заключалась в том, что асинхронные колбэки прогресса вызывались из синхронного контекста (thread pool), где нет активного event loop.
 
-**Проблемный код (устаревший API с текстом подэтапа):**
-```python
-def progress_callback(percent, message):
-    if progress_tracker:
-        asyncio.create_task(  # ❌ Ошибка: нет event loop в thread
-            progress_tracker.update_stage_progress(
-                "transcription", percent, message
-            )
-        )
-```
+Ранее использовался колбэк с передачей процентов и текста подэтапа; этот подход признан устаревшим и удалён.
 
 ## Решение
 
 Реализован thread-safe механизм обновления прогресса с graceful fallback.
 
-### Новый thread-safe колбэк
+### Текущее состояние
 
-```python
-def progress_callback(percent):
-    """Thread-safe колбэк для обновления прогресса транскрипции (упрощённый API)"""
-    if progress_tracker:
-        try:
-            # Получаем текущий event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Планируем выполнение в основном потоке
-                asyncio.run_coroutine_threadsafe(
-                    progress_tracker.update_stage_progress(
-                        "transcription", percent
-                    ), loop
-                )
-        except RuntimeError:
-            # Если нет активного event loop, просто логируем
-            logger.debug(f"Progress update: {percent}%")
-        except Exception as e:
-            logger.warning(f"Ошибка при обновлении прогресса: {e}")
-```
+Механизм колбэков прогресса удалён. Обновления прогресса больше не передаются из рабочих потоков; интерфейс показывает итоговые статусы этапов без перцентилей.
 
 ### Как это работает
 
@@ -77,11 +49,7 @@ future = asyncio.run_coroutine_threadsafe(
 
 ### Fallback механизм
 
-Если обновление прогресса через UI невозможно, система переключается на логирование:
-
-```python
-logger.debug(f"Progress update: {percent}%")
-```
+Ранее использовалось логирование прогресса для fallback. Теперь логируются только ключевые события (старт/успех/ошибка) без процентов.
 
 ## Результат
 
@@ -110,12 +78,12 @@ logger.debug(f"Progress update: {percent}%")
 
 ## Измененные файлы
 
-- **`src/services/optimized_processing_service.py`** - основное исправление thread-safe колбэка
+- Удалены вызовы колбэков прогресса в сервисах обработки
 
 ## Обратная совместимость
 
-- ⚠️ Упрощён API прогресса: удалён текст подэтапов. Используются только проценты и (опционально) `compression_info`.
-- ✅ Thread-safety добавлен без изменений логики обработки
+- ⚠️ API прогресса удалён: колбэки и проценты больше не используются.
+- ✅ Логика обработки не зависит от прогресса
 
 ## Мониторинг
 

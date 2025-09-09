@@ -182,16 +182,8 @@ result = await picovoice_service.diarize_file("audio.wav")
 print(f"Найдено говорящих: {result.total_speakers}")
 ```
 
-### С прогресс-баром
-```python
-def progress_callback(progress, message):
-    print(f"{progress}%: {message}")
-
-result = await picovoice_service.diarize_file(
-    "audio.wav", 
-    progress_callback=progress_callback
-)
-```
+### Прогресс
+Колбэки прогресса больше не поддерживаются. Диаризация выполняется без внешних обновлений прогресса.
 
 ## Устранение неполадок
 

@@ -191,30 +191,10 @@ class OptimizedProcessingService(BaseProcessingService):
         with PerformanceTimer("transcription", metrics_collector):
             start_time = time.time()
             
-            # Создаем thread-safe колбэк для обновления прогресса
-            def progress_callback(percent, compression_info=None):
-                """Thread-safe колбэк для обновления прогресса транскрипции"""
-                if progress_tracker:
-                    try:
-                        # Получаем текущий event loop
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            # Планируем выполнение в основном потоке
-                            asyncio.run_coroutine_threadsafe(
-                                progress_tracker.update_stage_progress(
-                                    "transcription", percent, compression_info
-                                ), loop
-                            )
-                    except RuntimeError:
-                        # Если нет активного event loop, просто логируем
-                        logger.debug(f"Progress update: {percent}%")
-                    except Exception as e:
-                        logger.warning(f"Ошибка при обновлении прогресса: {e}")
-            
             # Выполняем транскрипцию асинхронно
             logger.info(f"Запускаем транскрипцию файла: {file_path}")
             transcription_result = await self._run_transcription_async(
-                file_path, request.language, progress_callback
+                file_path, request.language
             )
             logger.info(f"Транскрипция завершена. Результат получен: {hasattr(transcription_result, 'transcription')}")
             
@@ -236,10 +216,10 @@ class OptimizedProcessingService(BaseProcessingService):
         
         return transcription_result
     
-    async def _run_transcription_async(self, file_path: str, language: str, progress_callback=None):
+    async def _run_transcription_async(self, file_path: str, language: str):
         """Асинхронная транскрипция"""
         return await self.transcription_service.transcribe_with_diarization(
-            file_path, language, progress_callback
+            file_path, language
         )
     
     @cache_llm_response()
