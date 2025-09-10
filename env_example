@@ -66,7 +66,7 @@ SSL_VERIFY=false
 # ТРАНСКРИПЦИЯ
 # =============================================================================
 
-# Режим транскрипции: local, cloud, hybrid, speechmatics
+# Режим транскрипции: local, cloud, hybrid, speechmatics, leopard
 TRANSCRIPTION_MODE=hybrid
 
 # Groq API для облачной транскрипции
@@ -95,6 +95,10 @@ HUGGINGFACE_TOKEN=your_huggingface_token_here_optional
 
 # Picovoice Access Key (для облачной диаризации)
 PICOVOICE_ACCESS_KEY=your_picovoice_access_key_here_optional
+
+# Путь к языковой модели Leopard (.pv). Для русского языка укажите путь к русской модели.
+# Пример: LEOPARD_MODEL_PATH=/app/models/leopard_params_ru.pv
+LEOPARD_MODEL_PATH=
 
 # Устройство для диаризации: auto, cpu, mps, cuda
 DIARIZATION_DEVICE=auto

@@ -18,6 +18,14 @@ from src.exceptions.processing import TranscriptionError, CloudTranscriptionErro
 from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
 
+# Leopard (Picovoice) STT
+try:
+    import pvleopard
+    LEOPARD_AVAILABLE = True
+except ImportError:
+    LEOPARD_AVAILABLE = False
+    logger.warning("pvleopard (Leopard STT) недоступен")
+
 try:
     from groq import Groq
     GROQ_AVAILABLE = True
@@ -308,7 +316,84 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Ошибка при транскрипции через Speechmatics {file_path}: {e}")
             raise CloudTranscriptionError(str(e), file_path)
-    
+
+    def _preprocess_for_leopard(self, file_path: str) -> str:
+        """Подготовить аудио для Leopard: конвертировать в 16kHz mono WAV PCM s16le"""
+        try:
+            if not self._check_ffmpeg():
+                logger.info("ffmpeg не найден — передаем исходный файл в Leopard")
+                return file_path
+
+            temp_wav = self.temp_dir / f"{Path(file_path).stem}_leopard.wav"
+            if os.path.exists(temp_wav):
+                return str(temp_wav)
+
+            import subprocess
+            cmd = [
+                "ffmpeg", "-i", file_path,
+                "-acodec", "pcm_s16le",
+                "-ac", "1",
+                "-ar", "16000",
+                "-y",
+                str(temp_wav)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info(f"Файл подготовлен для Leopard: {temp_wav}")
+                return str(temp_wav)
+            else:
+                logger.warning(f"Не удалось подготовить файл для Leopard: {result.stderr}")
+                return file_path
+        except Exception as e:
+            logger.warning(f"Ошибка подготовки файла для Leopard: {e}")
+            return file_path
+
+    async def _transcribe_with_leopard(self, file_path: str) -> tuple[str, dict]:
+        """Транскрипция через Picovoice Leopard (локально)"""
+        if not LEOPARD_AVAILABLE:
+            raise TranscriptionError("pvleopard не установлен", file_path)
+        if not settings.picovoice_access_key:
+            raise TranscriptionError("PICOVOICE_ACCESS_KEY не задан", file_path)
+
+        # Подготовка формата для Leopard
+        prepared_file = self._preprocess_for_leopard(file_path)
+
+        def _run_leopard_sync(path: str) -> str:
+            leopard = None
+            try:
+                # Если указан путь к языковой модели, используем его (например, русский)
+                create_kwargs = {"access_key": settings.picovoice_access_key}
+                if getattr(settings, "leopard_model_path", None):
+                    create_kwargs["model_path"] = settings.leopard_model_path
+
+                leopard = pvleopard.create(**create_kwargs)
+                transcript, _words = leopard.process_file(path)
+                return transcript.strip()
+            finally:
+                if leopard is not None:
+                    try:
+                        leopard.delete()
+                    except Exception:
+                        pass
+
+        try:
+            logger.info(f"Начало транскрипции через Leopard: {prepared_file}")
+            transcript = await asyncio.to_thread(_run_leopard_sync, prepared_file)
+            logger.info(f"Leopard транскрипция завершена. Длина: {len(transcript)} символов")
+        except Exception as e:
+            logger.error(f"Ошибка Leopard транскрипции {file_path}: {e}")
+            raise TranscriptionError(str(e), file_path)
+
+        compression_info = {
+            "compressed": False,
+            "original_size_mb": 0,
+            "compressed_size_mb": 0,
+            "compression_ratio": 0,
+            "compression_saved_mb": 0
+        }
+
+        return transcript, compression_info
+
     async def transcribe_with_diarization(self, file_path: str, language: str = "ru") -> TranscriptionResult:
         """Транскрибировать файл с диаризацией и защитой от OOM"""
         
@@ -365,6 +450,32 @@ class TranscriptionService:
         
         try:
             # Выбираем метод транскрипции в зависимости от настроек
+            if settings.transcription_mode == "leopard":
+                # Локальная транскрипция через Picovoice Leopard
+                transcription, compression_info = await self._transcribe_with_leopard(file_path)
+
+                # Применяем диаризацию при необходимости
+                if DIARIZATION_AVAILABLE and settings.enable_diarization:
+                    try:
+                        logger.info("Применение диаризации к результатам Leopard транскрипции...")
+                        diarization_result = await diarization_service.diarize_file(
+                            file_path, language
+                        )
+                        if diarization_result:
+                            result.diarization = diarization_result.to_dict()
+                            result.speakers_text = diarization_result.get_speakers_text()
+                            result.formatted_transcript = diarization_result.get_formatted_transcript()
+                            result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                            logger.info(f"Диаризация применена. Найдено говорящих: {len(diarization_result.speakers)}")
+                    except Exception as e:
+                        logger.warning(f"Ошибка диаризации после Leopard: {e}")
+
+                result.transcription = transcription
+                if not result.formatted_transcript:
+                    result.formatted_transcript = transcription
+                result.compression_info = compression_info
+                
+                return result
             if settings.transcription_mode == "speechmatics" and SPEECHMATICS_AVAILABLE and speechmatics_service.is_available():
                 # Транскрипция через Speechmatics API
                 try:

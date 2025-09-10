@@ -6,6 +6,8 @@ groq>=0.4.0
 speechmatics-python>=1.0.0
 # Picovoice Falcon для диаризации
 pvfalcon>=1.0.0
+# Picovoice Leopard для локальной транскрипции
+pvleopard>=1.0.0
 # Audio processing libraries with compatible versions
 openai-whisper>=20231117
 whisperx>=3.1.1
