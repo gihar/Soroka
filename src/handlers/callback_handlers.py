@@ -315,6 +315,85 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         except Exception as e:
             logger.error(f"Ошибка в settings_preferred_llm_callback: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке настроек")
+
+    @router.callback_query(F.data == "settings_openai_model")
+    async def settings_openai_model_callback(callback: CallbackQuery):
+        """Обработчик меню выбора модели OpenAI"""
+        try:
+            from config import settings as app_settings
+            models = getattr(app_settings, 'openai_models', [])
+            if not models or len(models) == 0:
+                await callback.message.edit_text(
+                    "❌ Не настроены модели OpenAI.\n\n"
+                    "Добавьте переменную окружения `OPENAI_MODELS` с перечнем пресетов.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+                    ])
+                )
+                await callback.answer()
+                return
+            # Получаем текущего пользователя и его выбор
+            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+            selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
+
+            keyboard_rows = []
+            for p in models:
+                label = f"{'✅ ' if selected_key == p.key else ''}{p.name}"
+                keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"set_openai_model_{p.key}")])
+            keyboard_rows.append([InlineKeyboardButton(text="🔄 Сбросить выбор модели", callback_data="reset_openai_model_preference")])
+            keyboard_rows.append([InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")])
+
+            await callback.message.edit_text(
+                "🧠 **Модель OpenAI**\n\n"
+                "Выберите модель, которая будет использоваться при провайдере OpenAI:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в settings_openai_model_callback: {e}")
+            await callback.answer("❌ Не удалось загрузить модели OpenAI")
+
+    @router.callback_query(F.data.startswith("set_openai_model_"))
+    async def set_openai_model_callback(callback: CallbackQuery):
+        """Устанавливает предпочитаемую модель OpenAI"""
+        try:
+            model_key = callback.data.replace("set_openai_model_", "")
+            await user_service.update_user_openai_model_preference(callback.from_user.id, model_key)
+            # Находим человекочитаемое имя модели из настроек
+            try:
+                from config import settings as app_settings
+                preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == model_key), None)
+                model_name = preset.name if preset else model_key
+            except Exception:
+                model_name = model_key
+            await callback.message.edit_text(
+                f"✅ Модель OpenAI обновлена: {model_name}.\n\n"
+                "Она будет использоваться при выборе провайдера OpenAI.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+                ])
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в set_openai_model_callback: {e}")
+            await callback.answer("❌ Не удалось сохранить выбор модели")
+
+    @router.callback_query(F.data == "reset_openai_model_preference")
+    async def reset_openai_model_preference_callback(callback: CallbackQuery):
+        """Сбрасывает предпочитаемую модель OpenAI"""
+        try:
+            await user_service.update_user_openai_model_preference(callback.from_user.id, None)
+            await callback.message.edit_text(
+                "🔄 Выбор модели OpenAI сброшен.\n\n"
+                "Будет использован пресет по умолчанию.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+                ])
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в reset_openai_model_preference_callback: {e}")
+            await callback.answer("❌ Не удалось сбросить выбор модели")
     
     
     
@@ -529,8 +608,25 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
         if preferred_llm in available_providers:
             # Сохраняем в состояние и сразу переходим к обработке
             await state.update_data(llm_provider=preferred_llm)
+            # Добавляем имя модели для OpenAI при наличии пресета
+            model_suffix = ""
+            if preferred_llm == 'openai':
+                try:
+                    from config import settings as app_settings
+                    selected_key = getattr(user, 'preferred_openai_model_key', None)
+                    preset = None
+                    if selected_key:
+                        preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == selected_key), None)
+                    if not preset:
+                        models = getattr(app_settings, 'openai_models', [])
+                        if models:
+                            preset = models[0]
+                    if preset:
+                        model_suffix = f" — {preset.name}"
+                except Exception:
+                    pass
             await callback.message.edit_text(
-                f"🤖 Используется сохранённый LLM: {available_providers[preferred_llm]}\n\n"
+                f"🤖 Используется LLM: {available_providers[preferred_llm]}{model_suffix}\n\n"
                 "⏳ Начинаю обработку..."
             )
             await _process_file(callback, state, processing_service)

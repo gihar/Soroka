@@ -18,7 +18,7 @@ class LLMProvider(ABC):
     """Абстрактный базовый класс для LLM провайдеров"""
     
     @abstractmethod
-    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол на основе транскрипции и шаблона"""
         pass
     
@@ -102,21 +102,22 @@ class OpenAIProvider(LLMProvider):
     
     def __init__(self):
         self.client = None
+        self.http_client = None
         if settings.openai_api_key:
             openai.api_key = settings.openai_api_key
             # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
             self.client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
-                http_client=http_client
+                http_client=self.http_client
             )
     
     def is_available(self) -> bool:
         return self.client is not None and settings.openai_api_key is not None
     
-    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол используя OpenAI GPT"""
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
@@ -126,25 +127,48 @@ class OpenAIProvider(LLMProvider):
         user_prompt = _build_user_prompt(transcription, template_variables, diarization_data)
         
         try:
+            # Выбор пресета модели, если передан ключ
+            selected_model = settings.openai_model
+            selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+            model_key = kwargs.get("openai_model_key")
+            if model_key:
+                try:
+                    preset = next((p for p in settings.openai_models if p.key == model_key), None)
+                except Exception:
+                    preset = None
+                if preset:
+                    selected_model = preset.model
+                    if getattr(preset, 'base_url', None):
+                        selected_base_url = preset.base_url
+            
+            # Клиент для нужного base_url (по умолчанию используем self.client)
+            client = self.client
+            if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+                client = openai.OpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=selected_base_url,
+                    http_client=self.http_client
+                )
+
             # Диагностика запроса (без утечки полной транскрипции)
-            base_url = settings.openai_base_url or "https://api.openai.com/v1"
+            base_url = selected_base_url or "https://api.openai.com/v1"
             sys_msg = "Ты - строгий аналитик протоколов встреч..."
             user_len = len(user_prompt)
             transcript_len = len(transcription)
             vars_count = len(template_variables)
             logger.info(
-                f"OpenAI запрос: model={settings.openai_model}, base_url={base_url}, "
+                f"OpenAI запрос: model={selected_model}, base_url={base_url}, "
                 f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
             )
             _snippet = user_prompt[:400].replace("\n", " ")
             logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
 
-            logger.info(f"Отправляем запрос в OpenAI с моделью {settings.openai_model}")
+            logger.info(f"Отправляем запрос в OpenAI с моделью {selected_model}")
             # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
             async def _call_openai():
                 return await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=settings.openai_model,
+                    client.chat.completions.create,
+                    model=selected_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -199,7 +223,7 @@ class AnthropicProvider(LLMProvider):
     def is_available(self) -> bool:
         return self.client is not None and settings.anthropic_api_key is not None
     
-    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол используя Anthropic Claude"""
         if not self.is_available():
             raise ValueError("Anthropic API не настроен")
@@ -266,7 +290,7 @@ class YandexGPTProvider(LLMProvider):
     def is_available(self) -> bool:
         return self.api_key is not None and self.folder_id is not None
     
-    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол используя Yandex GPT"""
         if not self.is_available():
             raise ValueError("Yandex GPT API не настроен")
@@ -359,7 +383,7 @@ class LLMManager:
         return available
     
     async def generate_protocol(self, provider_name: str, transcription: str, 
-                              template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                              template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол используя указанного провайдера"""
         if provider_name not in self.providers:
             raise ValueError(f"Неизвестный провайдер: {provider_name}")
@@ -368,7 +392,8 @@ class LLMManager:
         if not provider.is_available():
             raise ValueError(f"Провайдер {provider_name} недоступен")
         
-        return await provider.generate_protocol(transcription, template_variables, diarization_data)
+        # Передаем дополнительные аргументы (например, openai_model_key)
+        return await provider.generate_protocol(transcription, template_variables, diarization_data, **kwargs)
     
     async def generate_protocol_with_fallback(self, preferred_provider: str, transcription: str, 
                                             template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

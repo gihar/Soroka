@@ -171,11 +171,29 @@ async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_
                 # Сохраняем в состояние и сразу начинаем обработку
                 await state.update_data(llm_provider=preferred_llm)
                 
-                await message.answer(
-                    f"🤖 **Используется сохранённый LLM: {available_providers[preferred_llm]}**\n\n"
-                    f"⏳ Начинаю обработку файла...",
-                    parse_mode="Markdown"
+                # Добавляем имя модели для OpenAI при наличии пресета
+                model_suffix = ""
+                if preferred_llm == 'openai':
+                    try:
+                        from config import settings as app_settings
+                        selected_key = getattr(user, 'preferred_openai_model_key', None)
+                        preset = None
+                        if selected_key:
+                            preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == selected_key), None)
+                        if not preset:
+                            models = getattr(app_settings, 'openai_models', [])
+                            if models:
+                                preset = models[0]
+                        if preset:
+                            model_suffix = f" — {preset.name}"
+                    except Exception:
+                        pass
+
+                text = (
+                    f"🤖 **Используется LLM: {available_providers[preferred_llm]}{model_suffix}**\n\n"
+                    f"⏳ Начинаю обработку файла..."
                 )
+                await message.answer(text, parse_mode="Markdown")
                 
                 # Начинаем обработку файла
                 await _start_file_processing(message, state, processing_service)

@@ -128,6 +128,12 @@ class QuickActionsUI:
             ],
             [
                 InlineKeyboardButton(
+                    text="🧠 Модель OpenAI",
+                    callback_data="settings_openai_model"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="📝 Шаблон по умолчанию",
                     callback_data="settings_default_template"
                 )

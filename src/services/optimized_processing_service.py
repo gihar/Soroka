@@ -249,13 +249,23 @@ class OptimizedProcessingService(BaseProcessingService):
             # Создаем задачу для LLM
             llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
             
+            # Определяем ключ пресета модели OpenAI для текущего пользователя (если применимо)
+            openai_model_key = None
+            try:
+                user = await self.user_service.get_user_by_telegram_id(request.user_id)
+                if user and request.llm_provider == 'openai':
+                    openai_model_key = getattr(user, 'preferred_openai_model_key', None)
+            except Exception:
+                openai_model_key = None
+
             llm_result = await task_pool.submit_task(
                 llm_task_id,
                 self._generate_llm_response,
                 transcription_result,
                 template,
                 template_variables,
-                request.llm_provider
+                request.llm_provider,
+                openai_model_key
             )
             
             if not llm_result.success:
@@ -297,11 +307,12 @@ class OptimizedProcessingService(BaseProcessingService):
             return self._get_template_variables()
 
     async def _generate_llm_response(self, transcription_result, template, 
-                                   template_variables, llm_provider):
+                                   template_variables, llm_provider, openai_model_key=None):
         """Генерация ответа LLM с постобработкой"""
         llm_result = await self.llm_service.generate_protocol_with_fallback(
             llm_provider, transcription_result.transcription, template_variables,
-            transcription_result.diarization if hasattr(transcription_result, 'diarization') else None
+            transcription_result.diarization if hasattr(transcription_result, 'diarization') else None,
+            openai_model_key=openai_model_key
         )
         
         # Постобработка результатов - проверяем и исправляем неправильные JSON-структуры

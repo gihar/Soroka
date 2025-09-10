@@ -26,6 +26,7 @@ class Database:
                     first_name TEXT,
                     last_name TEXT,
                     preferred_llm TEXT DEFAULT 'openai',
+                    preferred_openai_model_key TEXT,
                     default_template_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +71,13 @@ class Database:
             except Exception:
                 # Поле уже существует, пропускаем
                 pass
+            # Миграция: добавляем поле preferred_openai_model_key если его нет
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN preferred_openai_model_key TEXT")
+                logger.info("Добавлено поле preferred_openai_model_key в таблицу users")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
             
             await db.commit()
             logger.info("База данных инициализирована")
@@ -102,6 +110,15 @@ class Database:
             await db.execute(
                 "UPDATE users SET preferred_llm = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
                 (llm_provider, telegram_id)
+            )
+            await db.commit()
+
+    async def update_user_openai_model_preference(self, telegram_id: int, model_key: Optional[str]):
+        """Обновить предпочтения модели OpenAI пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE users SET preferred_openai_model_key = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
+                (model_key, telegram_id)
             )
             await db.commit()
     

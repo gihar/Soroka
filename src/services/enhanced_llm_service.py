@@ -79,7 +79,8 @@ class EnhancedLLMService:
     
     async def _generate_protocol_primary(self, provider: str, transcription: str, 
                                        template_variables: Dict[str, str],
-                                       diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                                       diarization_data: Optional[Dict[str, Any]] = None,
+                                       openai_model_key: Optional[str] = None) -> Dict[str, Any]:
         """Основной метод генерации протокола с защитой"""
         # Проверяем rate limiter
         rate_limiter = self.rate_limiters.get(provider)
@@ -95,14 +96,16 @@ class EnhancedLLMService:
             async def protected_call():
                 return await retry_manager.execute_with_retry(
                     self.llm_manager.generate_protocol,
-                    provider, transcription, template_variables, diarization_data
+                    provider, transcription, template_variables, diarization_data,
+                    openai_model_key=openai_model_key
                 )
             
             return await circuit_breaker.call(protected_call)
         else:
             # Fallback к прямому вызову
             return await self.llm_manager.generate_protocol(
-                provider, transcription, template_variables, diarization_data
+                provider, transcription, template_variables, diarization_data,
+                openai_model_key=openai_model_key
             )
     
     async def generate_protocol(self, request: LLMRequest) -> LLMResponse:
@@ -147,7 +150,8 @@ class EnhancedLLMService:
     
     async def generate_protocol_with_fallback(self, preferred_provider: str, transcription: str, 
                                             template_variables: Dict[str, str], 
-                                            diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                                            diarization_data: Optional[Dict[str, Any]] = None,
+                                            openai_model_key: Optional[str] = None) -> Dict[str, Any]:
         """Генерировать протокол с автоматическим переключением провайдеров"""
         available_providers = list(self.get_available_providers().keys())
         
@@ -157,7 +161,8 @@ class EnhancedLLMService:
             cache_key = f"fallback_{hash(transcription[:100])}"
             return await self.fallback_manager.execute(
                 None, transcription, template_variables, diarization_data,
-                cache_key=cache_key
+                cache_key=cache_key,
+                openai_model_key=openai_model_key
             )
         
         # Упорядочиваем провайдеры: предпочитаемый первым
@@ -178,7 +183,8 @@ class EnhancedLLMService:
                 cache_key = f"{provider}_{hash(transcription[:100])}"
                 result = await self.fallback_manager.execute(
                     provider, transcription, template_variables, diarization_data,
-                    cache_key=cache_key
+                    cache_key=cache_key,
+                    openai_model_key=openai_model_key
                 )
                 exec_info = getattr(self.fallback_manager, 'last_execution', {})
                 if exec_info.get('mode') == 'fallback':
@@ -208,7 +214,8 @@ class EnhancedLLMService:
         try:
             return await self.fallback_manager.execute(
                 None, transcription, template_variables, diarization_data,
-                cache_key=cache_key
+                cache_key=cache_key,
+                openai_model_key=openai_model_key
             )
         except Exception as fallback_error:
             logger.error(f"Fallback также не сработал: {fallback_error}")

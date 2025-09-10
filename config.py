@@ -3,8 +3,15 @@
 """
 
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator
-from typing import Optional
+from pydantic import Field, validator, BaseModel
+from typing import Optional, List
+
+
+class OpenAIModelPreset(BaseModel):
+    key: str = Field(..., description="Уникальный ключ пресета (slug)")
+    name: str = Field(..., description="Отображаемое имя в меню")
+    model: str = Field(..., description="ID модели для API")
+    base_url: Optional[str] = Field(None, description="Базовый URL для этого пресета")
 
 
 class Settings(BaseSettings):
@@ -17,6 +24,16 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(None, description="API ключ OpenAI")
     openai_base_url: Optional[str] = Field(None, description="Базовый URL для OpenAI API")
     openai_model: str = Field("gpt-3.5-turbo", description="Модель OpenAI для генерации")
+    
+    # Наборы моделей OpenAI с собственными базовыми URL (по одному API ключу)
+    # Формат переменной окружения OPENAI_MODELS: JSON-массив объектов вида
+    # [
+    #   {"key": "openai_gpt4o", "name": "OpenAI: gpt-4o", "model": "gpt-4o", "base_url": "https://api.openai.com/v1"},
+    #   {"key": "local_oq", "name": "OpenRouter: llama3.1:70b", "model": "meta-llama/llama-3.1-70b-instruct", "base_url": "https://openrouter.ai/api/v1"}
+    # ]
+    # Если не задано, автоматически формируется 1 пресет из OPENAI_MODEL и OPENAI_BASE_URL
+    
+    openai_models: List[OpenAIModelPreset] = Field(default_factory=list, description="Список пресетов моделей OpenAI")
     
     # Anthropic Claude
     anthropic_api_key: Optional[str] = Field(None, description="API ключ Anthropic")
@@ -78,6 +95,30 @@ class Settings(BaseSettings):
     cleanup_interval_minutes: int = Field(30, description="Интервал очистки файлов в минутах")
     temp_file_max_age_hours: int = Field(2, description="Максимальный возраст временных файлов в часах")
     cache_max_age_hours: int = Field(24, description="Максимальный возраст кэш файлов в часах")
+    
+    @validator('openai_models', pre=True, always=True)
+    def ensure_openai_models(cls, v, values):
+        """Гарантируем наличие хотя бы одного пресета OpenAI.
+        Если OPENAI_MODELS не задан, используем одиночные OPENAI_MODEL/OPENAI_BASE_URL.
+        """
+        try:
+            # Если явно передан список пресетов
+            if isinstance(v, list) and len(v) > 0:
+                # Приведение к целевой схеме произойдёт автоматически
+                return v
+        except Exception:
+            pass
+
+        # Формируем одиночный дефолтный пресет из старых настроек
+        model = values.get('openai_model', 'gpt-3.5-turbo')
+        base_url = values.get('openai_base_url')
+        default_preset = {
+            "key": "default",
+            "name": f"OpenAI: {model}",
+            "model": model,
+            "base_url": base_url
+        }
+        return [default_preset]
     
     class Config:
         env_file = ".env"

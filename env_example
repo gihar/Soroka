@@ -18,6 +18,14 @@ OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-3.5-turbo
 
+# Опционально: Несколько пресетов моделей OpenAI (JSON-массив)
+# Если не задано, пресет по умолчанию будет собран из OPENAI_MODEL/OPENAI_BASE_URL
+# Пример:
+# OPENAI_MODELS=[
+#   {"key": "openai_gpt4o", "name": "OpenAI: gpt-4o", "model": "gpt-4o", "base_url": "https://api.openai.com/v1"},
+#   {"key": "openrouter_llama3_70b", "name": "OpenRouter: Llama 3.1 70B", "model": "meta-llama/llama-3.1-70b-instruct", "base_url": "https://openrouter.ai/api/v1"}
+# ]
+
 # Таймаут ожидания ответа от LLM (в секундах)
 LLM_TIMEOUT_SECONDS=30
 

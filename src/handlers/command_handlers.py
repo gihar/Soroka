@@ -70,6 +70,22 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 return
             
             current_llm = user.preferred_llm if user else 'openai'
+            # Готовим информацию о выбранной модели OpenAI (если применимо)
+            from config import settings as app_settings
+            openai_model_name = None
+            try:
+                if current_llm == 'openai' and getattr(app_settings, 'openai_models', None):
+                    selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
+                    # Выбираем текущий пресет: выбранный пользователем или дефолтный первый
+                    preset = None
+                    if selected_key:
+                        preset = next((p for p in app_settings.openai_models if p.key == selected_key), None)
+                    if not preset and len(app_settings.openai_models) > 0:
+                        preset = app_settings.openai_models[0]
+                    if preset:
+                        openai_model_name = preset.name
+            except Exception:
+                openai_model_name = None
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -87,11 +103,19 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             # Определяем статус автоматического выбора
             auto_select_status = "включён" if user and user.preferred_llm is not None else "выключен"
             
-            await message.answer(
+            base_text = (
                 f"⚙️ **Настройки бота**\n\n"
                 f"Текущий LLM: {available_providers.get(current_llm, 'Не настроен')}\n"
-                f"Автоматический выбор: {auto_select_status}\n\n"
-                f"Выберите LLM провайдера:",
+                f"Автоматический выбор: {auto_select_status}\n"
+            )
+            if openai_model_name:
+                base_text += f"Модель OpenAI: {openai_model_name}\n\n"
+            else:
+                base_text += "\n"
+            base_text += "Выберите LLM провайдера:"
+
+            await message.answer(
+                base_text,
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
