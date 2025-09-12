@@ -92,6 +92,24 @@ class UserService:
         except Exception as e:
             logger.error(f"Ошибка при обновлении предпочтений LLM для пользователя {telegram_id}: {e}")
             raise
+
+    async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]) -> User:
+        """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
+        try:
+            user = await self.get_user_by_telegram_id(telegram_id)
+            if not user:
+                raise UserNotFoundError(telegram_id)
+            await self.db.update_user_protocol_output_preference(telegram_id, mode)
+            updated_user = await self.get_user_by_telegram_id(telegram_id)
+            if not updated_user:
+                raise UserNotFoundError(telegram_id)
+            logger.info(f"Обновлен режим вывода протокола для пользователя {telegram_id}: {mode}")
+            return updated_user
+        except UserNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении режима вывода протокола для пользователя {telegram_id}: {e}")
+            raise
     
     async def get_or_create_user(self, telegram_id: int, username: str = None, 
                                 first_name: str = None, last_name: str = None) -> User:

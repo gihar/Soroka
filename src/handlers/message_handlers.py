@@ -334,23 +334,57 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             # Отправляем результат
             await message.answer(result_message, parse_mode="Markdown")
             
-            # Проверяем длину протокола и отправляем его
+            # Отправляем протокол согласно пользовательской настройке
             if not result.protocol_text:
                 logger.warning("protocol_text пустой или None")
                 await message.answer("❌ Протокол не был сгенерирован")
             else:
-                protocol_length = len(result.protocol_text)
-                logger.info(f"Длина протокола: {protocol_length} символов")
-                logger.info(f"Тип protocol_text: {type(result.protocol_text)}")
-                
-                if protocol_length > 4000:
-                    logger.info(f"Протокол длинный ({protocol_length} символов), разбиваем на части")
-                    # Разбиваем длинный протокол на части
-                    await _send_long_protocol(message, result.protocol_text)
-                else:
-                    logger.info(f"Протокол короткий ({protocol_length} символов), отправляем как есть")
-                    # Отправляем короткий протокол как есть
-                    await message.answer(result.protocol_text, parse_mode="Markdown")
+                try:
+                    from src.services.user_service import UserService as _US
+                    user_pref_service = _US()
+                    user = await user_pref_service.get_user_by_telegram_id(message.from_user.id)
+                    output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
+
+                    if output_mode == 'file':
+                        import tempfile
+                        from aiogram.types import FSInputFile
+                        suffix = '.md'
+                        safe_name = 'protocol'
+                        try:
+                            original = result.transcription_result and data.get('file_name') or 'protocol'
+                            import os
+                            safe_name = os.path.splitext(os.path.basename(original))[0][:40] or 'protocol'
+                        except Exception:
+                            pass
+                        with tempfile.NamedTemporaryFile('w', suffix=suffix, delete=False, encoding='utf-8') as f:
+                            f.write(result.protocol_text or '')
+                            temp_path = f.name
+                        try:
+                            file_input = FSInputFile(temp_path, filename=f"{safe_name}.md")
+                            await message.answer_document(
+                                file_input,
+                                caption="📎 Протокол встречи"
+                            )
+                        finally:
+                            import os
+                            try:
+                                os.unlink(temp_path)
+                            except Exception:
+                                pass
+                    else:
+                        # В сообщения: разбиваем при необходимости
+                        protocol_length = len(result.protocol_text)
+                        logger.info(f"Длина протокола: {protocol_length} символов")
+                        logger.info(f"Тип protocol_text: {type(result.protocol_text)}")
+                        if protocol_length > 4000:
+                            logger.info(f"Протокол длинный ({protocol_length} символов), разбиваем на части")
+                            await _send_long_protocol(message, result.protocol_text)
+                        else:
+                            logger.info(f"Протокол короткий ({protocol_length} символов), отправляем как есть")
+                            await message.answer(result.protocol_text, parse_mode="Markdown")
+                except Exception as send_err:
+                    logger.error(f"Ошибка при отправке протокола: {send_err}")
+                    await message.answer("⚠️ Не удалось отправить протокол. Попробуйте позже.")
             
             # Показываем кнопки быстрой обратной связи
             from ux.feedback_system import feedback_collector

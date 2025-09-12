@@ -28,6 +28,7 @@ class Database:
                     preferred_llm TEXT DEFAULT 'openai',
                     preferred_openai_model_key TEXT,
                     default_template_id INTEGER,
+                    protocol_output_mode TEXT DEFAULT 'messages',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (default_template_id) REFERENCES templates (id)
@@ -78,6 +79,13 @@ class Database:
             except Exception:
                 # Поле уже существует, пропускаем
                 pass
+            # Миграция: добавляем поле protocol_output_mode если его нет
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN protocol_output_mode TEXT DEFAULT 'messages'")
+                logger.info("Добавлено поле protocol_output_mode в таблицу users (по умолчанию 'messages')")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
             
             await db.commit()
             logger.info("База данных инициализирована")
@@ -110,6 +118,15 @@ class Database:
             await db.execute(
                 "UPDATE users SET preferred_llm = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
                 (llm_provider, telegram_id)
+            )
+            await db.commit()
+
+    async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]):
+        """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE users SET protocol_output_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
+                (mode, telegram_id)
             )
             await db.commit()
 

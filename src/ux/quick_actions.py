@@ -134,6 +134,12 @@ class QuickActionsUI:
             ],
             [
                 InlineKeyboardButton(
+                    text="📤 Вывод протокола",
+                    callback_data="settings_protocol_output"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="📝 Шаблон по умолчанию",
                     callback_data="settings_default_template"
                 )

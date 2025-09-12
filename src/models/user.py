@@ -16,6 +16,10 @@ class UserBase(BaseModel):
     preferred_llm: Optional[str] = Field(None, description="Предпочитаемый LLM провайдер")
     preferred_openai_model_key: Optional[str] = Field(None, description="Ключ выбранной модели OpenAI")
     default_template_id: Optional[int] = Field(None, description="ID шаблона по умолчанию")
+    protocol_output_mode: Optional[str] = Field(
+        None,
+        description="Режим вывода протокола: 'messages' (в сообщения) или 'file' (в файл)"
+    )
 
 
 class UserCreate(UserBase):

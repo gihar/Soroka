@@ -459,7 +459,11 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         try:
             # Сбрасываем все настройки пользователя
             await user_service.update_user_llm_preference(callback.from_user.id, None)
-            # TODO: Добавить сброс других настроек
+            # Сбрасываем режим вывода протокола на значение по умолчанию
+            try:
+                await user_service.update_user_protocol_output_preference(callback.from_user.id, 'messages')
+            except Exception:
+                pass
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -482,6 +486,66 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         except Exception as e:
             logger.error(f"Ошибка в settings_reset_callback: {e}")
             await callback.answer("❌ Произошла ошибка при сбросе настроек")
+
+    @router.callback_query(F.data == "settings_protocol_output")
+    async def settings_protocol_output_callback(callback: CallbackQuery):
+        """Обработчик настройки режима вывода протокола"""
+        try:
+            # Получаем текущую настройку пользователя
+            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+            current = getattr(user, 'protocol_output_mode', None) or 'messages'
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if current == 'messages' else ''}💬 В сообщения",
+                    callback_data="set_protocol_output_messages"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if current == 'file' else ''}📎 В файл",
+                    callback_data="set_protocol_output_file"
+                )],
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к настройкам",
+                    callback_data="back_to_settings"
+                )]
+            ])
+
+            await callback.message.edit_text(
+                "📤 **Вывод протокола**\n\n"
+                "Выберите, как отправлять готовый протокол:\n"
+                "• 💬 В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
+                "• 📎 В файл — протокол отправляется как прикрепленный файл (.md)",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в settings_protocol_output_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при загрузке настроек")
+
+    @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file"}))
+    async def set_protocol_output_mode_callback(callback: CallbackQuery):
+        """Установка режима вывода протокола"""
+        try:
+            mode = 'messages' if callback.data.endswith('messages') else 'file'
+            await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к настройкам",
+                    callback_data="back_to_settings"
+                )]
+            ])
+
+            mode_text = "💬 В сообщения" if mode == 'messages' else "📎 В файл"
+            await callback.message.edit_text(
+                f"✅ Режим вывода протокола изменён на: {mode_text}",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в set_protocol_output_mode_callback: {e}")
+            await callback.answer("❌ Не удалось изменить режим вывода")
     
     @router.callback_query(F.data == "back_to_settings")
     async def back_to_settings_callback(callback: CallbackQuery):
@@ -765,15 +829,51 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
                 else:
                     raise e
             
-            # Отправляем протокол с обработкой ошибок
+            # Отправляем протокол согласно настройке пользователя
             try:
-                await _send_long_message(callback.message.chat.id, result.protocol_text, callback.bot)
+                from src.services.user_service import UserService as _US
+                user_pref_service = _US()
+                user = await user_pref_service.get_user_by_telegram_id(callback.from_user.id)
+                output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
+
+                if output_mode == 'file':
+                    # Сохраняем протокол во временный .md файл и отправляем как документ
+                    import tempfile
+                    from aiogram.types import FSInputFile
+                    suffix = '.md'
+                    safe_name = 'protocol'
+                    try:
+                        # Попробуем извлечь базовое имя из исходного файла
+                        data = await state.get_data()
+                        original = data.get('file_name') or 'protocol'
+                        import os
+                        safe_name = os.path.splitext(os.path.basename(original))[0][:40] or 'protocol'
+                    except Exception:
+                        pass
+                    with tempfile.NamedTemporaryFile('w', suffix=suffix, delete=False, encoding='utf-8') as f:
+                        f.write(result.protocol_text or '')
+                        temp_path = f.name
+                    try:
+                        file_input = FSInputFile(temp_path, filename=f"{safe_name}.md")
+                        await callback.message.answer_document(
+                            file_input,
+                            caption="📎 Протокол встречи"
+                        )
+                    finally:
+                        import os
+                        try:
+                            os.unlink(temp_path)
+                        except Exception:
+                            pass
+                else:
+                    # По умолчанию отправляем в сообщения (разбиваем по частям при необходимости)
+                    await _send_long_message(callback.message.chat.id, result.protocol_text, callback.bot)
             except Exception as e:
                 logger.error(f"Ошибка отправки протокола: {e}")
                 # Отправляем уведомление об ошибке
                 await callback.bot.send_message(
                     callback.message.chat.id,
-                    "⚠️ Протокол слишком длинный для отправки. Попробуйте обработать файл меньшего размера."
+                    "⚠️ Не удалось отправить протокол. Попробуйте позже."
                 )
             
             # Запрашиваем обратную связь
