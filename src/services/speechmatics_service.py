@@ -44,6 +44,9 @@ class SpeechmaticsService:
     
     def __init__(self):
         self.client = None
+        # Гарантируем существование атрибута settings даже без API ключа,
+        # чтобы is_available() не обращался к неинициализированному полю
+        self.settings = None
         self.temp_dir = Path(settings.temp_dir)
         self.temp_dir.mkdir(exist_ok=True)
         
