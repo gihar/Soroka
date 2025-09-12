@@ -191,8 +191,10 @@ class MessageBuilder:
             template_name = result["template_used"].get("name", "Неизвестный")
             message += f"📝 Шаблон: {template_name}\n"
         
-        if result.get("llm_provider_used"):
-            message += f"🤖 ИИ: {result['llm_provider_used']}\n"
+        # Показываем человекочитаемое имя модели, если доступно
+        if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
+            ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
+            message += f"🤖 ИИ: {ai_name}\n"
         
         # Информация о транскрипции (с ограничением длины)
         if result.get("transcription_result"):
@@ -243,8 +245,9 @@ class MessageBuilder:
                 template_name = result["template_used"].get("name", "Неизвестный")
                 message += f"📝 Шаблон: {template_name}\n"
             
-            if result.get("llm_provider_used"):
-                message += f"🤖 ИИ: {result['llm_provider_used']}\n"
+            if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
+                ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
+                message += f"🤖 ИИ: {ai_name}\n"
             
             if result.get("transcription_result", {}).get("transcription"):
                 char_count = len(result["transcription_result"]["transcription"])

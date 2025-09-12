@@ -171,8 +171,8 @@ async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_
                 # Сохраняем в состояние и сразу начинаем обработку
                 await state.update_data(llm_provider=preferred_llm)
                 
-                # Добавляем имя модели для OpenAI при наличии пресета
-                model_suffix = ""
+                # Формируем отображаемое имя: для OpenAI показываем название модели (без префикса провайдера)
+                llm_display = available_providers[preferred_llm]
                 if preferred_llm == 'openai':
                     try:
                         from config import settings as app_settings
@@ -184,13 +184,13 @@ async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_
                             models = getattr(app_settings, 'openai_models', [])
                             if models:
                                 preset = models[0]
-                        if preset:
-                            model_suffix = f" — {preset.name}"
+                        if preset and getattr(preset, 'name', None):
+                            llm_display = preset.name
                     except Exception:
                         pass
 
                 text = (
-                    f"🤖 **Используется LLM: {available_providers[preferred_llm]}{model_suffix}**\n\n"
+                    f"🤖 **Используется LLM: {llm_display}**\n\n"
                     f"⏳ Начинаю обработку файла..."
                 )
                 await message.answer(text, parse_mode="Markdown")
@@ -286,13 +286,36 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         try:
             # Обрабатываем файл с отображением прогресса
             result = await processing_service.process_file(request, progress_tracker)
-            
+
             await progress_tracker.complete_all()
-            
+
+            # Определяем красивое имя модели для отображения
+            llm_model_name = result.llm_provider_used
+            try:
+                if result.llm_provider_used == 'openai':
+                    from config import settings as app_settings
+                    from src.services.user_service import UserService
+                    user_service = UserService()
+                    user = await user_service.get_user_by_telegram_id(message.from_user.id)
+                    selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
+                    preset = None
+                    if selected_key:
+                        preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == selected_key), None)
+                    if not preset:
+                        models = getattr(app_settings, 'openai_models', [])
+                        if models:
+                            preset = models[0]
+                    if preset:
+                        llm_model_name = preset.name
+            except Exception:
+                # В случае ошибок оставляем провайдера по умолчанию
+                pass
+
             # Показываем результат с улучшенным форматированием
             result_dict = {
                 "template_used": {"name": result.template_used.get('name', 'Неизвестный')},
                 "llm_provider_used": result.llm_provider_used,
+                "llm_model_name": llm_model_name,
                 "processing_time": result.processing_duration,
                 "file_name": result.transcription_result.transcription[:100] + "..." if len(result.transcription_result.transcription) > 100 else result.transcription_result.transcription,
                 "summary": result.protocol_text,
