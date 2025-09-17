@@ -153,8 +153,14 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
-    def _preprocess_for_groq(self, file_path: str) -> tuple[str, dict]:
-        """Предобработать файл для Groq API: конвертировать в 16KHz моно MP3"""
+    def _preprocess_audio(
+        self,
+        file_path: str,
+        suffix: str,
+        ffmpeg_args: list[str],
+        target_description: str,
+    ) -> tuple[str, dict]:
+        """Универсальная предобработка аудио через ffmpeg с расчетом информации о сжатии."""
         compression_info = {
             "compressed": False,
             "original_size_mb": 0,
@@ -162,37 +168,33 @@ class TranscriptionService:
             "compression_ratio": 0,
             "compression_saved_mb": 0
         }
-        
+
         try:
             if not self._check_ffmpeg():
-                logger.warning("ffmpeg не найден, пропускаем предобработку")
+                logger.warning(f"ffmpeg не найден, пропускаем предобработку для {target_description}")
                 return file_path, compression_info
-            
+
             # Создаем временный файл для предобработки
-            temp_mp3 = self.temp_dir / f"{Path(file_path).stem}_preprocessed.mp3"
-            
+            temp_file = self.temp_dir / f"{Path(file_path).stem}_{suffix}"
+
             # Конвертируем в MP3 с параметрами для Groq API
             import subprocess
             cmd = [
                 "ffmpeg",
                 "-i", file_path,
-                "-ar", "16000",  # Частота дискретизации 16KHz
-                "-ac", "1",      # Моно
-                "-map", "0:a",   # Только аудио поток
-                "-c:a", "mp3",   # MP3 кодек
-                "-b:a", "64k",   # Низкий битрейт для максимального сжатия
-                "-y",            # Перезаписать существующий файл
-                str(temp_mp3)
+                *ffmpeg_args,
+                "-y",  # Перезаписать существующий файл
+                str(temp_file)
             ]
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode == 0:
                 original_size = os.path.getsize(file_path)
-                processed_size = os.path.getsize(temp_mp3)
+                processed_size = os.path.getsize(temp_file)
                 original_mb = original_size / (1024 * 1024)
                 processed_mb = processed_size / (1024 * 1024)
-                
+
                 # Рассчитываем информацию о сжатии
                 compression_info = {
                     "compressed": True,
@@ -201,16 +203,55 @@ class TranscriptionService:
                     "compression_ratio": (1 - processed_mb / original_mb) * 100 if original_mb > 0 else 0,
                     "compression_saved_mb": original_mb - processed_mb
                 }
-                
-                logger.info(f"Файл предобработан для Groq API: {processed_mb:.1f}MB (было: {original_mb:.1f}MB, сжатие: {compression_info['compression_ratio']:.1f}%)")
-                return str(temp_mp3), compression_info
+
+                logger.info(
+                    f"Файл предобработан для {target_description}: {processed_mb:.1f}MB "
+                    f"(было: {original_mb:.1f}MB, сжатие: {compression_info['compression_ratio']:.1f}%)"
+                )
+                return str(temp_file), compression_info
             else:
-                logger.warning(f"Ошибка предобработки файла: {result.stderr}")
+                logger.warning(
+                    f"Ошибка предобработки файла для {target_description}: {result.stderr}"
+                )
                 return file_path, compression_info
                 
         except Exception as e:
-            logger.warning(f"Не удалось предобработать файл: {e}")
+            logger.warning(f"Не удалось предобработать файл для {target_description}: {e}")
             return file_path, compression_info
+
+    def _preprocess_for_groq(self, file_path: str) -> tuple[str, dict]:
+        """Предобработать файл для Groq API: конвертировать в 16KHz моно MP3"""
+        ffmpeg_args = [
+            "-ar", "16000",  # Частота дискретизации 16KHz
+            "-ac", "1",      # Моно
+            "-map", "0:a",   # Только аудио поток
+            "-c:a", "mp3",   # MP3 кодек
+            "-b:a", "64k",   # Низкий битрейт для максимального сжатия
+        ]
+
+        return self._preprocess_audio(
+            file_path=file_path,
+            suffix="preprocessed.mp3",
+            ffmpeg_args=ffmpeg_args,
+            target_description="Groq API"
+        )
+
+    def _preprocess_for_speechmatics(self, file_path: str) -> tuple[str, dict]:
+        """Предобработать файл для Speechmatics API аналогично Groq (16KHz моно MP3)."""
+        ffmpeg_args = [
+            "-ar", "16000",
+            "-ac", "1",
+            "-map", "0:a",
+            "-c:a", "mp3",
+            "-b:a", "64k",
+        ]
+
+        return self._preprocess_audio(
+            file_path=file_path,
+            suffix="speechmatics.mp3",
+            ffmpeg_args=ffmpeg_args,
+            target_description="Speechmatics API"
+        )
     
     async def _transcribe_with_groq(self, file_path: str) -> tuple[str, dict]:
         """Транскрибация через Groq API"""
@@ -294,23 +335,26 @@ class TranscriptionService:
         
         try:
             logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
-            
+
+            processed_file, compression_info = self._preprocess_for_speechmatics(file_path)
+
             # Выполняем транскрипцию через Speechmatics
             result = await speechmatics_service.transcribe_file(
-                file_path=file_path,
+                file_path=processed_file,
                 language=language,
                 enable_diarization=enable_diarization
             )
-            
+
             # Возвращаем текст и информацию о сжатии (Speechmatics не сжимает файлы)
-            compression_info = {
-                "compressed": False,
-                "original_size_mb": 0,
-                "compressed_size_mb": 0,
-                "compression_ratio": 0,
-                "compression_saved_mb": 0
-            }
-            
+            if not compression_info.get("compressed"):
+                compression_info = {
+                    "compressed": False,
+                    "original_size_mb": 0,
+                    "compressed_size_mb": 0,
+                    "compression_ratio": 0,
+                    "compression_saved_mb": 0
+                }
+
             return result.transcription, compression_info
             
         except Exception as e:
@@ -481,12 +525,18 @@ class TranscriptionService:
                 try:
                     logger.info("Выполнение транскрипции через Speechmatics...")
                     
+                    processed_file, compression_info = self._preprocess_for_speechmatics(file_path)
+
                     # Выполняем транскрипцию через Speechmatics (с диаризацией если включена)
                     result = await speechmatics_service.transcribe_file(
-                        file_path=file_path,
+                        file_path=processed_file,
                         language=language,
                         enable_diarization=settings.enable_diarization
                     )
+
+                    # Сохраняем информацию о сжатии в результате
+                    if result:
+                        result.compression_info = compression_info
                     
                     logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
                     if settings.enable_diarization and result.diarization:
