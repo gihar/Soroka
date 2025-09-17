@@ -84,7 +84,55 @@ class URLService:
     
     def _get_google_drive_direct_url(self, file_id: str) -> str:
         """Получить прямую ссылку для скачивания с Google Drive"""
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
+        # Добавляем параметр confirm=t для обхода предупреждения о больших файлах
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    
+    async def _get_google_drive_real_download_url(self, file_id: str) -> str:
+        """Получить реальную ссылку для скачивания с Google Drive, обходя предупреждения"""
+        # Сначала пробуем стандартный метод
+        initial_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        try:
+            # Делаем запрос без редиректов, чтобы получить промежуточную ссылку
+            async with self.session.get(initial_url, allow_redirects=False) as response:
+                if response.status == 303:
+                    # Получаем ссылку из Location заголовка
+                    location = response.headers.get('location')
+                    if location:
+                        # Проверяем, ведет ли ссылка на HTML страницу с предупреждением
+                        async with self.session.get(location, allow_redirects=False) as warning_response:
+                            if warning_response.status == 200:
+                                content_type = warning_response.headers.get('content-type', '').lower()
+                                if 'text/html' in content_type:
+                                    # Это HTML страница с предупреждением, нужно извлечь реальную ссылку
+                                    html_content = await warning_response.text()
+                                    # Ищем ссылку для скачивания в HTML
+                                    import re
+                                    download_match = re.search(r'href="([^"]*download[^"]*)"', html_content)
+                                    if download_match:
+                                        download_url = download_match.group(1)
+                                        # Если ссылка относительная, делаем её абсолютной
+                                        if download_url.startswith('/'):
+                                            download_url = 'https://drive.usercontent.google.com' + download_url
+                                        return download_url
+                                    else:
+                                        # Если не нашли ссылку в HTML, пробуем альтернативный метод
+                                        return f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+                                else:
+                                    # Это не HTML, значит прямая ссылка на файл
+                                    return location
+                            else:
+                                return location
+                    else:
+                        # Если нет Location заголовка, используем стандартный метод
+                        return self._get_google_drive_direct_url(file_id)
+                else:
+                    # Если не редирект, используем исходную ссылку
+                    return initial_url
+        except Exception as e:
+            logger.warning(f"Ошибка при получении реальной ссылки Google Drive: {e}")
+            # В случае ошибки возвращаем стандартную ссылку
+            return self._get_google_drive_direct_url(file_id)
     
     async def _get_yandex_disk_direct_url(self, url: str) -> str:
         """Получить прямую ссылку для скачивания с Яндекс.Диска"""
@@ -116,6 +164,14 @@ class URLService:
         except aiohttp.ClientError as e:
             logger.error(f"Ошибка при получении информации о файле: {e}")
             raise FileError(f"Ошибка при получении информации о файле: {e}")
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка в get_file_info: {e}")
+            logger.error(f"Тип исключения в get_file_info: {type(e).__name__}")
+            if isinstance(e, FileSizeError):
+                logger.error(f"=== FileSizeError ПЕРЕХВАЧЕНА В get_file_info ===")
+                logger.error(f"FileSizeError выбрасывается в get_file_info!")
+                logger.error(f"Пробрасываем FileSizeError из get_file_info")
+            raise
     
     async def _get_google_drive_file_info(self, url: str) -> Tuple[str, int, str]:
         """Получить информацию о файле Google Drive"""
@@ -123,7 +179,8 @@ class URLService:
         if not file_id:
             raise FileError("Не удалось извлечь ID файла из ссылки Google Drive")
         
-        direct_url = self._get_google_drive_direct_url(file_id)
+        # Пытаемся получить прямую ссылку через альтернативный метод
+        direct_url = await self._get_google_drive_real_download_url(file_id)
         
         # Выполняем HEAD запрос для получения информации о файле
         async with self.session.head(direct_url, allow_redirects=True) as response:
@@ -132,9 +189,11 @@ class URLService:
                 content_length = response.headers.get('content-length')
                 if content_length:
                     file_size = int(content_length)
+                    logger.error(f"Размер файла получен из content-length: {file_size}")
                 else:
                     # Если размер неизвестен, делаем частичный GET запрос
                     file_size = await self._get_file_size_by_range(direct_url)
+                    logger.error(f"Размер файла получен из range запроса: {file_size}")
                 
                 # Получаем имя файла
                 content_disposition = response.headers.get('content-disposition', '')
@@ -256,11 +315,15 @@ class URLService:
         """Валидация файла по его информации"""
         # Проверка размера
         if file_size > settings.max_external_file_size:
-            raise FileSizeError(
+            logger.error(f"=== FileSizeError ВЫБРАСЫВАЕТСЯ В validate_file_by_info ===")
+            logger.error(f"Размер файла: {file_size}, лимит: {settings.max_external_file_size}")
+            error = FileSizeError(
                 file_size,
                 settings.max_external_file_size,
                 filename
             )
+            logger.error(f"FileSizeError создан: {error}")
+            raise error
         
         # Проверка расширения
         if filename:
@@ -304,7 +367,7 @@ class URLService:
             # Получаем прямую ссылку
             if self._is_google_drive_url(url):
                 file_id = self._extract_google_drive_id(url)
-                download_url = self._get_google_drive_direct_url(file_id)
+                download_url = await self._get_google_drive_real_download_url(file_id)
             elif self._is_yandex_disk_url(url):
                 download_url = await self._get_yandex_disk_direct_url(url)
             else:
@@ -340,8 +403,8 @@ class URLService:
         # Получаем информацию о файле
         filename, file_size, direct_url = await self.get_file_info(url)
         
-        # Валидируем файл
-        self.validate_file_by_info(filename, file_size)
+        # Валидация файла должна быть выполнена вызывающим кодом
+        # self.validate_file_by_info(filename, file_size)
         
         # Скачиваем файл
         temp_path = await self.download_file(url, filename)

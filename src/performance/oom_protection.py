@@ -14,6 +14,8 @@ from loguru import logger
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
+from config import settings
+
 
 @dataclass
 class MemoryLimits:
@@ -25,11 +27,26 @@ class MemoryLimits:
     max_process_memory_mb: float = 1024.0  # Максимальная память процесса
 
 
+DEFAULT_MEMORY_LIMITS = MemoryLimits()
+
+
 class OOMProtection:
     """Система защиты от OOM Killer"""
     
     def __init__(self, limits: Optional[MemoryLimits] = None):
-        self.limits = limits or MemoryLimits()
+        if limits is None:
+            max_file_size_mb = settings.oom_max_file_size_mb
+
+            if max_file_size_mb is None:
+                configured_max_bytes = settings.max_file_size
+                max_file_size_mb = configured_max_bytes / (1024 * 1024)
+
+                if max_file_size_mb <= 0:
+                    max_file_size_mb = DEFAULT_MEMORY_LIMITS.max_file_size_mb
+
+            limits = MemoryLimits(max_file_size_mb=max_file_size_mb)
+
+        self.limits = limits
         self.process = psutil.Process()
         self.system_memory = psutil.virtual_memory()
         

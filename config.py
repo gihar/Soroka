@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     max_file_size: int = Field(20 * 1024 * 1024, description="Максимальный размер файла в байтах")
     telegram_max_file_size: int = Field(20 * 1024 * 1024, description="Максимальный размер файла для Telegram Bot API в байтах")
     max_external_file_size: int = Field(50 * 1024 * 1024, description="Максимальный размер файла из внешних источников (Google Drive, Яндекс.Диск) в байтах")
+    oom_max_file_size_mb: Optional[float] = Field(
+        None,
+        description="Максимальный размер файла для стадии транскрипции (MB). По умолчанию берётся из MAX_FILE_SIZE"
+    )
     temp_dir: str = Field("temp", description="Директория для временных файлов")
     
     # Логирование

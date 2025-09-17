@@ -12,7 +12,7 @@ from loguru import logger
 
 from services import FileService, TemplateService, OptimizedProcessingService
 from services.url_service import URLService
-from exceptions import FileError, FileSizeError, FileTypeError
+from src.exceptions.file import FileError, FileSizeError, FileTypeError
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
