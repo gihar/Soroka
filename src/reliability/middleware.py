@@ -59,6 +59,10 @@ class MonitoringMiddleware(BaseMiddleware):
         self.error_count = 0
         self.processing_times = []
         self.user_activity = {}
+        self.protocol_request_count = 0
+        self.protocol_error_count = 0
+        self.protocol_processing_times = []
+        self.protocol_users = set()
     
     async def __call__(
         self,
@@ -103,27 +107,68 @@ class MonitoringMiddleware(BaseMiddleware):
                 f"(user: {user_id}, type: {type(event).__name__}): {e}"
             )
             raise
-    
+
+    def record_protocol_request(
+        self,
+        user_id: Optional[int],
+        duration: float,
+        success: bool = True
+    ) -> None:
+        """Зафиксировать запрос на создание протокола"""
+        self.protocol_request_count += 1
+        if not success:
+            self.protocol_error_count += 1
+
+        if user_id:
+            self.protocol_users.add(user_id)
+
+        if duration is not None:
+            self.protocol_processing_times.append(duration)
+            if len(self.protocol_processing_times) > 1000:
+                self.protocol_processing_times = self.protocol_processing_times[-500:]
+
     def get_stats(self) -> Dict[str, Any]:
         """Получить статистику мониторинга"""
-        if not self.processing_times:
+        relevant_times = (
+            self.protocol_processing_times
+            if self.protocol_processing_times
+            else self.processing_times
+        )
+
+        if not relevant_times:
             avg_time = 0
             max_time = 0
             min_time = 0
         else:
-            avg_time = sum(self.processing_times) / len(self.processing_times)
-            max_time = max(self.processing_times)
-            min_time = min(self.processing_times)
-        
+            avg_time = sum(relevant_times) / len(relevant_times)
+            max_time = max(relevant_times)
+            min_time = min(relevant_times)
+
+        total_requests = self.protocol_request_count
+        total_errors = self.protocol_error_count
+        error_rate = (
+            (total_errors / max(1, total_requests)) * 100
+            if total_requests > 0
+            else 0
+        )
+
+        active_users = (
+            len(self.protocol_users)
+            if self.protocol_users
+            else len(self.user_activity)
+        )
+
         return {
-            "total_requests": self.request_count,
-            "total_errors": self.error_count,
-            "error_rate": (self.error_count / max(1, self.request_count)) * 100,
+            "total_requests": total_requests,
+            "total_errors": total_errors,
+            "error_rate": error_rate,
             "average_processing_time": avg_time,
             "max_processing_time": max_time,
             "min_processing_time": min_time,
-            "active_users": len(self.user_activity),
-            "recent_processing_times": self.processing_times[-10:] if self.processing_times else []
+            "active_users": active_users,
+            "recent_processing_times": relevant_times[-10:] if relevant_times else [],
+            "total_events": self.request_count,
+            "total_event_errors": self.error_count
         }
 
 

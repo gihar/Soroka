@@ -19,6 +19,8 @@ from src.performance.async_optimization import (
     OptimizedHTTPClient, async_lru_cache
 )
 from src.performance.memory_management import memory_optimizer
+from reliability.middleware import monitoring_middleware
+from database import db
 
 
 class OptimizedProcessingService(BaseProcessingService):
@@ -40,6 +42,19 @@ class OptimizedProcessingService(BaseProcessingService):
         processing_metrics = metrics_collector.start_processing_metrics(
             request.file_name, request.user_id
         )
+        monitoring_start_time = time.time()
+
+        def record_monitoring(success: bool) -> None:
+            duration = (
+                processing_metrics.total_duration
+                if processing_metrics.total_duration
+                else time.time() - monitoring_start_time
+            )
+            monitoring_middleware.record_protocol_request(
+                user_id=request.user_id,
+                duration=duration,
+                success=success
+            )
         
         try:
             # Начинаем отслеживание прогресса (первый видимый этап — "preparation")
@@ -52,6 +67,8 @@ class OptimizedProcessingService(BaseProcessingService):
                 logger.info(f"Найден кэшированный результат для {request.file_name}")
                 processing_metrics.end_time = processing_metrics.start_time  # Мгновенный результат
                 metrics_collector.finish_processing_metrics(processing_metrics)
+                record_monitoring(True)
+                await self._save_processing_history(request, cached_result)
                 if progress_tracker:
                     await progress_tracker.complete_all()
                 return cached_result
@@ -66,12 +83,48 @@ class OptimizedProcessingService(BaseProcessingService):
             )
             
             metrics_collector.finish_processing_metrics(processing_metrics)
+            record_monitoring(True)
+            await self._save_processing_history(request, result)
             return result
             
         except Exception as e:
             logger.error(f"Ошибка в оптимизированной обработке {request.file_name}: {e}")
             metrics_collector.finish_processing_metrics(processing_metrics, e)
+            record_monitoring(False)
             raise
+
+    async def _save_processing_history(
+        self,
+        request: ProcessingRequest,
+        result: ProcessingResult
+    ) -> None:
+        """Сохранить информацию об успешной обработке в БД"""
+        try:
+            user = await self.user_service.get_user_by_telegram_id(request.user_id)
+            if not user:
+                logger.warning(
+                    f"Не удалось сохранить историю обработки: пользователь {request.user_id} не найден"
+                )
+                return
+
+            transcription_text = ""
+            if getattr(result, "transcription_result", None):
+                transcription_text = getattr(
+                    result.transcription_result,
+                    "transcription",
+                    ""
+                ) or ""
+
+            await db.save_processing_result(
+                user_id=user.id,
+                file_name=request.file_name,
+                template_id=request.template_id,
+                llm_provider=result.llm_provider_used,
+                transcription_text=transcription_text,
+                result_text=result.protocol_text or ""
+            )
+        except Exception as err:
+            logger.error(f"Ошибка при сохранении истории обработки: {err}")
     
     async def _process_file_optimized(self, request: ProcessingRequest, 
                                     processing_metrics, progress_tracker=None) -> ProcessingResult:
