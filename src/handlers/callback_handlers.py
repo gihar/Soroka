@@ -10,6 +10,164 @@ from loguru import logger
 from services import UserService, TemplateService, EnhancedLLMService, OptimizedProcessingService
 
 
+def _convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
+    """
+    Конвертирует markdown текст в PDF файл с поддержкой кириллицы
+    
+    Args:
+        markdown_text: текст в формате markdown
+        output_path: путь к выходному PDF файлу
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import re
+    import os
+    
+    # Регистрируем шрифты с поддержкой кириллицы
+    # Ищем системные шрифты
+    font_registered = False
+    
+    # Попробуем найти и зарегистрировать системные шрифты для macOS
+    possible_fonts = [
+        # macOS
+        '/System/Library/Fonts/Helvetica.ttc',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+        '/Library/Fonts/Arial Unicode.ttf',
+        # Linux
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    ]
+    
+    for font_path in possible_fonts:
+        if os.path.exists(font_path):
+            try:
+                if font_path.endswith('.ttc'):
+                    # TrueType Collection - используем первый шрифт
+                    pdfmetrics.registerFont(TTFont('CustomFont', font_path, subfontIndex=0))
+                    pdfmetrics.registerFont(TTFont('CustomFont-Bold', font_path, subfontIndex=1))
+                else:
+                    pdfmetrics.registerFont(TTFont('CustomFont', font_path))
+                    pdfmetrics.registerFont(TTFont('CustomFont-Bold', font_path))
+                font_registered = True
+                break
+            except Exception:
+                continue
+    
+    # Если не нашли системный шрифт, используем стандартный Helvetica
+    font_name = 'CustomFont' if font_registered else 'Helvetica'
+    font_name_bold = 'CustomFont-Bold' if font_registered else 'Helvetica-Bold'
+    
+    # Создаем PDF документ
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    
+    # Стили с кастомными шрифтами
+    styles = getSampleStyleSheet()
+    
+    # Кастомные стили с поддержкой кириллицы
+    styles.add(ParagraphStyle(
+        name='CustomTitle',
+        fontName=font_name_bold,
+        fontSize=24,
+        textColor=colors.HexColor('#2c3e50'),
+        spaceAfter=12,
+        spaceBefore=12,
+        leading=28
+    ))
+    
+    styles.add(ParagraphStyle(
+        name='CustomHeading2',
+        fontName=font_name_bold,
+        fontSize=18,
+        textColor=colors.HexColor('#34495e'),
+        spaceAfter=10,
+        spaceBefore=10,
+        leading=22
+    ))
+    
+    styles.add(ParagraphStyle(
+        name='CustomHeading3',
+        fontName=font_name_bold,
+        fontSize=14,
+        textColor=colors.HexColor('#7f8c8d'),
+        spaceAfter=8,
+        spaceBefore=8,
+        leading=18
+    ))
+    
+    styles.add(ParagraphStyle(
+        name='CustomBody',
+        fontName=font_name,
+        fontSize=12,
+        leading=16,
+        alignment=TA_LEFT
+    ))
+    
+    # Парсинг markdown и создание элементов
+    story = []
+    lines = markdown_text.split('\n')
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Пропускаем пустые строки
+        if not line:
+            story.append(Spacer(1, 0.3*cm))
+            i += 1
+            continue
+        
+        # Заголовки
+        if line.startswith('# '):
+            text = line[2:].strip()
+            story.append(Paragraph(text, styles['CustomTitle']))
+        elif line.startswith('## '):
+            text = line[3:].strip()
+            story.append(Paragraph(text, styles['CustomHeading2']))
+        elif line.startswith('### '):
+            text = line[4:].strip()
+            story.append(Paragraph(text, styles['CustomHeading3']))
+        
+        # Списки
+        elif line.startswith('- ') or line.startswith('* '):
+            text = '• ' + line[2:].strip()
+            # Обрабатываем жирный текст в списках
+            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+            story.append(Paragraph(text, styles['CustomBody']))
+        elif re.match(r'^\d+\.\s', line):
+            text = line
+            # Обрабатываем жирный текст в нумерованных списках
+            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+            story.append(Paragraph(text, styles['CustomBody']))
+        
+        # Обычный текст
+        else:
+            # Обрабатываем жирный текст **text**
+            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
+            # Обрабатываем курсив *text*
+            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+            story.append(Paragraph(text, styles['CustomBody']))
+        
+        i += 1
+    
+    # Генерируем PDF
+    doc.build(story)
+
+
 def setup_callback_handlers(user_service: UserService, template_service: TemplateService,
                            llm_service: EnhancedLLMService, processing_service: OptimizedProcessingService) -> Router:
     """Настройка обработчиков callback запросов"""
@@ -501,8 +659,12 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     callback_data="set_protocol_output_messages"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'file' else ''}📎 В файл",
+                    text=f"{'✅ ' if current == 'file' else ''}📎 В файл md",
                     callback_data="set_protocol_output_file"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if current == 'pdf' else ''}📄 В файл pdf",
+                    callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
                     text="⬅️ Назад к настройкам",
@@ -514,7 +676,8 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 "📤 **Вывод протокола**\n\n"
                 "Выберите, как отправлять готовый протокол:\n"
                 "• 💬 В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
-                "• 📎 В файл — протокол отправляется как прикрепленный файл (.md)",
+                "• 📎 В файл md — протокол отправляется как прикрепленный файл (.md)\n"
+                "• 📄 В файл pdf — протокол отправляется как прикрепленный файл (.pdf)",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -523,11 +686,20 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в settings_protocol_output_callback: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке настроек")
 
-    @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file"}))
+    @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file", "set_protocol_output_pdf"}))
     async def set_protocol_output_mode_callback(callback: CallbackQuery):
         """Установка режима вывода протокола"""
         try:
-            mode = 'messages' if callback.data.endswith('messages') else 'file'
+            if callback.data.endswith('messages'):
+                mode = 'messages'
+                mode_text = "💬 В сообщения"
+            elif callback.data.endswith('pdf'):
+                mode = 'pdf'
+                mode_text = "📄 В файл pdf"
+            else:
+                mode = 'file'
+                mode_text = "📎 В файл md"
+            
             await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -537,7 +709,6 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 )]
             ])
 
-            mode_text = "💬 В сообщения" if mode == 'messages' else "📎 В файл"
             await callback.message.edit_text(
                 f"✅ Режим вывода протокола изменён на: {mode_text}",
                 reply_markup=keyboard
@@ -836,35 +1007,54 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
                 user = await user_pref_service.get_user_by_telegram_id(callback.from_user.id)
                 output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
 
-                if output_mode == 'file':
-                    # Сохраняем протокол во временный .md файл и отправляем как документ
+                if output_mode in ('file', 'pdf'):
+                    # Сохраняем протокол во временный файл и отправляем как документ
                     import tempfile
                     from aiogram.types import FSInputFile
-                    suffix = '.md'
+                    import os
+                    
+                    suffix = '.pdf' if output_mode == 'pdf' else '.md'
                     safe_name = 'protocol'
                     try:
                         # Попробуем извлечь базовое имя из исходного файла
                         data = await state.get_data()
                         original = data.get('file_name') or 'protocol'
-                        import os
                         safe_name = os.path.splitext(os.path.basename(original))[0][:40] or 'protocol'
                     except Exception:
                         pass
-                    with tempfile.NamedTemporaryFile('w', suffix=suffix, delete=False, encoding='utf-8') as f:
-                        f.write(result.protocol_text or '')
-                        temp_path = f.name
-                    try:
-                        file_input = FSInputFile(temp_path, filename=f"{safe_name}.md")
-                        await callback.message.answer_document(
-                            file_input,
-                            caption="📎 Протокол встречи"
-                        )
-                    finally:
-                        import os
+                    
+                    if output_mode == 'pdf':
+                        # Генерируем PDF
+                        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+                            temp_path = f.name
                         try:
-                            os.unlink(temp_path)
-                        except Exception:
-                            pass
+                            _convert_markdown_to_pdf(result.protocol_text or '', temp_path)
+                            file_input = FSInputFile(temp_path, filename=f"{safe_name}.pdf")
+                            await callback.message.answer_document(
+                                file_input,
+                                caption="📄 Протокол встречи (PDF)"
+                            )
+                        finally:
+                            try:
+                                os.unlink(temp_path)
+                            except Exception:
+                                pass
+                    else:
+                        # Сохраняем как MD файл
+                        with tempfile.NamedTemporaryFile('w', suffix='.md', delete=False, encoding='utf-8') as f:
+                            f.write(result.protocol_text or '')
+                            temp_path = f.name
+                        try:
+                            file_input = FSInputFile(temp_path, filename=f"{safe_name}.md")
+                            await callback.message.answer_document(
+                                file_input,
+                                caption="📎 Протокол встречи (Markdown)"
+                            )
+                        finally:
+                            try:
+                                os.unlink(temp_path)
+                            except Exception:
+                                pass
                 else:
                     # По умолчанию отправляем в сообщения (разбиваем по частям при необходимости)
                     await _send_long_message(callback.message.chat.id, result.protocol_text, callback.bot)
