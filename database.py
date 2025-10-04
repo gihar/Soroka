@@ -65,6 +65,61 @@ class Database:
                 )
             """)
             
+            # Таблица обратной связи
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL,
+                    feedback_type TEXT NOT NULL,
+                    comment TEXT,
+                    protocol_id TEXT,
+                    processing_time REAL,
+                    file_format TEXT,
+                    file_size INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Таблица метрик производительности
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS performance_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    unit TEXT NOT NULL,
+                    tags TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Таблица метрик обработки файлов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS processing_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_name TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP,
+                    download_duration REAL DEFAULT 0.0,
+                    validation_duration REAL DEFAULT 0.0,
+                    conversion_duration REAL DEFAULT 0.0,
+                    transcription_duration REAL DEFAULT 0.0,
+                    diarization_duration REAL DEFAULT 0.0,
+                    llm_duration REAL DEFAULT 0.0,
+                    formatting_duration REAL DEFAULT 0.0,
+                    file_size_bytes INTEGER DEFAULT 0,
+                    file_format TEXT,
+                    audio_duration_seconds REAL DEFAULT 0.0,
+                    transcription_length INTEGER DEFAULT 0,
+                    speakers_count INTEGER DEFAULT 0,
+                    error_occurred BOOLEAN DEFAULT 0,
+                    error_stage TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Миграция: добавляем поле default_template_id если его нет
             try:
                 await db.execute("ALTER TABLE users ADD COLUMN default_template_id INTEGER")
@@ -352,6 +407,124 @@ class Database:
             """, (telegram_id,))
             await db.commit()
             return cursor.rowcount > 0
+    
+    # Методы для работы с обратной связью
+    async def save_feedback(self, user_id: int, rating: int, feedback_type: str,
+                          comment: Optional[str] = None, protocol_id: Optional[str] = None,
+                          processing_time: Optional[float] = None, file_format: Optional[str] = None,
+                          file_size: Optional[int] = None):
+        """Сохранить обратную связь"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO feedback 
+                (user_id, rating, feedback_type, comment, protocol_id, processing_time, file_format, file_size)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, rating, feedback_type, comment, protocol_id, processing_time, file_format, file_size))
+            await db.commit()
+    
+    async def get_all_feedback(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Получить всю обратную связь"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            query = "SELECT * FROM feedback ORDER BY created_at DESC"
+            if limit:
+                query += f" LIMIT {limit}"
+            cursor = await db.execute(query)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_feedback_stats(self) -> Dict[str, Any]:
+        """Получить статистику обратной связи"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Общая статистика
+            cursor = await db.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    AVG(rating) as average_rating
+                FROM feedback
+            """)
+            stats = await cursor.fetchone()
+            
+            # По типам
+            cursor = await db.execute("""
+                SELECT 
+                    feedback_type,
+                    COUNT(*) as count,
+                    AVG(rating) as average_rating
+                FROM feedback
+                GROUP BY feedback_type
+            """)
+            by_type = await cursor.fetchall()
+            
+            return {
+                "total": stats['total'] if stats else 0,
+                "average_rating": round(stats['average_rating'], 2) if stats and stats['average_rating'] else 0,
+                "by_type": {row['feedback_type']: {"count": row['count'], "average_rating": round(row['average_rating'], 2)} 
+                           for row in by_type}
+            }
+    
+    # Методы для работы с метриками производительности
+    async def save_performance_metric(self, name: str, value: float, unit: str, 
+                                     tags: Optional[Dict[str, str]] = None):
+        """Сохранить метрику производительности"""
+        import json
+        async with aiosqlite.connect(self.db_path) as db:
+            tags_json = json.dumps(tags) if tags else None
+            await db.execute("""
+                INSERT INTO performance_metrics (name, value, unit, tags)
+                VALUES (?, ?, ?, ?)
+            """, (name, value, unit, tags_json))
+            await db.commit()
+    
+    async def save_processing_metric(self, metric_data: Dict[str, Any]) -> int:
+        """Сохранить метрику обработки файла"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO processing_metrics (
+                    file_name, user_id, start_time, end_time,
+                    download_duration, validation_duration, conversion_duration,
+                    transcription_duration, diarization_duration, llm_duration, formatting_duration,
+                    file_size_bytes, file_format, audio_duration_seconds,
+                    transcription_length, speakers_count,
+                    error_occurred, error_stage, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                metric_data.get('file_name'),
+                metric_data.get('user_id'),
+                metric_data.get('start_time'),
+                metric_data.get('end_time'),
+                metric_data.get('download_duration', 0.0),
+                metric_data.get('validation_duration', 0.0),
+                metric_data.get('conversion_duration', 0.0),
+                metric_data.get('transcription_duration', 0.0),
+                metric_data.get('diarization_duration', 0.0),
+                metric_data.get('llm_duration', 0.0),
+                metric_data.get('formatting_duration', 0.0),
+                metric_data.get('file_size_bytes', 0),
+                metric_data.get('file_format'),
+                metric_data.get('audio_duration_seconds', 0.0),
+                metric_data.get('transcription_length', 0),
+                metric_data.get('speakers_count', 0),
+                metric_data.get('error_occurred', False),
+                metric_data.get('error_stage'),
+                metric_data.get('error_message')
+            ))
+            await db.commit()
+            return cursor.lastrowid
+    
+    async def get_processing_metrics(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Получить метрики обработки за последние N часов"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT * FROM processing_metrics
+                WHERE created_at >= DATETIME('now', ?) 
+                ORDER BY created_at DESC
+            """, (f'-{hours} hours',))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
 
 # Глобальный экземпляр базы данных

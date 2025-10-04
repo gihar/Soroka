@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from loguru import logger
 import json
+import sys
+import os
+
+# Добавляем корневую директорию в путь для импорта database
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from database import db
 
 
 @dataclass
@@ -146,6 +152,57 @@ class MetricsCollector:
         # Фоновая задача для сбора системных метрик
         self.monitoring_task: Optional[asyncio.Task] = None
         self.is_monitoring = False
+        self._initialized = False
+    
+    async def initialize(self):
+        """Загрузить данные из БД при инициализации"""
+        if self._initialized:
+            return
+        
+        try:
+            # Загружаем метрики обработки за последние 24 часа
+            metrics_data = await db.get_processing_metrics(hours=24)
+            for metric_dict in metrics_data:
+                metric = ProcessingMetrics(
+                    file_name=metric_dict['file_name'],
+                    user_id=metric_dict['user_id'],
+                    start_time=datetime.fromisoformat(metric_dict['start_time']),
+                    end_time=datetime.fromisoformat(metric_dict['end_time']) if metric_dict['end_time'] else None,
+                    download_duration=metric_dict.get('download_duration', 0.0),
+                    validation_duration=metric_dict.get('validation_duration', 0.0),
+                    conversion_duration=metric_dict.get('conversion_duration', 0.0),
+                    transcription_duration=metric_dict.get('transcription_duration', 0.0),
+                    diarization_duration=metric_dict.get('diarization_duration', 0.0),
+                    llm_duration=metric_dict.get('llm_duration', 0.0),
+                    formatting_duration=metric_dict.get('formatting_duration', 0.0),
+                    file_size_bytes=metric_dict.get('file_size_bytes', 0),
+                    file_format=metric_dict.get('file_format', ''),
+                    audio_duration_seconds=metric_dict.get('audio_duration_seconds', 0.0),
+                    transcription_length=metric_dict.get('transcription_length', 0),
+                    speakers_count=metric_dict.get('speakers_count', 0),
+                    error_occurred=bool(metric_dict.get('error_occurred', False)),
+                    error_stage=metric_dict.get('error_stage', ''),
+                    error_message=metric_dict.get('error_message', '')
+                )
+                self.processing_metrics.append(metric)
+                
+                # Восстанавливаем почасовую статистику
+                hour_key = metric.start_time.strftime("%Y-%m-%d-%H")
+                self.hourly_stats[hour_key]["requests"] += 1
+                if metric.end_time:
+                    self.hourly_stats[hour_key]["total_duration"] += metric.total_duration
+                if metric.error_occurred:
+                    self.hourly_stats[hour_key]["errors"] += 1
+                if self.hourly_stats[hour_key]["requests"] > 0:
+                    self.hourly_stats[hour_key]["avg_duration"] = (
+                        self.hourly_stats[hour_key]["total_duration"] / 
+                        self.hourly_stats[hour_key]["requests"]
+                    )
+            
+            logger.info(f"Загружено {len(self.processing_metrics)} метрик обработки из БД")
+            self._initialized = True
+        except Exception as e:
+            logger.error(f"Ошибка загрузки метрик из БД: {e}")
     
     def start_monitoring(self):
         """Запустить мониторинг системных метрик"""
@@ -266,6 +323,41 @@ class MetricsCollector:
         if metrics.efficiency_score > 0:
             self.add_metric("processing.efficiency", metrics.efficiency_score, "ratio",
                            metrics.end_time, {"file_format": metrics.file_format})
+        
+        # Сохраняем в БД
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._save_processing_metrics_to_db(metrics))
+        except Exception as e:
+            logger.error(f"Ошибка сохранения метрик в БД: {e}")
+    
+    async def _save_processing_metrics_to_db(self, metrics: ProcessingMetrics):
+        """Сохранить метрики обработки в БД"""
+        try:
+            metric_data = {
+                'file_name': metrics.file_name,
+                'user_id': metrics.user_id,
+                'start_time': metrics.start_time.isoformat(),
+                'end_time': metrics.end_time.isoformat() if metrics.end_time else None,
+                'download_duration': metrics.download_duration,
+                'validation_duration': metrics.validation_duration,
+                'conversion_duration': metrics.conversion_duration,
+                'transcription_duration': metrics.transcription_duration,
+                'diarization_duration': metrics.diarization_duration,
+                'llm_duration': metrics.llm_duration,
+                'formatting_duration': metrics.formatting_duration,
+                'file_size_bytes': metrics.file_size_bytes,
+                'file_format': metrics.file_format,
+                'audio_duration_seconds': metrics.audio_duration_seconds,
+                'transcription_length': metrics.transcription_length,
+                'speakers_count': metrics.speakers_count,
+                'error_occurred': metrics.error_occurred,
+                'error_stage': metrics.error_stage,
+                'error_message': metrics.error_message
+            }
+            await db.save_processing_metric(metric_data)
+        except Exception as e:
+            logger.error(f"Ошибка сохранения метрик обработки: {e}")
     
     def get_current_stats(self) -> Dict[str, Any]:
         """Получить текущую статистику"""

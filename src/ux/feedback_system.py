@@ -12,6 +12,12 @@ from aiogram.types import (
 )
 from loguru import logger
 import json
+import sys
+import os
+
+# Добавляем корневую директорию в путь для импорта database
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from database import db
 
 
 @dataclass
@@ -33,42 +39,100 @@ class FeedbackCollector:
     
     def __init__(self):
         self.feedback_storage: List[FeedbackEntry] = []
+        self._initialized = False
+    
+    async def initialize(self):
+        """Загрузить данные из БД при инициализации"""
+        if self._initialized:
+            return
+        
+        try:
+            # Загружаем последние 1000 записей из БД
+            feedbacks = await db.get_all_feedback(limit=1000)
+            for feedback_dict in feedbacks:
+                feedback = FeedbackEntry(
+                    user_id=feedback_dict['user_id'],
+                    timestamp=datetime.fromisoformat(feedback_dict['created_at']),
+                    rating=feedback_dict['rating'],
+                    feedback_type=feedback_dict['feedback_type'],
+                    comment=feedback_dict.get('comment'),
+                    protocol_id=feedback_dict.get('protocol_id'),
+                    processing_time=feedback_dict.get('processing_time'),
+                    file_format=feedback_dict.get('file_format'),
+                    file_size=feedback_dict.get('file_size')
+                )
+                self.feedback_storage.append(feedback)
+            
+            logger.info(f"Загружено {len(self.feedback_storage)} записей обратной связи из БД")
+            self._initialized = True
+        except Exception as e:
+            logger.error(f"Ошибка загрузки обратной связи из БД: {e}")
     
     def add_feedback(self, feedback: FeedbackEntry):
         """Добавить обратную связь"""
         self.feedback_storage.append(feedback)
         logger.info(f"Получена обратная связь от пользователя {feedback.user_id}: {feedback.rating}/5")
+        
+        # Сохраняем в БД асинхронно
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._save_feedback_to_db(feedback))
+        except Exception as e:
+            logger.error(f"Ошибка сохранения обратной связи в БД: {e}")
     
-    def get_statistics(self) -> Dict[str, Any]:
+    async def _save_feedback_to_db(self, feedback: FeedbackEntry):
+        """Сохранить обратную связь в БД"""
+        try:
+            await db.save_feedback(
+                user_id=feedback.user_id,
+                rating=feedback.rating,
+                feedback_type=feedback.feedback_type,
+                comment=feedback.comment,
+                protocol_id=feedback.protocol_id,
+                processing_time=feedback.processing_time,
+                file_format=feedback.file_format,
+                file_size=feedback.file_size
+            )
+        except Exception as e:
+            logger.error(f"Ошибка сохранения обратной связи: {e}")
+    
+    async def get_statistics(self) -> Dict[str, Any]:
         """Получить статистику обратной связи"""
-        if not self.feedback_storage:
-            return {"total": 0, "average_rating": 0, "by_type": {}}
-        
-        total = len(self.feedback_storage)
-        average_rating = sum(f.rating for f in self.feedback_storage) / total
-        
-        by_type = {}
-        for feedback in self.feedback_storage:
-            feedback_type = feedback.feedback_type
-            if feedback_type not in by_type:
-                by_type[feedback_type] = {"count": 0, "average_rating": 0}
-            by_type[feedback_type]["count"] += 1
-        
-        # Пересчитываем средние рейтинги по типам
-        for feedback_type in by_type:
-            type_feedbacks = [f for f in self.feedback_storage if f.feedback_type == feedback_type]
-            by_type[feedback_type]["average_rating"] = sum(f.rating for f in type_feedbacks) / len(type_feedbacks)
-        
-        return {
-            "total": total,
-            "average_rating": round(average_rating, 2),
-            "by_type": by_type,
-            "recent_comments": [
-                {"rating": f.rating, "comment": f.comment, "type": f.feedback_type}
-                for f in sorted(self.feedback_storage, key=lambda x: x.timestamp, reverse=True)[:5]
-                if f.comment
-            ]
-        }
+        try:
+            # Получаем статистику из БД
+            return await db.get_feedback_stats()
+        except Exception as e:
+            logger.error(f"Ошибка получения статистики из БД: {e}")
+            # Fallback: считаем из памяти
+            if not self.feedback_storage:
+                return {"total": 0, "average_rating": 0, "by_type": {}}
+            
+            total = len(self.feedback_storage)
+            average_rating = sum(f.rating for f in self.feedback_storage) / total
+            
+            by_type = {}
+            for feedback in self.feedback_storage:
+                feedback_type = feedback.feedback_type
+                if feedback_type not in by_type:
+                    by_type[feedback_type] = {"count": 0, "average_rating": 0}
+                by_type[feedback_type]["count"] += 1
+            
+            # Пересчитываем средние рейтинги по типам
+            for feedback_type in by_type:
+                type_feedbacks = [f for f in self.feedback_storage if f.feedback_type == feedback_type]
+                by_type[feedback_type]["average_rating"] = sum(f.rating for f in type_feedbacks) / len(type_feedbacks)
+            
+            return {
+                "total": total,
+                "average_rating": round(average_rating, 2),
+                "by_type": by_type,
+                "recent_comments": [
+                    {"rating": f.rating, "comment": f.comment, "type": f.feedback_type}
+                    for f in sorted(self.feedback_storage, key=lambda x: x.timestamp, reverse=True)[:5]
+                    if f.comment
+                ]
+            }
     
     def export_feedback(self) -> str:
         """Экспортировать обратную связь в JSON"""

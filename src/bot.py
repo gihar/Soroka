@@ -223,26 +223,39 @@ class EnhancedTelegramBot:
             os.makedirs(settings.temp_dir, exist_ok=True)
             logger.info(f"Директория для временных файлов создана: {settings.temp_dir}")
             
-            # 4. Запускаем мониторинг здоровья
+            # 4. Инициализируем систему обратной связи и метрик
+            try:
+                from ux import feedback_collector
+                from performance.metrics import metrics_collector
+                
+                await feedback_collector.initialize()
+                logger.info("Система обратной связи инициализирована")
+                
+                await metrics_collector.initialize()
+                logger.info("Система метрик производительности инициализирована")
+            except Exception as e:
+                logger.warning(f"Не удалось инициализировать статистику: {e}")
+            
+            # 5. Запускаем мониторинг здоровья
             await health_checker.start_monitoring()
             logger.info("Мониторинг здоровья запущен")
             
-            # 5. Запускаем мониторинг памяти
+            # 6. Запускаем мониторинг памяти
             if OOM_PROTECTION_AVAILABLE:
                 memory_optimizer.start_optimization()
                 logger.info("Мониторинг памяти запущен")
             
-            # 6. Запускаем сервис очистки файлов
+            # 7. Запускаем сервис очистки файлов
             if CLEANUP_SERVICE_AVAILABLE and settings.enable_cleanup:
                 await cleanup_service.start_cleanup()
                 logger.info("Сервис очистки файлов запущен")
             elif not settings.enable_cleanup:
                 logger.info("Сервис очистки файлов отключен в настройках")
             
-            # 7. Проверяем доступность компонентов
+            # 8. Проверяем доступность компонентов
             await self._perform_startup_checks()
             
-            # 8. Запускаем бота
+            # 9. Запускаем бота
             logger.info("Бот с системой надежности запущен и готов к работе")
             await self.dp.start_polling(self.bot)
             
