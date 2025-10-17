@@ -6,7 +6,7 @@ import json
 import asyncio
 import httpx
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from loguru import logger
 from config import settings
 

@@ -3,8 +3,12 @@
 """
 
 import re
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, TYPE_CHECKING
 from loguru import logger
+
+# Импорт для избежания циркулярных зависимостей
+if TYPE_CHECKING:
+    from src.models.diarization_analysis import DiarizationAnalysisResult
 
 
 class MeetingClassifier:
@@ -82,14 +86,14 @@ class MeetingClassifier:
     def classify(
         self,
         transcription: str,
-        diarization_analysis: Optional['DiarizationAnalysisResult'] = None
+        diarization_analysis: Optional[Any] = None
     ) -> Tuple[str, Dict[str, float]]:
         """
         Классифицировать тип встречи
         
         Args:
             transcription: Текст транскрипции
-            diarization_analysis: Результат анализа диаризации (опционально)
+            diarization_analysis: Результат анализа диаризации (объект или словарь)
             
         Returns:
             (тип встречи, словарь с оценками для каждого типа)
@@ -112,19 +116,37 @@ class MeetingClassifier:
         
         # Дополнительные эвристики на основе диаризации
         if diarization_analysis:
-            # Если один спикер доминирует (>60%), вероятно презентация или обучение
-            if diarization_analysis.total_speakers > 0:
-                max_contribution = max(
-                    s.speaking_time_percent 
-                    for s in diarization_analysis.speakers.values()
-                )
+            try:
+                # Получаем данные в зависимости от типа (объект или словарь)
+                if isinstance(diarization_analysis, dict):
+                    statistics = diarization_analysis.get('statistics', {})
+                    total_speakers = statistics.get('total_speakers', 0)
+                    speakers = diarization_analysis.get('speakers', {})
+                    participation_balance = statistics.get('participation_balance', 0)
+                else:
+                    # Это объект DiarizationAnalysisResult
+                    total_speakers = diarization_analysis.total_speakers
+                    speakers = diarization_analysis.speakers
+                    participation_balance = diarization_analysis.participation_balance
                 
-                if max_contribution > 60:
-                    normalized_scores['educational'] += 2.0
-            
-            # Если много участников с равным вкладом, вероятно брейнш��орм
-            if diarization_analysis.participation_balance > 0.7:
-                normalized_scores['brainstorm'] += 1.5
+                # Если один спикер доминирует (>60%), вероятно презентация или обучение
+                if total_speakers > 0 and speakers:
+                    if isinstance(speakers, dict):
+                        # Если speakers это словарь
+                        max_contribution = max(
+                            (s.get('speaking_time_percent', 0) if isinstance(s, dict) 
+                             else s.speaking_time_percent)
+                            for s in speakers.values()
+                        )
+                        
+                        if max_contribution > 60:
+                            normalized_scores['educational'] += 2.0
+                
+                # Если много участников с равным вкладом, вероятно брейнш��орм
+                if participation_balance > 0.7:
+                    normalized_scores['brainstorm'] += 1.5
+            except (AttributeError, KeyError, ValueError) as e:
+                logger.warning(f"Ошибка при использовании diarization_analysis: {e}")
         
         # Специальные проверки
         question_count = len(re.findall(r'[?？]', transcription))
@@ -171,13 +193,6 @@ class MeetingClassifier:
         
         return descriptions.get(meeting_type, 'Общая встреча')
 
-
-# Импорт с условием для избежания циркулярных зависимостей
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from src.models.diarization_analysis import DiarizationAnalysisResult
-else:
-    from typing import Optional
 
 # Глобальный экземпляр классификатора
 meeting_classifier = MeetingClassifier()
