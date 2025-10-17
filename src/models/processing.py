@@ -27,6 +27,7 @@ class TranscriptionResult(BaseModel):
     formatted_transcript: str = Field("", description="Форматированная транскрипция")
     speakers_summary: str = Field("", description="Резюме говорящих")
     compression_info: Optional[Dict[str, Any]] = Field(None, description="Информация о сжатии файла")
+    diarization_analysis: Optional[Any] = Field(None, description="Расширенный анализ диаризации")
 
 
 class DiarizationData(BaseModel):
