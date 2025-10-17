@@ -356,7 +356,14 @@ class OptimizedProcessingService(BaseProcessingService):
             # Извлекаем анализ диаризации если есть
             diarization_analysis = None
             if hasattr(transcription_result, 'diarization_analysis'):
-                diarization_analysis = transcription_result.diarization_analysis.to_dict()
+                analysis_obj = transcription_result.diarization_analysis
+                if analysis_obj:
+                    # Если это уже словарь (из кэша), используем его напрямую
+                    if isinstance(analysis_obj, dict):
+                        diarization_analysis = analysis_obj
+                    # Если это объект DiarizationAnalysisResult, вызываем to_dict()
+                    elif hasattr(analysis_obj, 'to_dict'):
+                        diarization_analysis = analysis_obj.to_dict()
             
             # Определяем длительность встречи для проверки необходимости Chain-of-Thought
             estimated_duration_minutes = None
@@ -523,14 +530,126 @@ class OptimizedProcessingService(BaseProcessingService):
         processed_result = {}
         
         for key, value in llm_result.items():
-            if isinstance(value, str):
-                # Проверяем, не является ли значение JSON-строкой
-                processed_value = self._fix_json_in_text(value)
-                processed_result[key] = processed_value
-            else:
-                processed_result[key] = value
+            # Преобразуем сложные типы (dict, list) в читаемый текст
+            processed_value = self._convert_complex_to_markdown(value)
+            processed_result[key] = processed_value
         
         return processed_result
+    
+    def _convert_complex_to_markdown(self, value: Any) -> str:
+        """Преобразовать сложные типы (dict, list) в читаемый Markdown-текст"""
+        
+        # Если уже строка - проверяем на JSON внутри и возвращаем
+        if isinstance(value, str):
+            return self._fix_json_in_text(value)
+        
+        # Преобразуем dict в текст
+        if isinstance(value, dict):
+            return self._format_dict_to_text(value)
+        
+        # Преобразуем list в текст
+        if isinstance(value, list):
+            return self._format_list_to_text(value)
+        
+        # Для остальных типов - просто строковое представление
+        return str(value)
+    
+    def _format_dict_to_text(self, data: dict) -> str:
+        """Форматировать словарь в читаемый текст"""
+        
+        # Специальные случаи для известных структур
+        
+        # Структура времени/даты с milestones, constraints
+        if 'constraints' in data or 'milestones' in data or 'meetings' in data:
+            parts = []
+            if 'constraints' in data:
+                constraints = data['constraints']
+                if isinstance(constraints, list):
+                    parts.append("Ограничения:\n" + "\n".join([f"- {c}" for c in constraints]))
+            if 'milestones' in data:
+                milestones = data['milestones']
+                if isinstance(milestones, list):
+                    milestone_texts = []
+                    for m in milestones:
+                        if isinstance(m, dict):
+                            date = m.get('date', '')
+                            event = m.get('event', '')
+                            milestone_texts.append(f"- {date}: {event}")
+                        else:
+                            milestone_texts.append(f"- {m}")
+                    parts.append("Важные даты:\n" + "\n".join(milestone_texts))
+            if 'meetings' in data:
+                meetings = data['meetings']
+                if isinstance(meetings, list):
+                    meeting_texts = []
+                    for m in meetings:
+                        if isinstance(m, dict):
+                            slot = m.get('slot', '')
+                            event = m.get('event', '')
+                            meeting_texts.append(f"- {slot}: {event}")
+                        else:
+                            meeting_texts.append(f"- {m}")
+                    parts.append("Встречи:\n" + "\n".join(meeting_texts))
+            return "\n\n".join(parts) if parts else "Не указано"
+        
+        # Структура участника с name и role
+        if 'name' in data and 'role' in data:
+            name = data.get('name', '')
+            role = data.get('role', '')
+            notes = data.get('notes', '')
+            if notes:
+                return f"{name} ({role}): {notes}"
+            return f"{name} ({role})" if role else name
+        
+        # Структура решения с decision
+        if 'decision' in data:
+            decision = data.get('decision', '')
+            decision_maker = data.get('decision_maker', '')
+            if decision_maker and decision_maker != 'Не указано':
+                return f"- {decision} (решение принял: {decision_maker})"
+            return f"- {decision}"
+        
+        # Структура задачи с item
+        if 'item' in data or 'task' in data:
+            item = data.get('item', data.get('task', ''))
+            assignee = data.get('assignee', 'Не указано')
+            due = data.get('due', '')
+            if due:
+                return f"- {item} — Ответственный: {assignee}, срок: {due}"
+            return f"- {item} — Ответственный: {assignee}"
+        
+        # Общий случай - key: value пары
+        lines = []
+        for k, v in data.items():
+            if isinstance(v, (dict, list)):
+                v_str = self._convert_complex_to_markdown(v)
+                lines.append(f"**{k}:** {v_str}")
+            else:
+                lines.append(f"**{k}:** {v}")
+        return "\n".join(lines) if lines else "Не указано"
+    
+    def _format_list_to_text(self, data: list) -> str:
+        """Форматировать список в читаемый текст"""
+        if not data:
+            return "Не указано"
+        
+        # Проверяем тип первого элемента
+        first = data[0]
+        
+        # Список словарей - обрабатываем каждый
+        if isinstance(first, dict):
+            items = []
+            for item in data:
+                formatted = self._format_dict_to_text(item)
+                # Если результат уже с дефисом, не добавляем еще один
+                if formatted.strip().startswith('-'):
+                    items.append(formatted.strip())
+                else:
+                    items.append(f"- {formatted}")
+            return "\n".join(items)
+        
+        # Список простых значений
+        return "\n".join([f"- {item}" for item in data])
     
     def _fix_json_in_text(self, text: str) -> str:
         """Исправляет JSON-структуры в тексте, преобразуя их в читаемый формат"""
