@@ -13,6 +13,13 @@ from config import settings
 import openai
 from anthropic import Anthropic
 
+# Импорт для контекстно-зависимых промптов
+from src.services.meeting_classifier import meeting_classifier
+from src.prompts.specialized_prompts import (
+    get_specialized_system_prompt, 
+    get_specialized_extraction_instructions
+)
+
 
 class LLMProvider(ABC):
     """Абстрактный базовый класс для LLM провайдеров"""
@@ -31,8 +38,39 @@ class LLMProvider(ABC):
 # -------------------------------------------------------------
 # Унифицированные билдеры промптов для всех провайдеров
 # -------------------------------------------------------------
-def _build_system_prompt() -> str:
-    """Строгая системная политика для получения профессионального протокола."""
+def _build_system_prompt(
+    transcription: Optional[str] = None,
+    diarization_analysis: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Строгая системная политика для получения профессионального протокола.
+    Автоматически выбирает специализированный промпт если включена классификация.
+    
+    Args:
+        transcription: Текст транскрипции (для классификации)
+        diarization_analysis: Анализ диаризации (для классификации)
+        
+    Returns:
+        Системный промпт (базовый или специализированный)
+    """
+    # Если включена классификация и есть транскрипция
+    if settings.meeting_type_detection and transcription:
+        try:
+            # Классифицируем встречу
+            meeting_type, _ = meeting_classifier.classify(
+                transcription, 
+                diarization_analysis
+            )
+            
+            # Получаем специализированный промпт
+            specialized_prompt = get_specialized_system_prompt(meeting_type)
+            logger.info(f"Использую специализированный промпт для типа встречи: {meeting_type}")
+            return specialized_prompt
+            
+        except Exception as e:
+            logger.warning(f"Ошибка при классификации встречи: {e}. Используем базовый промпт")
+    
+    # Базовый промпт (для общих встреч или при отключенной классификации)
     return (
         "Ты — профессиональный протоколист высшей квалификации с опытом документирования "
         "деловых встреч, совещаний и переговоров.\n\n"
@@ -528,6 +566,511 @@ class LLMManager:
         
         # Если все провайдеры не сработали
         raise ValueError(f"Все доступные провайдеры не сработали. Последняя ошибка: {last_error}")
+
+
+# ===================================================================
+# ДВУХЭТАПНАЯ ГЕНЕРАЦИЯ ПРОТОКОЛА
+# ===================================================================
+
+def _build_extraction_prompt(
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Промпт для первого этапа: извлечение и структурирование информации
+    """
+    # Блок контекста (с учётом диаризации)
+    if diarization_data and diarization_data.get("formatted_transcript"):
+        transcription_text = (
+            "Транскрипция с разделением говорящих:\n"
+            f"{diarization_data['formatted_transcript']}\n\n"
+            "Дополнительная информация:\n"
+            f"- Количество говорящих: {diarization_data.get('total_speakers', 'неизвестно')}\n"
+            f"- Список говорящих: {', '.join(diarization_data.get('speakers', []))}\n\n"
+        )
+    else:
+        transcription_text = f"Транскрипция:\n{transcription}\n\n"
+    
+    variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
+    
+    prompt = f"""ЭТАП 1: ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
+
+{transcription_text}
+
+ЗАДАЧА:
+Извлеки из транскрипции информацию для следующих полей:
+{variables_str}
+
+ТРЕБОВАНИЯ:
+1. Используй ТОЛЬКО факты из транскрипции
+2. Если информация не найдена явно - пиши "Не указано"
+3. Сохраняй хронологический порядок
+4. НЕ интерпретируй и НЕ добавляй собственные выводы
+5. Для списков используй формат: "- пункт1\\n- пункт2"
+6. Для участников с ролями: "Имя, должность; Следующий участник"
+
+ФОРМАТ ВЫВОДА:
+Валидный JSON-объект с ключами из списка полей выше.
+Каждое значение - строка (UTF-8).
+
+Выведи ТОЛЬКО JSON, без дополнительных комментариев."""
+
+    return prompt
+
+
+def _build_reflection_prompt(
+    extracted_data: Dict[str, Any],
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_analysis: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Промпт для второго этапа: проверка и улучшение
+    """
+    extracted_json = json.dumps(extracted_data, ensure_ascii=False, indent=2)
+    
+    # Добавляем анализ диаризации если есть
+    diarization_context = ""
+    if diarization_analysis:
+        speakers_info = diarization_analysis.get('speakers', {})
+        if speakers_info:
+            diarization_context = "\n\nАНАЛИЗ УЧАСТНИКОВ:\n"
+            for speaker_id, info in speakers_info.items():
+                role = info.get('role', 'участник')
+                time_percent = info.get('speaking_time_percent', 0)
+                diarization_context += f"- {speaker_id} ({role}): {time_percent:.1f}% времени\n"
+    
+    prompt = f"""ЭТАП 2: ПРОВЕРКА И УЛУЧШЕНИЕ
+
+ИЗВЛЕЧЕННЫЕ ДАННЫЕ (этап 1):
+{extracted_json}
+{diarization_context}
+
+ЗАДАЧА:
+Проверь и улучши извлеченные данные:
+
+1. ПРОВЕРКА ПОЛНОТЫ:
+   - Все ли важные моменты из транскрипции отражены?
+   - Нет ли пропущенных решений, задач или проблем?
+   - Достаточно ли детализированы поля?
+
+2. ПРОВЕРКА ТОЧНОСТИ:
+   - Все ли факты соответствуют транскрипции?
+   - Нет ли домыслов или интерпретаций?
+   - Корректны ли имена и термины?
+
+3. ИСПОЛЬЗОВАНИЕ ДИАРИЗАЦИИ:
+   - Указаны ли ответственные за задачи из числа спикеров?
+   - Отражен ли вклад разных участников?
+   - Использована ли информация о ролях спикеров?
+
+4. СТРУКТУРА:
+   - Правильно ли отформатированы списки (с дефисами)?
+   - Нет ли лишней пунктуации?
+   - Логичен ли порядок пунктов?
+
+ИНСТРУКЦИИ ПО УЛУЧШЕНИЮ:
+- Если нашел пропущенную важную информацию - добавь её
+- Если нашел неточность - исправь её
+- Если можно улучшить формулировку - улучши
+- Если можно добавить контекст из диаризации - добавь
+- НЕ добавляй информацию, которой НЕТ в транскрипции
+
+ФОРМАТ ВЫВОДА:
+Валидный JSON-объект с теми же ключами, но улучшенными значениями.
+Выведи ТОЛЬКО JSON, без комментариев."""
+
+    return prompt
+
+
+async def generate_protocol_two_stage(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+    diarization_analysis: Optional[Dict[str, Any]] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Двухэтапная генерация протокола: извлечение + рефлексия
+    
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера
+        transcription: Текст транскрипции
+        template_variables: Переменные шаблона
+        diarization_data: Данные диаризации
+        diarization_analysis: Анализ диаризации
+        **kwargs: Дополнительные параметры
+        
+    Returns:
+        Улучшенный протокол
+    """
+    logger.info("Начало двухэтапной генерации протокола")
+    
+    # ЭТАП 1: Извлечение информации
+    logger.info("Этап 1: Извлечение информации")
+    extraction_prompt = _build_extraction_prompt(transcription, template_variables, diarization_data)
+    
+    # Используем системный промпт (с учетом классификации если включена)
+    system_prompt = _build_system_prompt(transcription, diarization_analysis)
+    
+    # Генерируем первый результат
+    if provider_name == "openai":
+        provider = manager.providers[provider_name]
+        openai_model_key = kwargs.get("openai_model_key")
+        
+        # Выбор пресета модели
+        selected_model = settings.openai_model
+        selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+        
+        if openai_model_key:
+            try:
+                preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                if preset:
+                    selected_model = preset.model
+                    if getattr(preset, 'base_url', None):
+                        selected_base_url = preset.base_url
+            except Exception:
+                pass
+        
+        # Клиент для нужного base_url
+        client = provider.client
+        if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+            client = openai.OpenAI(
+                api_key=settings.openai_api_key,
+                base_url=selected_base_url,
+                http_client=provider.http_client
+            )
+        
+        # Этап 1: Извлечение
+        async def _call_openai_stage1():
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+        
+        response1 = await _call_openai_stage1()
+        content1 = response1.choices[0].message.content
+        
+        try:
+            extracted_data = json.loads(content1)
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON на этапе 1: {e}")
+            # Пытаемся извлечь JSON из текста
+            start_idx = content1.find('{')
+            end_idx = content1.rfind('}') + 1
+            json_str = content1[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content1
+            extracted_data = json.loads(json_str)
+        
+        logger.info(f"Этап 1 завершен, извлечено {len(extracted_data)} полей")
+        
+        # ЭТАП 2: Рефлексия и улучшение
+        logger.info("Этап 2: Рефлексия и улучшение")
+        reflection_prompt = _build_reflection_prompt(
+            extracted_data, transcription, template_variables, diarization_analysis
+        )
+        
+        async def _call_openai_stage2():
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": reflection_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+        
+        response2 = await _call_openai_stage2()
+        content2 = response2.choices[0].message.content
+        
+        try:
+            improved_data = json.loads(content2)
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON на этапе 2: {e}")
+            start_idx = content2.find('{')
+            end_idx = content2.rfind('}') + 1
+            json_str = content2[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content2
+            improved_data = json.loads(json_str)
+        
+        logger.info(f"Этап 2 завершен, протокол улучшен")
+        return improved_data
+    
+    else:
+        # Для других провайдеров используем стандартный подход
+        logger.warning(f"Двухэтапная генерация не поддерживается для {provider_name}, используем стандартный подход")
+        return await manager.generate_protocol(
+            provider_name, transcription, template_variables, diarization_data, **kwargs
+        )
+
+
+# ===================================================================
+# CHAIN-OF-THOUGHT ДЛЯ ДЛИННЫХ ВСТРЕЧ
+# ===================================================================
+
+def _build_segment_analysis_prompt(
+    segment_text: str,
+    segment_id: int,
+    total_segments: int,
+    template_variables: Dict[str, str]
+) -> str:
+    """
+    Промпт для анализа отдельного сегмента транскрипции
+    """
+    variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
+    
+    prompt = f"""CHAIN-OF-THOUGHT: АНАЛИЗ СЕГМЕНТА {segment_id + 1} ИЗ {total_segments}
+
+СЕГМЕНТ ТРАНСКРИПЦИИ:
+{segment_text}
+
+ЗАДАЧА:
+Проанализируй этот сегмент встречи и извлеки информацию для следующих категорий:
+{variables_str}
+
+ВАЖНО:
+- Это сегмент {segment_id + 1} из {total_segments} частей встречи
+- Извлекай ТОЛЬКО информацию из ЭТОГО сегмента
+- Если в сегменте нет информации для какой-то категории - пиши "Нет в этом сегменте"
+- Сохраняй контекст: это часть более длинной встречи
+- Для списков используй формат: "- пункт1\\n- пункт2"
+
+ФОРМАТ ВЫВОДА:
+JSON-объект с ключами из списка категорий выше.
+Каждое значение - строка.
+
+Выведи ТОЛЬКО JSON, без комментариев."""
+
+    return prompt
+
+
+def _build_synthesis_prompt(
+    segment_results: List[Dict[str, Any]],
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_analysis: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Промпт для синтеза финального протокола из результатов сегментов
+    """
+    # Форматируем результаты сегментов
+    segments_summary = ""
+    for i, result in enumerate(segment_results):
+        segments_summary += f"\n--- СЕГМЕНТ {i + 1} ---\n"
+        segments_summary += json.dumps(result, ensure_ascii=False, indent=2)
+        segments_summary += "\n"
+    
+    # Добавляем анализ диаризации если есть
+    diarization_context = ""
+    if diarization_analysis:
+        speakers_info = diarization_analysis.get('speakers', {})
+        if speakers_info:
+            diarization_context = "\n\nАНАЛИЗ УЧАСТНИКОВ ВСТРЕЧИ:\n"
+            for speaker_id, info in speakers_info.items():
+                role = info.get('role', 'участник')
+                time_percent = info.get('speaking_time_percent', 0)
+                diarization_context += f"- {speaker_id} ({role}): {time_percent:.1f}% времени\n"
+    
+    variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
+    
+    prompt = f"""CHAIN-OF-THOUGHT: СИНТЕЗ ФИНАЛЬНОГО ПРОТОКОЛА
+
+РЕЗУЛЬТАТЫ АНАЛИЗА СЕГМЕНТОВ:
+{segments_summary}
+{diarization_context}
+
+ЗАДАЧА:
+Объедини информацию из всех сегментов в единый связный протокол для категорий:
+{variables_str}
+
+ИНСТРУКЦИИ ПО СИНТЕЗУ:
+1. ОБЪЕДИНЕНИЕ: Собери всю информацию из сегментов в единое целое
+2. ДЕДУПЛИКАЦИЯ: Удали повторяющуюся информацию между сегментами
+3. ХРОНОЛОГИЯ: Сохрани хронологический порядок событий
+4. СВЯЗНОСТЬ: Создай связное повествование, а не список фрагментов
+5. ПОЛНОТА: Включи всю важную информацию из сегментов
+6. КОНТЕКСТ: Используй информацию о спикерах для уточнения ответственных
+
+СПЕЦИАЛЬНЫЕ ПРАВИЛА:
+- Если информация из разных сегментов конфликтует - используй более детальную
+- Объединяй похожие пункты в списках
+- Группируй задачи и решения по смысловым блокам
+- Для участников: объедини всех упомянутых, укажи роли если известны
+- Для задач: укажи ответственных из числа участников если возможно
+
+ФОРМАТ ВЫВОДА:
+JSON-объект с теми же ключами, но с объединенной и улучшенной информацией.
+Выведи ТОЛЬКО JSON, без комментариев."""
+
+    return prompt
+
+
+async def generate_protocol_chain_of_thought(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    template_variables: Dict[str, str],
+    segments: List['TranscriptionSegment'],
+    diarization_data: Optional[Dict[str, Any]] = None,
+    diarization_analysis: Optional[Dict[str, Any]] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Chain-of-Thought генерация протокола для длинных встреч
+    
+    Этапы:
+    1. Анализ каждого сегмента отдельно
+    2. Синтез финального протокола из результатов сегментов
+    
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера
+        transcription: Полный текст транскрипции
+        template_variables: Переменные шаблона
+        segments: Список сегментов транскрипции
+        diarization_data: Данные диаризации
+        diarization_analysis: Анализ диаризации
+        **kwargs: Дополнительные параметры
+        
+    Returns:
+        Финальный протокол
+    """
+    logger.info(f"Начало Chain-of-Thought генерации для {len(segments)} сегментов")
+    
+    # Используем системный промпт (с учетом классификации)
+    system_prompt = _build_system_prompt(transcription, diarization_analysis)
+    
+    segment_results = []
+    
+    # ЭТАП 1: Анализ каждого сегмента
+    logger.info("Этап 1: Анализ отдельных сегментов")
+    
+    if provider_name == "openai":
+        provider = manager.providers[provider_name]
+        openai_model_key = kwargs.get("openai_model_key")
+        
+        # Выбор пресета модели
+        selected_model = settings.openai_model
+        selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+        
+        if openai_model_key:
+            try:
+                preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                if preset:
+                    selected_model = preset.model
+                    if getattr(preset, 'base_url', None):
+                        selected_base_url = preset.base_url
+            except Exception:
+                pass
+        
+        # Клиент для нужного base_url
+        client = provider.client
+        if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+            client = openai.OpenAI(
+                api_key=settings.openai_api_key,
+                base_url=selected_base_url,
+                http_client=provider.http_client
+            )
+        
+        # Обрабатываем каждый сегмент
+        for segment in segments:
+            logger.info(f"Обработка сегмента {segment.segment_id + 1}/{len(segments)}")
+            
+            # Используем форматированный текст если есть, иначе обычный
+            segment_text = segment.formatted_text if segment.formatted_text else segment.text
+            
+            segment_prompt = _build_segment_analysis_prompt(
+                segment_text=segment_text,
+                segment_id=segment.segment_id,
+                total_segments=len(segments),
+                template_variables=template_variables
+            )
+            
+            async def _call_openai_segment():
+                return await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=selected_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": segment_prompt}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+            
+            try:
+                response = await _call_openai_segment()
+                content = response.choices[0].message.content
+                
+                segment_result = json.loads(content)
+                segment_results.append(segment_result)
+                
+                logger.info(f"Сегмент {segment.segment_id + 1} обработан успешно")
+                
+            except Exception as e:
+                logger.error(f"Ошибка при обработке сегмента {segment.segment_id + 1}: {e}")
+                # Добавляем пустой результат для сохранения порядка
+                segment_results.append({
+                    key: "Ошибка обработки сегмента" 
+                    for key in template_variables.keys()
+                })
+        
+        # ЭТАП 2: Синтез финального протокола
+        logger.info("Этап 2: Синтез финального протокола из сегментов")
+        
+        synthesis_prompt = _build_synthesis_prompt(
+            segment_results=segment_results,
+            transcription=transcription,
+            template_variables=template_variables,
+            diarization_analysis=diarization_analysis
+        )
+        
+        async def _call_openai_synthesis():
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": synthesis_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+        
+        response_synthesis = await _call_openai_synthesis()
+        content_synthesis = response_synthesis.choices[0].message.content
+        
+        try:
+            final_protocol = json.loads(content_synthesis)
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON на этапе синтеза: {e}")
+            start_idx = content_synthesis.find('{')
+            end_idx = content_synthesis.rfind('}') + 1
+            json_str = content_synthesis[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content_synthesis
+            final_protocol = json.loads(json_str)
+        
+        logger.info("Chain-of-Thought генерация завершена успешно")
+        return final_protocol
+    
+    else:
+        # Для других провайдеров используем стандартный подход
+        logger.warning(
+            f"Chain-of-Thought не поддерживается для {provider_name}, "
+            f"используем стандартный подход"
+        )
+        return await manager.generate_protocol(
+            provider_name, transcription, template_variables, diarization_data, **kwargs
+        )
 
 
 # Глобальный экземпляр менеджера LLM

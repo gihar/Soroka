@@ -64,6 +64,7 @@ class ProcessingMetrics:
     # Результаты
     transcription_length: int = 0
     speakers_count: int = 0
+    protocol_quality_score: float = 0.0  # Оценка качества протокола (0-1)
     error_occurred: bool = False
     error_stage: str = ""
     error_message: str = ""

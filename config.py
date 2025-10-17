@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     temp_file_max_age_hours: int = Field(2, description="Максимальный возраст временных файлов в часах")
     cache_max_age_hours: int = Field(24, description="Максимальный возраст кэш файлов в часах")
     
+    # Улучшения качества протоколов
+    two_stage_processing: bool = Field(True, description="Включить двухэтапную генерацию протокола (извлечение + рефлексия)")
+    enable_diarization_analysis: bool = Field(True, description="Включить расширенный анализ данных диаризации")
+    enable_text_preprocessing: bool = Field(True, description="Включить предобработку текста транскрипции")
+    enable_protocol_validation: bool = Field(True, description="Включить валидацию и оценку качества протоколов")
+    meeting_type_detection: bool = Field(True, description="Включить автоопределение типа встречи")
+    chain_of_thought_threshold_minutes: int = Field(30, description="Порог длительности встречи для Chain-of-Thought подхода (в минутах)")
+    
     @validator('openai_models', pre=True, always=True)
     def ensure_openai_models(cls, v, values):
         """Гарантируем наличие хотя бы одного пресета OpenAI.

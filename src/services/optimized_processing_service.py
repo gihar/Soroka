@@ -22,6 +22,14 @@ from src.performance.memory_management import memory_optimizer
 from reliability.middleware import monitoring_middleware
 from database import db
 
+# Новые сервисы для улучшения качества
+from src.services.transcription_preprocessor import get_preprocessor
+from src.services.diarization_analyzer import diarization_analyzer
+from src.services.protocol_validator import protocol_validator
+from src.services.segmentation_service import segmentation_service
+from llm_providers import generate_protocol_two_stage, generate_protocol_chain_of_thought, llm_manager
+from config import settings
+
 
 class OptimizedProcessingService(BaseProcessingService):
     """Сервис обработки с оптимизацией производительности"""
@@ -227,7 +235,7 @@ class OptimizedProcessingService(BaseProcessingService):
     @cache_transcription()
     async def _optimized_transcription(self, file_path: str, request: ProcessingRequest,
                                      processing_metrics, progress_tracker=None) -> Any:
-        """Оптимизированная транскрипция с кэшированием"""
+        """Оптимизированная транскрипция с кэшированием и предобработкой"""
         
         # Создаем ключ кэша на основе содержимого файла
         file_hash = await self._calculate_file_hash(file_path)
@@ -264,6 +272,43 @@ class OptimizedProcessingService(BaseProcessingService):
                     processing_metrics.speakers_count = diarization_data.get('total_speakers', 0)
                     processing_metrics.diarization_duration = 5.0  # Примерное время
         
+        # Этап предобработки текста транскрипции
+        if settings.enable_text_preprocessing and hasattr(transcription_result, 'transcription'):
+            logger.info("Применение предобработки текста")
+            preprocessor = get_preprocessor(request.language)
+            
+            preprocessed = preprocessor.preprocess(
+                text=transcription_result.transcription,
+                formatted_transcript=getattr(transcription_result, 'formatted_transcript', None)
+            )
+            
+            # Обновляем транскрипцию очищенным текстом
+            transcription_result.transcription = preprocessed['cleaned_text']
+            if preprocessed['cleaned_formatted']:
+                transcription_result.formatted_transcript = preprocessed['cleaned_formatted']
+            
+            logger.info(
+                f"Предобработка завершена: сокращение на {preprocessed['statistics']['reduction_percent']}%"
+            )
+        
+        # Этап расширенного анализа диаризации
+        if settings.enable_diarization_analysis and hasattr(transcription_result, 'diarization'):
+            if transcription_result.diarization:
+                logger.info("Применение расширенного анализа диаризации")
+                
+                analysis_result = diarization_analyzer.enrich_diarization_data(
+                    transcription_result.diarization,
+                    transcription_result.transcription
+                )
+                
+                # Сохраняем результат анализа
+                transcription_result.diarization_analysis = analysis_result
+                
+                logger.info(
+                    f"Анализ диаризации завершен: {analysis_result.total_speakers} спикеров, "
+                    f"тип встречи: {analysis_result.meeting_type}"
+                )
+        
         # Кэшируем результат
         await performance_cache.set(cache_key, transcription_result, cache_type="transcription")
         
@@ -278,7 +323,7 @@ class OptimizedProcessingService(BaseProcessingService):
     @cache_llm_response()
     async def _optimized_llm_generation(self, transcription_result: Any, template: Dict,
                                       request: ProcessingRequest, processing_metrics) -> Any:
-        """Оптимизированная генерация LLM с кэшированием"""
+        """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
         
         # Создаем ключ кэша на основе транскрипции и шаблона
         transcription_hash = hash(str(transcription_result.transcription))
@@ -299,9 +344,6 @@ class OptimizedProcessingService(BaseProcessingService):
             # Подготавливаем данные для LLM - извлекаем переменные из шаблона
             template_variables = self._get_template_variables_from_template(template)
             
-            # Создаем задачу для LLM
-            llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
-            
             # Определяем ключ пресета модели OpenAI для текущего пользователя (если применимо)
             openai_model_key = None
             try:
@@ -310,27 +352,129 @@ class OptimizedProcessingService(BaseProcessingService):
                     openai_model_key = getattr(user, 'preferred_openai_model_key', None)
             except Exception:
                 openai_model_key = None
-
-            llm_result = await task_pool.submit_task(
-                llm_task_id,
-                self._generate_llm_response,
-                transcription_result,
-                template,
-                template_variables,
-                request.llm_provider,
-                openai_model_key
+            
+            # Извлекаем анализ диаризации если есть
+            diarization_analysis = None
+            if hasattr(transcription_result, 'diarization_analysis'):
+                diarization_analysis = transcription_result.diarization_analysis.to_dict()
+            
+            # Определяем длительность встречи для проверки необходимости Chain-of-Thought
+            estimated_duration_minutes = None
+            diarization_data_raw = getattr(transcription_result, 'diarization', None)
+            if diarization_data_raw:
+                estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
+            
+            # Выбираем метод генерации: Chain-of-Thought > Двухэтапный > Стандартный
+            # Проверяем необходимость Chain-of-Thought для длинных встреч
+            should_use_cot = segmentation_service.should_use_segmentation(
+                transcription=transcription_result.transcription,
+                estimated_duration_minutes=estimated_duration_minutes
             )
             
-            if not llm_result.success:
-                raise ProcessingError(f"Ошибка LLM: {llm_result.error}", 
-                                    request.file_name, "llm")
+            if should_use_cot and request.llm_provider == 'openai':
+                logger.info("Использование Chain-of-Thought генерации для длинной встречи")
+                
+                # Сегментация транскрипции
+                # Приоритет: по спикерам если есть диаризация, иначе по времени
+                if diarization_data_raw and diarization_data_raw.get('formatted_transcript'):
+                    logger.info("Сегментация по спикерам")
+                    segments = segmentation_service.segment_by_speakers(
+                        diarization_data=diarization_data_raw,
+                        transcription=transcription_result.transcription
+                    )
+                else:
+                    logger.info("Сегментация по времени")
+                    segments = segmentation_service.segment_by_time(
+                        transcription=transcription_result.transcription,
+                        diarization_data=diarization_data_raw,
+                        target_minutes=int(settings.chain_of_thought_threshold_minutes / 6)  # ~5 мин сегменты
+                    )
+                
+                # Логирование сегментов
+                for segment in segments:
+                    logger.info(segmentation_service.create_segment_summary(segment))
+                
+                # Chain-of-Thought генерация
+                llm_result_data = await generate_protocol_chain_of_thought(
+                    manager=llm_manager,
+                    provider_name=request.llm_provider,
+                    transcription=transcription_result.transcription,
+                    template_variables=template_variables,
+                    segments=segments,
+                    diarization_data=diarization_data_raw,
+                    diarization_analysis=diarization_analysis,
+                    openai_model_key=openai_model_key
+                )
+                
+            elif settings.two_stage_processing and request.llm_provider == 'openai':
+                logger.info("Использование двухэтапной генерации протокола")
+                
+                # Двухэтапная генерация
+                llm_result_data = await generate_protocol_two_stage(
+                    manager=llm_manager,
+                    provider_name=request.llm_provider,
+                    transcription=transcription_result.transcription,
+                    template_variables=template_variables,
+                    diarization_data=diarization_data_raw,
+                    diarization_analysis=diarization_analysis,
+                    openai_model_key=openai_model_key
+                )
+            else:
+                # Стандартная генерация
+                llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
+                
+                llm_result = await task_pool.submit_task(
+                    llm_task_id,
+                    self._generate_llm_response,
+                    transcription_result,
+                    template,
+                    template_variables,
+                    request.llm_provider,
+                    openai_model_key
+                )
+                
+                if not llm_result.success:
+                    raise ProcessingError(f"Ошибка LLM: {llm_result.error}", 
+                                        request.file_name, "llm")
+                
+                llm_result_data = llm_result.result
             
             processing_metrics.llm_duration = time.time() - start_time
             
+            # Валидация протокола
+            if settings.enable_protocol_validation:
+                logger.info("Запуск валидации протокола")
+                
+                validation_result = protocol_validator.calculate_quality_score(
+                    protocol=llm_result_data,
+                    transcription=transcription_result.transcription,
+                    template_variables=template_variables,
+                    diarization_data=getattr(transcription_result, 'diarization', None)
+                )
+                
+                logger.info(
+                    f"Валидация завершена: общая оценка {validation_result.overall_score}, "
+                    f"полнота {validation_result.completeness_score}, "
+                    f"структура {validation_result.structure_score}"
+                )
+                
+                # Сохраняем результат валидации в метрики
+                processing_metrics.protocol_quality_score = validation_result.overall_score
+                
+                # Если качество низкое, логируем предупреждения
+                if validation_result.overall_score < 0.7:
+                    logger.warning(
+                        f"Низкое качество протокола ({validation_result.overall_score}). "
+                        f"Предупреждения: {validation_result.warnings}"
+                    )
+                
+                # Сохраняем валидацию в результате
+                llm_result_data['_validation'] = validation_result.to_dict()
+            
         # Кэшируем результат
-        await performance_cache.set(cache_key, llm_result.result, cache_type="llm_response")
+        await performance_cache.set(cache_key, llm_result_data, cache_type="llm_response")
         
-        return llm_result.result
+        return llm_result_data
     
     def _get_template_variables_from_template(self, template) -> Dict[str, str]:
         """Извлечь переменные из конкретного шаблона"""
