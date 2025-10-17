@@ -54,8 +54,9 @@ class SpeechmaticsService:
         if SPEECHMATICS_AVAILABLE and settings.speechmatics_api_key:
             try:
                 # Создаем настройки подключения с учетом SSL настроек
+                # Базовый URL без /v2, так как SDK сам добавляет нужные пути (/v2/jobs и т.д.)
                 connection_kwargs = {
-                    "url": "https://asr.api.speechmatics.com/v2",
+                    "url": "https://asr.api.speechmatics.com",
                     "auth_token": settings.speechmatics_api_key,
                 }
                 
