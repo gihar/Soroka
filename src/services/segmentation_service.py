@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 from loguru import logger
 
+from config import settings
+
 
 @dataclass
 class TranscriptionSegment:
@@ -47,15 +49,16 @@ class TranscriptionSegmentationService:
             True если нужна сегментация
         """
         word_count = len(transcription.split())
+        threshold = settings.chain_of_thought_threshold_minutes
         
         # Если передана длительность, используем её
         if estimated_duration_minutes:
-            return estimated_duration_minutes > 30
+            return estimated_duration_minutes > threshold
         
         # Иначе оцениваем по количеству слов
-        # 30 минут * 150 слов/мин = 4500 слов
+        # threshold минут * 150 слов/мин
         estimated_minutes = word_count / self.words_per_minute
-        return estimated_minutes > 30
+        return estimated_minutes > threshold
     
     def segment_by_time(
         self,
