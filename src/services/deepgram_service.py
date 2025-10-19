@@ -1,12 +1,12 @@
 """
-Сервис для работы с Deepgram API
+Сервис для работы с Deepgram API (SDK v5.x)
 """
 
 from __future__ import annotations
 
 import os
 import asyncio
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any
 from pathlib import Path
 from loguru import logger
 from config import settings
@@ -15,15 +15,12 @@ from src.models.processing import TranscriptionResult
 from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, DeepgramAPIError
 
 try:
-    from deepgram import DeepgramClient, PrerecordedOptions, FileSource
-    import httpx
+    from deepgram import DeepgramClient
     DEEPGRAM_AVAILABLE = True
 except ImportError:
     DEEPGRAM_AVAILABLE = False
+    DeepgramClient = None
     logger.warning("Deepgram SDK недоступен")
-    if TYPE_CHECKING:
-        # Только для type checking, не будет исполняться
-        from deepgram import DeepgramClient, PrerecordedOptions, FileSource
 
 
 class DeepgramService:
@@ -34,11 +31,12 @@ class DeepgramService:
         self.temp_dir = Path(settings.temp_dir)
         self.temp_dir.mkdir(exist_ok=True)
         
-        # Инициализация клиента
+        # Инициализация клиента (SDK v5.x)
         if DEEPGRAM_AVAILABLE and settings.deepgram_api_key:
             try:
-                self.client = DeepgramClient(settings.deepgram_api_key)
-                logger.info("Deepgram клиент инициализирован")
+                # В SDK v5.x используется keyword argument
+                self.client = DeepgramClient(api_key=settings.deepgram_api_key)
+                logger.info("Deepgram клиент инициализирован (SDK v5.x)")
             except Exception as e:
                 logger.warning(f"Ошибка при инициализации Deepgram клиента: {e}")
         else:
@@ -66,19 +64,19 @@ class DeepgramService:
             logger.error(f"Ошибка при проверке размера файла {file_path}: {e}")
             return False
     
-    def _prepare_transcription_options(self, language: str = None, enable_diarization: bool = False):
-        """Подготовить опции для транскрипции"""
-        options = PrerecordedOptions(
-            model=settings.deepgram_model,
-            language=language or settings.deepgram_language,
-            smart_format=True,
-            punctuate=True,
-            utterances=True,
-        )
+    def _prepare_transcription_options(self, language: str = None, enable_diarization: bool = False) -> Dict[str, Any]:
+        """Подготовить опции для транскрипции (SDK v5.x)"""
+        options = {
+            "model": settings.deepgram_model,
+            "language": language or settings.deepgram_language,
+            "smart_format": True,
+            "punctuate": True,
+            "utterances": True,
+        }
         
         # Добавляем диаризацию если включена
         if enable_diarization:
-            options.diarize = True
+            options["diarize"] = True
         
         return options
     
@@ -101,17 +99,16 @@ class DeepgramService:
             # Подготавливаем опции
             options = self._prepare_transcription_options(language, enable_diarization)
             
-            # Выполняем транскрипцию в отдельном потоке
+            # Выполняем транскрипцию в отдельном потоке (SDK v5.x)
             def _deepgram_transcribe_sync():
                 with open(file_path, "rb") as audio_file:
                     buffer_data = audio_file.read()
                 
-                payload: FileSource = {
-                    "buffer": buffer_data,
-                }
-                
-                response = self.client.listen.prerecorded.v("1").transcribe_file(
-                    payload, options
+                # SDK v5.x API: используем client.listen.v1().transcribe_file
+                # Передаем данные как {"buffer": buffer_data}
+                response = self.client.listen.v1().transcribe_file(
+                    {"buffer": buffer_data},
+                    options
                 )
                 
                 return response
