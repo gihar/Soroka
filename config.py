@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # LLM Таймауты
     llm_timeout_seconds: float = Field(30.0, description="Общий таймаут ожидания ответа от LLM (в секундах)")
     
+    # HTTP заголовки для LLM запросов
+    http_referer: Optional[str] = Field("https://github.com/gihar/Soroka", description="HTTP Referer заголовок для LLM запросов")
+    x_title: Optional[str] = Field("Soroka", description="X-Title заголовок для LLM запросов")
+    
     # База данных
     database_url: str = Field("sqlite:///bot.db", description="URL базы данных")
     

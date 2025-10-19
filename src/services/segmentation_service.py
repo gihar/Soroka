@@ -91,17 +91,30 @@ class TranscriptionSegmentationService:
             
             # Пытаемся найти естественную границу (конец предложения)
             if end_idx < total_words:
-                # Ищем ближайшую точку, вопрос или восклицательный знак
-                segment_text = ' '.join(words[start_idx:end_idx + 50])
-                sentence_ends = [m.end() for m in re.finditer(r'[.!?]\s+', segment_text)]
+                # Берем немного больше слов для поиска границы
+                search_end = min(end_idx + 100, total_words)
+                search_segment = words[start_idx:search_end]
                 
-                if sentence_ends:
-                    # Находим ближайшую границу к целевой позиции
-                    target_pos = end_idx - start_idx
-                    closest_end = min(sentence_ends, key=lambda x: abs(x - target_pos))
-                    # Пересчитываем end_idx
-                    adjusted_text = segment_text[:closest_end]
-                    end_idx = start_idx + len(adjusted_text.split())
+                # Ищем конец предложения в диапазоне ±50 слов от целевой позиции
+                target_word_idx = end_idx - start_idx
+                search_start = max(target_word_idx - 50, 0)
+                search_end_range = min(target_word_idx + 50, len(search_segment))
+                
+                best_boundary = None
+                min_distance = float('inf')
+                
+                # Ищем точки, вопросы или восклицательные знаки
+                for i in range(search_start, search_end_range):
+                    word = search_segment[i]
+                    if word.endswith(('.', '!', '?')):
+                        distance = abs(i - target_word_idx)
+                        if distance < min_distance:
+                            min_distance = distance
+                            best_boundary = i + 1  # +1 чтобы включить слово с точкой
+                
+                # Если нашли подходящую границу, используем её
+                if best_boundary is not None:
+                    end_idx = start_idx + best_boundary
             
             # Извлекаем текст сегмента
             segment_words = words[start_idx:end_idx]

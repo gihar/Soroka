@@ -272,7 +272,12 @@ class OpenAIProvider(LLMProvider):
             openai.api_key = settings.openai_api_key
             # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            headers = {}
+            if settings.http_referer:
+                headers["Referer"] = settings.http_referer
+            if settings.x_title:
+                headers["X-Title"] = settings.x_title
+            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds, headers=headers)
             self.client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
@@ -379,7 +384,12 @@ class AnthropicProvider(LLMProvider):
         if settings.anthropic_api_key:
             # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            headers = {}
+            if settings.http_referer:
+                headers["Referer"] = settings.http_referer
+            if settings.x_title:
+                headers["X-Title"] = settings.x_title
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds, headers=headers)
             self.client = Anthropic(
                 api_key=settings.anthropic_api_key,
                 http_client=http_client
@@ -468,6 +478,11 @@ class YandexGPTProvider(LLMProvider):
             "Authorization": f"Api-Key {self.api_key}",
             "Content-Type": "application/json"
         }
+        
+        if settings.http_referer:
+            headers["Referer"] = settings.http_referer
+        if settings.x_title:
+            headers["X-Title"] = settings.x_title
         
         data = {
             "modelUri": f"gpt://{self.folder_id}/yandexgpt-lite",
