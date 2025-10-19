@@ -473,6 +473,13 @@ class MeetingStructureBuilder:
             # Простой системный промпт
             system_prompt = "Ты — точный аналитик встреч. Извлекай только фактическую информацию из транскрипции."
             
+            # Формируем extra_headers для атрибуции
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+            
             async def _call_openai():
                 return await asyncio.to_thread(
                     provider.client.chat.completions.create,
@@ -482,7 +489,8 @@ class MeetingStructureBuilder:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    extra_headers=extra_headers
                 )
             
             response = await _call_openai()
