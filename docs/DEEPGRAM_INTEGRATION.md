@@ -58,9 +58,12 @@ pip install "deepgram-sdk>=3.0.0,<6.0.0"
 ```
 
 **Рекомендуемые версии:**
-- Минимальная: 3.0.0 (первая версия с async/await и новым API)
+- Минимальная: 5.0.0 (полностью переработанный API)
 - Актуальная: 5.1.0 (последняя стабильная версия на момент написания)
-- Версия 3.x принесла критические изменения в API, поэтому версии 2.x не поддерживаются
+- Версии 3.x и 4.x используют устаревший API (PrerecordedOptions)
+- Версия 5.x принесла breaking changes: новая структура API, отказ от PrerecordedOptions
+
+**Важно:** Код написан для SDK v5.x! Для версий 3.x-4.x потребуется другая реализация.
 
 ## Использование
 
@@ -193,19 +196,21 @@ Deepgram поддерживает более 30 языков, включая:
 ```python
 from src.services.deepgram_service import deepgram_service
 
-# Транскрипция без диаризации
+# Транскрипция без диаризации (SDK v5.x)
 result = await deepgram_service.transcribe_file(
     file_path="audio.mp3",
     language="ru"
 )
 
-# Транскрипция с диаризацией
+# Транскрипция с диаризацией (SDK v5.x)
 result = await deepgram_service.transcribe_file(
     file_path="audio.mp3",
     language="ru",
     enable_diarization=True
 )
 ```
+
+**Примечание:** SDK v5.x использует `client.listen.v1().transcribe_file()` API.
 
 ### Интеграция в основной сервис
 
@@ -270,6 +275,12 @@ result = await service.transcribe_with_diarization(
 
 ## Технические детали
 
+### Версия SDK
+Интеграция использует **Deepgram SDK v5.x** с новым API:
+- `client.listen.v1().transcribe_file()` вместо `prerecorded.v("1").transcribe_file()`
+- Опции передаются как словарь, не объект `PrerecordedOptions`
+- Инициализация: `DeepgramClient(api_key=...)` с keyword argument
+
 ### API эндпоинт
 ```
 POST https://api.deepgram.com/v1/listen
@@ -333,6 +344,7 @@ Deepgram предлагает гибкие тарифные планы:
 - [Официальная документация Deepgram](https://developers.deepgram.com/)
 - [Deepgram Console](https://console.deepgram.com/)
 - [Deepgram SDK для Python](https://github.com/deepgram/deepgram-python-sdk)
+- [Миграция v3 → v5](https://github.com/deepgram/deepgram-python-sdk/blob/main/docs/Migrating-v3-to-v5.md)
 - [Примеры использования](https://developers.deepgram.com/docs/getting-started-with-pre-recorded-audio)
 - [Поддерживаемые языки](https://developers.deepgram.com/docs/models-languages-overview)
 
