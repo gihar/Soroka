@@ -27,6 +27,7 @@ from src.services.transcription_preprocessor import get_preprocessor
 from src.services.diarization_analyzer import diarization_analyzer
 from src.services.protocol_validator import protocol_validator
 from src.services.segmentation_service import segmentation_service
+from src.services.meeting_structure_builder import get_structure_builder
 from llm_providers import generate_protocol_two_stage, generate_protocol_chain_of_thought, llm_manager
 from config import settings
 
@@ -370,6 +371,54 @@ class OptimizedProcessingService(BaseProcessingService):
             diarization_data_raw = getattr(transcription_result, 'diarization', None)
             if diarization_data_raw:
                 estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
+            
+            # Построение структурированного представления встречи (если включено)
+            meeting_structure = None
+            if settings.enable_meeting_structure:
+                try:
+                    logger.info("Построение структурированного представления встречи")
+                    structure_start_time = time.time()
+                    
+                    # Получаем builder с LLM manager
+                    structure_builder = get_structure_builder(llm_manager)
+                    
+                    # Определяем тип встречи если есть классификация
+                    meeting_type = "general"
+                    if diarization_analysis:
+                        meeting_type = diarization_analysis.get('meeting_type', 'general')
+                    
+                    # Строим структуру
+                    meeting_structure = await structure_builder.build_from_transcription(
+                        transcription=transcription_result.transcription,
+                        diarization_analysis=diarization_analysis,
+                        meeting_type=meeting_type,
+                        language=request.language
+                    )
+                    
+                    # Сохраняем метрики
+                    processing_metrics.structure_building_duration = time.time() - structure_start_time
+                    processing_metrics.topics_extracted = len(meeting_structure.topics)
+                    processing_metrics.decisions_extracted = len(meeting_structure.decisions)
+                    processing_metrics.actions_extracted = len(meeting_structure.action_items)
+                    
+                    validation = meeting_structure.validate_structure()
+                    processing_metrics.structure_validation_passed = validation['valid']
+                    
+                    logger.info(
+                        f"Структура построена за {processing_metrics.structure_building_duration:.2f}с: "
+                        f"{processing_metrics.topics_extracted} тем, {processing_metrics.decisions_extracted} решений, "
+                        f"{processing_metrics.actions_extracted} задач"
+                    )
+                    
+                    # Кэшируем структуру если включено
+                    if settings.cache_meeting_structures:
+                        structure_cache_key = f"structure:{transcription_hash}"
+                        await performance_cache.set(structure_cache_key, meeting_structure.to_dict(), cache_type="meeting_structure")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка построения структуры встречи: {e}", exc_info=True)
+                    # Продолжаем без структуры
+                    meeting_structure = None
             
             # Выбираем метод генерации: Chain-of-Thought > Двухэтапный > Стандартный
             # Проверяем необходимость Chain-of-Thought для длинных встреч

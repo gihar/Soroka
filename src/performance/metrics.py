@@ -65,6 +65,14 @@ class ProcessingMetrics:
     transcription_length: int = 0
     speakers_count: int = 0
     protocol_quality_score: float = 0.0  # Оценка качества протокола (0-1)
+    
+    # Метрики структурированного представления
+    structure_building_duration: float = 0.0
+    topics_extracted: int = 0
+    decisions_extracted: int = 0
+    actions_extracted: int = 0
+    structure_validation_passed: bool = False
+    
     error_occurred: bool = False
     error_stage: str = ""
     error_message: str = ""
