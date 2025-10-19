@@ -272,12 +272,7 @@ class OpenAIProvider(LLMProvider):
             openai.api_key = settings.openai_api_key
             # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            headers = {}
-            if settings.http_referer:
-                headers["Referer"] = settings.http_referer
-            if settings.x_title:
-                headers["X-Title"] = settings.x_title
-            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds, headers=headers)
+            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
             self.client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
@@ -334,6 +329,14 @@ class OpenAIProvider(LLMProvider):
             logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
 
             logger.info(f"Отправляем запрос в OpenAI с моделью {selected_model}")
+            
+            # Формируем extra_headers для атрибуции
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+            
             # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
             async def _call_openai():
                 return await asyncio.to_thread(
@@ -344,7 +347,8 @@ class OpenAIProvider(LLMProvider):
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    extra_headers=extra_headers
                 )
             response = await _call_openai()
             logger.info("Получен ответ от OpenAI API")
@@ -384,12 +388,7 @@ class AnthropicProvider(LLMProvider):
         if settings.anthropic_api_key:
             # Создаем HTTP клиент с настройками SSL и таймаутом из настроек
             import httpx
-            headers = {}
-            if settings.http_referer:
-                headers["Referer"] = settings.http_referer
-            if settings.x_title:
-                headers["X-Title"] = settings.x_title
-            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds, headers=headers)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
             self.client = Anthropic(
                 api_key=settings.anthropic_api_key,
                 http_client=http_client
@@ -418,6 +417,14 @@ class AnthropicProvider(LLMProvider):
             )
             _a_snippet = prompt[:400].replace("\n", " ")
             logger.debug(f"Anthropic prompt (фрагмент 400): {_a_snippet}...")
+            
+            # Формируем extra_headers для атрибуции
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+            
             # Выполняем синхронный вызов клиента Anthropic в отдельном потоке
             async def _call_anthropic():
                 return await asyncio.to_thread(
@@ -428,7 +435,8 @@ class AnthropicProvider(LLMProvider):
                     system=system_prompt,
                     messages=[
                         {"role": "user", "content": prompt}
-                    ]
+                    ],
+                    extra_headers=extra_headers
                 )
             response = await _call_anthropic()
             
@@ -797,6 +805,13 @@ async def generate_protocol_two_stage(
                 http_client=provider.http_client
             )
         
+        # Формируем extra_headers для атрибуции
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+        
         # Этап 1: Извлечение
         async def _call_openai_stage1():
             return await asyncio.to_thread(
@@ -807,7 +822,8 @@ async def generate_protocol_two_stage(
                     {"role": "user", "content": extraction_prompt}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_headers=extra_headers
             )
         
         response1 = await _call_openai_stage1()
@@ -840,7 +856,8 @@ async def generate_protocol_two_stage(
                     {"role": "user", "content": reflection_prompt}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_headers=extra_headers
             )
         
         response2 = await _call_openai_stage2()
@@ -1049,6 +1066,13 @@ async def generate_protocol_chain_of_thought(
                 http_client=provider.http_client
             )
         
+        # Формируем extra_headers для атрибуции
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+        
         # Обрабатываем каждый сегмент
         for segment in segments:
             logger.info(f"Обработка сегмента {segment.segment_id + 1}/{len(segments)}")
@@ -1072,7 +1096,8 @@ async def generate_protocol_chain_of_thought(
                         {"role": "user", "content": segment_prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    extra_headers=extra_headers
                 )
             
             try:
@@ -1111,7 +1136,8 @@ async def generate_protocol_chain_of_thought(
                     {"role": "user", "content": synthesis_prompt}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_headers=extra_headers
             )
         
         response_synthesis = await _call_openai_synthesis()
