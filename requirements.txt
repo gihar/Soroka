@@ -33,3 +33,7 @@ requests>=2.32.3
 urllib3>=2.2.3
 # PDF generation (pure Python, no system dependencies)
 reportlab>=4.2.5
+# ML для умного выбора шаблонов
+sentence-transformers>=3.3.1
+scikit-learn>=1.5.2
+numpy>=1.26.4

@@ -84,7 +84,10 @@ class TemplateService:
                 content=template_data.content,
                 description=template_data.description,
                 created_by=template_data.created_by,
-                is_default=template_data.is_default
+                is_default=template_data.is_default,
+                category=template_data.category,
+                tags=template_data.tags,
+                keywords=template_data.keywords
             )
             
             # Возвращаем созданный шаблон
@@ -143,25 +146,41 @@ class TemplateService:
             logger.warning(f"Не удалось извлечь переменные из шаблона: {e}")
             return []
     
+    def _convert_dict_to_template(self, template_dict: Dict[str, Any]) -> Template:
+        """Преобразовать словарь в объект Template"""
+        return Template(**template_dict)
+    
     async def init_default_templates(self) -> None:
-        """Инициализация базовых шаблонов"""
+        """Инициализация базовых и библиотечных шаблонов"""
         try:
             # Проверяем, есть ли уже шаблоны
             existing_templates = await self.get_all_templates()
-            if existing_templates:
-                logger.info("Базовые шаблоны уже существуют, пропускаем инициализацию")
+            
+            # Импортируем библиотеку шаблонов
+            from src.services.template_library import TemplateLibrary
+            
+            # Объединяем базовые и библиотечные шаблоны
+            library = TemplateLibrary()
+            all_templates = self._get_default_templates() + library.get_all_templates()
+            
+            # Если уже есть достаточно шаблонов, пропускаем
+            if len(existing_templates) >= len(all_templates):
+                logger.info(f"Шаблоны уже инициализированы ({len(existing_templates)} шаблонов)")
                 return
             
-            default_templates = self._get_default_templates()
+            # Создаем только отсутствующие шаблоны
+            existing_names = {t.name for t in existing_templates}
+            templates_to_create = [t for t in all_templates if t["name"] not in existing_names]
             
-            for template_data in default_templates:
+            for template_data in templates_to_create:
                 template_create = TemplateCreate(**template_data)
                 await self.create_template(template_create)
             
-            logger.info(f"Инициализировано {len(default_templates)} базовых шаблонов")
+            logger.info(f"Инициализировано {len(templates_to_create)} новых шаблонов")
+            logger.info(f"Всего шаблонов в системе: {len(existing_templates) + len(templates_to_create)}")
             
         except Exception as e:
-            logger.error(f"Ошибка при инициализации базовых шаблонов: {e}")
+            logger.error(f"Ошибка при инициализации шаблонов: {e}")
             raise
     
     def _get_default_templates(self) -> List[Dict[str, Any]]:
@@ -170,6 +189,9 @@ class TemplateService:
             {
                 "name": "Стандартный протокол встречи",
                 "description": "Базовый шаблон для оформления протокола встречи",
+                "category": "general",
+                "tags": ["general", "meeting"],
+                "keywords": ["встреча", "протокол", "общий"],
                 "content": """# Протокол встречи
 
 ## Основная информация
@@ -209,6 +231,9 @@ class TemplateService:
             {
                 "name": "Краткое резюме встречи",
                 "description": "Сокращенный формат для быстрого резюме",
+                "category": "general",
+                "tags": ["brief", "summary"],
+                "keywords": ["резюме", "краткое", "summary"],
                 "content": """# Резюме встречи
 
 **Участники:** {{ participants }}
@@ -231,6 +256,9 @@ class TemplateService:
             {
                 "name": "Техническое совещание",
                 "description": "Шаблон для технических встреч и code review с диаризацией",
+                "category": "technical",
+                "tags": ["technical", "engineering", "code_review"],
+                "keywords": ["техническое", "разработка", "код", "архитектура"],
                 "content": """# Техническое совещание
 
 ## Участники
@@ -265,6 +293,9 @@ class TemplateService:
             {
                 "name": "Протокол с детализацией говорящих",
                 "description": "Подробный шаблон с акцентом на диаризацию и вклад каждого участника",
+                "category": "general",
+                "tags": ["detailed", "diarization"],
+                "keywords": ["детализация", "участники", "диаризация", "спикеры"],
                 "content": """# Протокол встречи с анализом участников
 
 ## Основная информация

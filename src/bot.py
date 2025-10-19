@@ -219,6 +219,15 @@ class EnhancedTelegramBot:
             await self.template_service.init_default_templates()
             logger.info("Базовые шаблоны инициализированы")
             
+            # 2.5. Инициализируем ML-классификатор шаблонов
+            try:
+                from src.services.smart_template_selector import smart_selector
+                templates = await self.template_service.get_all_templates()
+                await smart_selector.index_templates(templates)
+                logger.info(f"ML-классификатор шаблонов инициализирован ({len(templates)} шаблонов)")
+            except Exception as e:
+                logger.warning(f"Не удалось инициализировать ML-классификатор: {e}")
+            
             # 3. Создаем директорию для временных файлов
             os.makedirs(settings.temp_dir, exist_ok=True)
             logger.info(f"Директория для временных файлов создана: {settings.temp_dir}")

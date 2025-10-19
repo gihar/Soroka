@@ -1,5 +1,5 @@
 """
-Сервис для работы с Deepgram API (SDK v5.x)
+Сервис для работы с Deepgram API (прямой HTTP API для избежания Pydantic validation errors)
 """
 
 from __future__ import annotations
@@ -9,38 +9,41 @@ import asyncio
 from typing import Optional, Dict, Any
 from pathlib import Path
 from loguru import logger
+import httpx
 from config import settings
 
 from src.models.processing import TranscriptionResult
 from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, DeepgramAPIError
 
-try:
-    from deepgram import DeepgramClient
-    DEEPGRAM_AVAILABLE = True
-except ImportError:
-    DEEPGRAM_AVAILABLE = False
-    DeepgramClient = None
-    logger.warning("Deepgram SDK недоступен")
+# Используем прямой HTTP API вместо SDK для избежания проблем с Pydantic валидацией
+DEEPGRAM_AVAILABLE = True
 
 
 class DeepgramService:
-    """Сервис для работы с Deepgram API"""
+    """Сервис для работы с Deepgram API через прямой HTTP API"""
+    
+    DEEPGRAM_API_URL = "https://api.deepgram.com/v1/listen"
     
     def __init__(self):
-        self.client = None
+        self.api_key = settings.deepgram_api_key
         self.temp_dir = Path(settings.temp_dir)
         self.temp_dir.mkdir(exist_ok=True)
         
-        # Инициализация клиента (SDK v5.x)
-        if DEEPGRAM_AVAILABLE and settings.deepgram_api_key:
-            try:
-                # В SDK v5.x используется keyword argument
-                self.client = DeepgramClient(api_key=settings.deepgram_api_key)
-                logger.info("Deepgram клиент инициализирован (SDK v5.x)")
-            except Exception as e:
-                logger.warning(f"Ошибка при инициализации Deepgram клиента: {e}")
+        # Инициализация HTTP клиента
+        if self.api_key:
+            # Создаем httpx клиент с настройками SSL
+            verify_ssl = getattr(settings, 'ssl_verify', True)
+            self.http_client = httpx.AsyncClient(
+                timeout=300.0,  # 5 минут таймаут для больших файлов
+                verify=verify_ssl,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                }
+            )
+            logger.info("Deepgram HTTP клиент инициализирован (прямой API)")
         else:
-            logger.warning("Deepgram API ключ не настроен или SDK недоступен")
+            self.http_client = None
+            logger.warning("Deepgram API ключ не настроен")
     
     def _check_file_size(self, file_path: str) -> bool:
         """Проверить размер файла для Deepgram API"""
@@ -64,28 +67,12 @@ class DeepgramService:
             logger.error(f"Ошибка при проверке размера файла {file_path}: {e}")
             return False
     
-    def _prepare_transcription_options(self, language: str = None, enable_diarization: bool = False) -> Dict[str, Any]:
-        """Подготовить опции для транскрипции (SDK v5.x)"""
-        options = {
-            "model": settings.deepgram_model,
-            "language": language or settings.deepgram_language,
-            "smart_format": True,
-            "punctuate": True,
-            "utterances": True,
-        }
-        
-        # Добавляем диаризацию если включена
-        if enable_diarization:
-            options["diarize"] = True
-        
-        return options
-    
     async def transcribe_file(self, file_path: str, language: str = None, 
                             enable_diarization: bool = False) -> TranscriptionResult:
         """Транскрибировать файл через Deepgram API"""
         
-        if not self.client:
-            raise CloudTranscriptionError("Deepgram клиент не инициализирован", file_path)
+        if not self.http_client:
+            raise CloudTranscriptionError("Deepgram HTTP клиент не инициализирован", file_path)
         
         if not os.path.exists(file_path):
             raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
@@ -96,26 +83,46 @@ class DeepgramService:
         try:
             logger.info(f"Начало транскрипции через Deepgram: {file_path}")
             
-            # Подготавливаем опции
-            options = self._prepare_transcription_options(language, enable_diarization)
+            # Подготавливаем параметры запроса
+            params = {
+                "model": settings.deepgram_model,
+                "language": language or settings.deepgram_language,
+                "smart_format": "true",
+                "punctuate": "true",
+                "utterances": "true",
+            }
             
-            # Выполняем транскрипцию в отдельном потоке (SDK v5.x)
-            def _deepgram_transcribe_sync():
-                with open(file_path, "rb") as audio_file:
-                    buffer_data = audio_file.read()
-                
-                # SDK v5.x API: используем client.listen.v1().transcribe_file
-                # Передаем данные как {"buffer": buffer_data}
-                response = self.client.listen.v1().transcribe_file(
-                    {"buffer": buffer_data},
-                    options
-                )
-                
-                return response
+            if enable_diarization:
+                params["diarize"] = "true"
             
+            # Читаем файл
+            with open(file_path, "rb") as audio_file:
+                audio_data = audio_file.read()
+            
+            # Определяем mime type
+            mime_type = "audio/mpeg"
+            if file_path.endswith(".wav"):
+                mime_type = "audio/wav"
+            elif file_path.endswith(".m4a"):
+                mime_type = "audio/mp4"
+            elif file_path.endswith(".ogg"):
+                mime_type = "audio/ogg"
+            
+            # Отправляем запрос
             try:
-                response = await asyncio.to_thread(_deepgram_transcribe_sync)
-                result = self._process_transcript_result(response, enable_diarization)
+                response = await self.http_client.post(
+                    self.DEEPGRAM_API_URL,
+                    params=params,
+                    content=audio_data,
+                    headers={"Content-Type": mime_type}
+                )
+                response.raise_for_status()
+                
+                # Получаем JSON ответ
+                response_data = response.json()
+                
+                # Обрабатываем результат
+                result = self._process_transcript_result(response_data, enable_diarization)
                 logger.info(f"Транскрипция через Deepgram завершена. Длина текста: {len(result.transcription)} символов")
                 return result
                 
@@ -153,8 +160,8 @@ class DeepgramService:
             logger.error(f"Ошибка при транскрипции через Deepgram {file_path}: {e}")
             raise CloudTranscriptionError(str(e), file_path)
     
-    def _process_transcript_result(self, response: Any, enable_diarization: bool = False) -> TranscriptionResult:
-        """Обработать результат транскрипции от Deepgram"""
+    def _process_transcript_result(self, response_data: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
+        """Обработать результат транскрипции от Deepgram (работа с сырым JSON)"""
         
         # Извлекаем основной текст
         transcription_text = ""
@@ -164,19 +171,23 @@ class DeepgramService:
         
         try:
             # Получаем результаты
-            results = response.results
+            results = response_data.get("results", {})
             
             # Извлекаем транскрипцию из первого канала
-            if results.channels and len(results.channels) > 0:
-                channel = results.channels[0]
-                if channel.alternatives and len(channel.alternatives) > 0:
-                    transcription_text = channel.alternatives[0].transcript
+            channels = results.get("channels", [])
+            if channels and len(channels) > 0:
+                channel = channels[0]
+                alternatives = channel.get("alternatives", [])
+                if alternatives and len(alternatives) > 0:
+                    transcription_text = alternatives[0].get("transcript", "")
             
             # Если включена диаризация, обрабатываем utterances (высказывания)
-            if enable_diarization and results.utterances:
-                for utterance in results.utterances:
-                    speaker_id = f"Speaker {utterance.speaker}"
-                    utterance_text = utterance.transcript
+            utterances = results.get("utterances", [])
+            if enable_diarization and utterances:
+                for utterance in utterances:
+                    speaker = utterance.get("speaker", 0)
+                    speaker_id = f"Speaker {speaker}"
+                    utterance_text = utterance.get("transcript", "")
                     
                     if speaker_id not in speakers_text:
                         speakers_text[speaker_id] = ""
@@ -231,7 +242,12 @@ class DeepgramService:
     
     def is_available(self) -> bool:
         """Проверить, доступен ли сервис Deepgram"""
-        return DEEPGRAM_AVAILABLE and self.client is not None
+        return DEEPGRAM_AVAILABLE and self.http_client is not None
+    
+    async def cleanup(self):
+        """Очистка ресурсов"""
+        if self.http_client:
+            await self.http_client.aclose()
 
 
 # Глобальный экземпляр сервиса

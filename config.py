@@ -2,9 +2,13 @@
 Конфигурация приложения
 """
 
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field, validator, BaseModel
 from typing import Optional, List
+
+# Предотвращаем конфликты при форкинге процессов после использования токенизаторов
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class OpenAIModelPreset(BaseModel):

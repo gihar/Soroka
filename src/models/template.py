@@ -2,7 +2,7 @@
 Модели шаблонов
 """
 
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,9 @@ class TemplateBase(BaseModel):
     description: Optional[str] = Field(None, description="Описание шаблона", max_length=500)
     content: str = Field(..., description="Содержимое шаблона", min_length=10)
     is_default: bool = Field(False, description="Является ли шаблон по умолчанию")
+    category: Optional[str] = Field(None, description="Категория шаблона (management, product, technical, sales)")
+    tags: Optional[List[str]] = Field(None, description="Теги для классификации")
+    keywords: Optional[List[str]] = Field(None, description="Ключевые слова для ML-классификации")
 
 
 class TemplateCreate(TemplateBase):

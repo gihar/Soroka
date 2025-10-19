@@ -28,6 +28,7 @@ from src.services.diarization_analyzer import diarization_analyzer
 from src.services.protocol_validator import protocol_validator
 from src.services.segmentation_service import segmentation_service
 from src.services.meeting_structure_builder import get_structure_builder
+from src.services.smart_template_selector import smart_selector
 from llm_providers import generate_protocol_two_stage, generate_protocol_chain_of_thought, llm_manager
 from config import settings
 
@@ -142,16 +143,9 @@ class OptimizedProcessingService(BaseProcessingService):
         async with optimized_file_processing() as resources:
             http_client = resources["http_client"]
             
-            # Этап 1: Параллельная загрузка данных пользователя и шаблона
+            # Этап 1: Загрузка данных пользователя
             with PerformanceTimer("data_loading", metrics_collector):
-                user_task = asyncio.create_task(
-                    self.user_service.get_user_by_telegram_id(request.user_id)
-                )
-                template_task = asyncio.create_task(
-                    self.template_service.get_template_by_id(request.template_id)
-                )
-                
-                user, template = await asyncio.gather(user_task, template_task)
+                user = await self.user_service.get_user_by_telegram_id(request.user_id)
                 
                 if not user:
                     raise ProcessingError(f"Пользователь {request.user_id} не найден", 
@@ -200,6 +194,18 @@ class OptimizedProcessingService(BaseProcessingService):
                 temp_file_path, request, processing_metrics, progress_tracker
             )
             
+            # Этап 2.5: Умный выбор шаблона после транскрипции
+            template = await self._suggest_template_if_needed(
+                request, transcription_result, progress_tracker
+            )
+            
+            if not template:
+                raise ProcessingError("Не удалось выбрать шаблон", 
+                                    request.file_name, "template_selection")
+            
+            # Обновляем request с выбранным шаблоном
+            request.template_id = template.id
+            
             # Этап 3: Анализ и генерация
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
@@ -232,6 +238,58 @@ class OptimizedProcessingService(BaseProcessingService):
                 llm_provider_used=request.llm_provider,
                 processing_duration=processing_metrics.total_duration
             )
+    
+    async def _suggest_template_if_needed(
+        self,
+        request: ProcessingRequest,
+        transcription_result: Any,
+        progress_tracker=None
+    ) -> Optional[Any]:
+        """
+        Предложить умный выбор шаблона если template_id не задан
+        
+        Returns:
+            Template или None если уже выбран
+        """
+        # Если шаблон уже выбран, возвращаем его
+        if request.template_id:
+            return await self.template_service.get_template_by_id(request.template_id)
+        
+        # Получаем все доступные шаблоны
+        templates = await self.template_service.get_user_templates(request.user_id)
+        
+        if not templates:
+            # Fallback на первый базовый шаблон
+            all_templates = await self.template_service.get_all_templates()
+            return all_templates[0] if all_templates else None
+        
+        # Получаем историю использования
+        user_stats = await db.get_user_stats(request.user_id)
+        template_history = []
+        if user_stats and user_stats.get('favorite_templates'):
+            # Извлекаем ID шаблонов из истории
+            template_history = [t['id'] for t in user_stats['favorite_templates']]
+        
+        # ML-based рекомендация
+        suggestions = await smart_selector.suggest_templates(
+            transcription=transcription_result.transcription,
+            templates=[self.template_service._convert_dict_to_template(t) for t in templates],
+            top_k=3,
+            user_history=template_history
+        )
+        
+        if suggestions:
+            best_template, confidence = suggestions[0]
+            logger.info(
+                f"Рекомендован шаблон '{best_template.name}' "
+                f"(уверенность: {confidence:.2%})"
+            )
+            
+            # Возвращаем лучший вариант
+            return best_template
+        
+        # Fallback
+        return self.template_service._convert_dict_to_template(templates[0])
     
     @cache_transcription()
     async def _optimized_transcription(self, file_path: str, request: ProcessingRequest,

@@ -166,7 +166,7 @@ class TranscriptionService:
         """Проверить наличие ffmpeg"""
         return shutil.which("ffmpeg") is not None
     
-    def _preprocess_audio(
+    async def _preprocess_audio(
         self,
         file_path: str,
         suffix: str,
@@ -190,8 +190,7 @@ class TranscriptionService:
             # Создаем временный файл для предобработки
             temp_file = self.temp_dir / f"{Path(file_path).stem}_{suffix}"
 
-            # Конвертируем в MP3 с параметрами для Groq API
-            import subprocess
+            # Конвертируем в MP3 с параметрами через асинхронный subprocess
             cmd = [
                 "ffmpeg",
                 "-i", file_path,
@@ -200,9 +199,28 @@ class TranscriptionService:
                 str(temp_file)
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # Используем асинхронный subprocess для корректной обработки сигналов
+            logger.info(f"Начинаем конвертацию файла для {target_description}: {file_path}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            try:
+                # Таймаут 30 минут для длинных файлов
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=1800
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Превышен таймаут конвертации файла для {target_description}")
+                process.kill()
+                await process.wait()
+                return file_path, compression_info
 
-            if result.returncode == 0:
+            if process.returncode == 0:
                 original_size = os.path.getsize(file_path)
                 processed_size = os.path.getsize(temp_file)
                 original_mb = original_size / (1024 * 1024)
@@ -223,8 +241,9 @@ class TranscriptionService:
                 )
                 return str(temp_file), compression_info
             else:
+                stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ''
                 logger.warning(
-                    f"Ошибка предобработки файла для {target_description}: {result.stderr}"
+                    f"Ошибка предобработки файла для {target_description}: {stderr_text}"
                 )
                 return file_path, compression_info
                 
@@ -232,7 +251,7 @@ class TranscriptionService:
             logger.warning(f"Не удалось предобработать файл для {target_description}: {e}")
             return file_path, compression_info
 
-    def _preprocess_for_groq(self, file_path: str) -> tuple[str, dict]:
+    async def _preprocess_for_groq(self, file_path: str) -> tuple[str, dict]:
         """Предобработать файл для Groq API: конвертировать в 16KHz моно MP3"""
         ffmpeg_args = [
             "-ar", "16000",  # Частота дискретизации 16KHz
@@ -242,14 +261,14 @@ class TranscriptionService:
             "-b:a", "64k",   # Низкий битрейт для максимального сжатия
         ]
 
-        return self._preprocess_audio(
+        return await self._preprocess_audio(
             file_path=file_path,
             suffix="preprocessed.mp3",
             ffmpeg_args=ffmpeg_args,
             target_description="Groq API"
         )
 
-    def _preprocess_for_speechmatics(self, file_path: str) -> tuple[str, dict]:
+    async def _preprocess_for_speechmatics(self, file_path: str) -> tuple[str, dict]:
         """Предобработать файл для Speechmatics API аналогично Groq (16KHz моно MP3)."""
         ffmpeg_args = [
             "-ar", "16000",
@@ -259,14 +278,14 @@ class TranscriptionService:
             "-b:a", "64k",
         ]
 
-        return self._preprocess_audio(
+        return await self._preprocess_audio(
             file_path=file_path,
             suffix="speechmatics.mp3",
             ffmpeg_args=ffmpeg_args,
             target_description="Speechmatics API"
         )
     
-    def _preprocess_for_deepgram(self, file_path: str) -> tuple[str, dict]:
+    async def _preprocess_for_deepgram(self, file_path: str) -> tuple[str, dict]:
         """Предобработать файл для Deepgram API (16KHz моно MP3)."""
         ffmpeg_args = [
             "-ar", "16000",
@@ -276,7 +295,7 @@ class TranscriptionService:
             "-b:a", "64k",
         ]
 
-        return self._preprocess_audio(
+        return await self._preprocess_audio(
             file_path=file_path,
             suffix="deepgram.mp3",
             ffmpeg_args=ffmpeg_args,
@@ -297,7 +316,7 @@ class TranscriptionService:
             # Предобрабатываем файл для Groq API
             logger.info(f"Начинаем предобработку файла: {file_path}")
             
-            processed_file, compression_info = self._preprocess_for_groq(file_path)
+            processed_file, compression_info = await self._preprocess_for_groq(file_path)
             logger.info(f"Предобработка завершена. Результат: {compression_info}")
             
             # Логируем информацию о сжатии (если есть)
@@ -366,7 +385,7 @@ class TranscriptionService:
         try:
             logger.info(f"Начало транскрипции через Speechmatics: {file_path}")
 
-            processed_file, compression_info = self._preprocess_for_speechmatics(file_path)
+            processed_file, compression_info = await self._preprocess_for_speechmatics(file_path)
 
             # Выполняем транскрипцию через Speechmatics
             result = await speechmatics_service.transcribe_file(
@@ -403,7 +422,7 @@ class TranscriptionService:
         try:
             logger.info(f"Начало транскрипции через Deepgram: {file_path}")
 
-            processed_file, compression_info = self._preprocess_for_deepgram(file_path)
+            processed_file, compression_info = await self._preprocess_for_deepgram(file_path)
 
             # Выполняем транскрипцию через Deepgram
             result = await deepgram_service.transcribe_file(
@@ -593,7 +612,7 @@ class TranscriptionService:
                 try:
                     logger.info("Выполнение транскрипции через Deepgram...")
                     
-                    processed_file, compression_info = self._preprocess_for_deepgram(file_path)
+                    processed_file, compression_info = await self._preprocess_for_deepgram(file_path)
 
                     # Выполняем транскрипцию через Deepgram (с диаризацией если включена)
                     result = await deepgram_service.transcribe_file(
@@ -656,7 +675,7 @@ class TranscriptionService:
                 try:
                     logger.info("Выполнение транскрипции через Speechmatics...")
                     
-                    processed_file, compression_info = self._preprocess_for_speechmatics(file_path)
+                    processed_file, compression_info = await self._preprocess_for_speechmatics(file_path)
 
                     # Выполняем транскрипцию через Speechmatics (с диаризацией если включена)
                     result = await speechmatics_service.transcribe_file(

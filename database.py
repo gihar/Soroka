@@ -45,6 +45,9 @@ class Database:
                     is_default BOOLEAN DEFAULT 0,
                     created_by INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    category TEXT,
+                    tags TEXT,
+                    keywords TEXT,
                     FOREIGN KEY (created_by) REFERENCES users (id)
                 )
             """)
@@ -142,6 +145,25 @@ class Database:
                 # Поле уже существует, пропускаем
                 pass
             
+            # Миграция: добавляем поля для категоризации шаблонов
+            try:
+                await db.execute("ALTER TABLE templates ADD COLUMN category TEXT")
+                logger.info("Добавлено поле category в таблицу templates")
+            except Exception:
+                pass
+            
+            try:
+                await db.execute("ALTER TABLE templates ADD COLUMN tags TEXT")
+                logger.info("Добавлено поле tags в таблицу templates")
+            except Exception:
+                pass
+            
+            try:
+                await db.execute("ALTER TABLE templates ADD COLUMN keywords TEXT")
+                logger.info("Добавлено поле keywords в таблицу templates")
+            except Exception:
+                pass
+            
             await db.commit()
             logger.info("База данных инициализирована")
     
@@ -196,14 +218,31 @@ class Database:
     
     async def get_templates(self) -> List[Dict[str, Any]]:
         """Получить все шаблоны"""
+        import json
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM templates ORDER BY is_default DESC, name")
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            templates = []
+            for row in rows:
+                template = dict(row)
+                # Десериализуем JSON поля
+                if template.get('tags'):
+                    try:
+                        template['tags'] = json.loads(template['tags'])
+                    except:
+                        template['tags'] = None
+                if template.get('keywords'):
+                    try:
+                        template['keywords'] = json.loads(template['keywords'])
+                    except:
+                        template['keywords'] = None
+                templates.append(template)
+            return templates
     
     async def get_user_templates(self, telegram_id: int) -> List[Dict[str, Any]]:
         """Получить шаблоны пользователя"""
+        import json
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             
@@ -224,24 +263,61 @@ class Database:
             """, (user_id,))
             
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            templates = []
+            for row in rows:
+                template = dict(row)
+                # Десериализуем JSON поля
+                if template.get('tags'):
+                    try:
+                        template['tags'] = json.loads(template['tags'])
+                    except:
+                        template['tags'] = None
+                if template.get('keywords'):
+                    try:
+                        template['keywords'] = json.loads(template['keywords'])
+                    except:
+                        template['keywords'] = None
+                templates.append(template)
+            return templates
     
     async def get_template(self, template_id: int) -> Optional[Dict[str, Any]]:
         """Получить шаблон по ID"""
+        import json
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM templates WHERE id = ?", (template_id,))
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            template = dict(row)
+            # Десериализуем JSON поля
+            if template.get('tags'):
+                try:
+                    template['tags'] = json.loads(template['tags'])
+                except:
+                    template['tags'] = None
+            if template.get('keywords'):
+                try:
+                    template['keywords'] = json.loads(template['keywords'])
+                except:
+                    template['keywords'] = None
+            return template
     
     async def create_template(self, name: str, content: str, description: str = None, 
-                            created_by: int = None, is_default: bool = False) -> int:
+                            created_by: int = None, is_default: bool = False,
+                            category: str = None, tags: List[str] = None, 
+                            keywords: List[str] = None) -> int:
         """Создать новый шаблон"""
+        import json
         async with aiosqlite.connect(self.db_path) as db:
+            # Сериализуем списки в JSON
+            tags_json = json.dumps(tags) if tags else None
+            keywords_json = json.dumps(keywords) if keywords else None
+            
             cursor = await db.execute("""
-                INSERT INTO templates (name, content, description, created_by, is_default)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, content, description, created_by, is_default))
+                INSERT INTO templates (name, content, description, created_by, is_default, category, tags, keywords)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, content, description, created_by, is_default, category, tags_json, keywords_json))
             await db.commit()
             return cursor.lastrowid
 
