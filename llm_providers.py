@@ -6,7 +6,7 @@ import json
 import asyncio
 import httpx
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, TYPE_CHECKING
 from loguru import logger
 from config import settings
 
@@ -19,6 +19,9 @@ from src.prompts.specialized_prompts import (
     get_specialized_system_prompt, 
     get_specialized_extraction_instructions
 )
+
+if TYPE_CHECKING:
+    from src.services.segmentation_service import TranscriptionSegment
 
 
 class LLMProvider(ABC):
