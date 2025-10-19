@@ -14,7 +14,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.models.processing import TranscriptionResult, DiarizationData
-from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError, SpeechmaticsAPIError
+from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError, SpeechmaticsAPIError, DeepgramAPIError
 from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
 
@@ -47,6 +47,13 @@ except ImportError:
     SPEECHMATICS_AVAILABLE = False
     logger.warning("Speechmatics сервис недоступен")
 
+try:
+    from .deepgram_service import deepgram_service
+    DEEPGRAM_AVAILABLE = True
+except ImportError:
+    DEEPGRAM_AVAILABLE = False
+    logger.warning("Deepgram сервис недоступен")
+
 
 class TranscriptionService:
     """Обновленный сервис транскрипции с защитой от OOM"""
@@ -76,6 +83,12 @@ class TranscriptionService:
             logger.info("Speechmatics сервис доступен")
         else:
             logger.warning("Speechmatics сервис недоступен")
+        
+        # Инициализация Deepgram сервиса
+        if DEEPGRAM_AVAILABLE and deepgram_service.is_available():
+            logger.info("Deepgram сервис доступен")
+        else:
+            logger.warning("Deepgram сервис недоступен")
         
         # Настраиваем callbacks для очистки памяти
         self.oom_protection.add_cleanup_callback(self._cleanup_models)
@@ -253,6 +266,23 @@ class TranscriptionService:
             target_description="Speechmatics API"
         )
     
+    def _preprocess_for_deepgram(self, file_path: str) -> tuple[str, dict]:
+        """Предобработать файл для Deepgram API (16KHz моно MP3)."""
+        ffmpeg_args = [
+            "-ar", "16000",
+            "-ac", "1",
+            "-map", "0:a",
+            "-c:a", "mp3",
+            "-b:a", "64k",
+        ]
+
+        return self._preprocess_audio(
+            file_path=file_path,
+            suffix="deepgram.mp3",
+            ffmpeg_args=ffmpeg_args,
+            target_description="Deepgram API"
+        )
+    
     async def _transcribe_with_groq(self, file_path: str) -> tuple[str, dict]:
         """Транскрибация через Groq API"""
         if not self.groq_client:
@@ -359,6 +389,43 @@ class TranscriptionService:
             
         except Exception as e:
             logger.error(f"Ошибка при транскрипции через Speechmatics {file_path}: {e}")
+            raise CloudTranscriptionError(str(e), file_path)
+
+    async def _transcribe_with_deepgram(self, file_path: str, language: str = "ru", 
+                                       enable_diarization: bool = False) -> tuple[str, dict]:
+        """Транскрипция через Deepgram API"""
+        if not DEEPGRAM_AVAILABLE or not deepgram_service.is_available():
+            raise CloudTranscriptionError("Deepgram сервис недоступен", file_path)
+        
+        if not os.path.exists(file_path):
+            raise CloudTranscriptionError(f"Файл не найден: {file_path}", file_path)
+        
+        try:
+            logger.info(f"Начало транскрипции через Deepgram: {file_path}")
+
+            processed_file, compression_info = self._preprocess_for_deepgram(file_path)
+
+            # Выполняем транскрипцию через Deepgram
+            result = await deepgram_service.transcribe_file(
+                file_path=processed_file,
+                language=language,
+                enable_diarization=enable_diarization
+            )
+
+            # Возвращаем текст и информацию о сжатии
+            if not compression_info.get("compressed"):
+                compression_info = {
+                    "compressed": False,
+                    "original_size_mb": 0,
+                    "compressed_size_mb": 0,
+                    "compression_ratio": 0,
+                    "compression_saved_mb": 0
+                }
+
+            return result.transcription, compression_info
+            
+        except Exception as e:
+            logger.error(f"Ошибка при транскрипции через Deepgram {file_path}: {e}")
             raise CloudTranscriptionError(str(e), file_path)
 
     def _preprocess_for_leopard(self, file_path: str) -> str:
@@ -520,6 +587,70 @@ class TranscriptionService:
                 result.compression_info = compression_info
                 
                 return result
+            
+            if settings.transcription_mode == "deepgram" and DEEPGRAM_AVAILABLE and deepgram_service.is_available():
+                # Транскрипция через Deepgram API
+                try:
+                    logger.info("Выполнение транскрипции через Deepgram...")
+                    
+                    processed_file, compression_info = self._preprocess_for_deepgram(file_path)
+
+                    # Выполняем транскрипцию через Deepgram (с диаризацией если включена)
+                    result = await deepgram_service.transcribe_file(
+                        file_path=processed_file,
+                        language=language,
+                        enable_diarization=settings.enable_diarization
+                    )
+
+                    # Сохраняем информацию о сжатии в результате
+                    if result:
+                        result.compression_info = compression_info
+                    
+                    logger.info(f"Транскрипция через Deepgram завершена. Длина текста: {len(result.transcription)} символов")
+                    if settings.enable_diarization and result.diarization:
+                        logger.info(f"Диаризация выполнена через Deepgram. Найдено говорящих: {len(result.speakers_text) if result.speakers_text else 0}")
+                    
+                    return result
+                    
+                except (CloudTranscriptionError, DeepgramAPIError) as e:
+                    # При ошибке Deepgram переключаемся на локальную транскрипцию
+                    logger.warning(f"Ошибка транскрипции через Deepgram, переключаемся на локальную: {e}")
+                    self._load_whisper_model()
+                    
+                    whisper_result = await self._transcribe_with_progress(
+                        file_path, language
+                    )
+                    
+                    transcription = whisper_result["text"].strip()
+                    
+                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
+                    
+                    # Применяем диаризацию к результатам fallback транскрипции
+                    if DIARIZATION_AVAILABLE and settings.enable_diarization:
+                        try:
+                            logger.info("Применение диаризации к результатам fallback транскрипции...")
+                            diarization_result = await diarization_service.diarize_file(
+                                file_path, language
+                            )
+                            
+                            if diarization_result:
+                                result.diarization = diarization_result.to_dict()
+                                result.speakers_text = diarization_result.get_speakers_text()
+                                result.formatted_transcript = diarization_result.get_formatted_transcript()
+                                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                                
+                                logger.info(f"Диаризация применена к fallback транскрипции. Найдено говорящих: {len(diarization_result.speakers)}")
+                                
+                        except Exception as e:
+                            logger.warning(f"Ошибка при применении диаризации к fallback транскрипции: {e}")
+                    
+                    result.transcription = transcription
+                    if not result.formatted_transcript:
+                        result.formatted_transcript = transcription
+                    result.compression_info = compression_info
+                    
+                    return result
+            
             if settings.transcription_mode == "speechmatics" and SPEECHMATICS_AVAILABLE and speechmatics_service.is_available():
                 # Транскрипция через Speechmatics API
                 try:

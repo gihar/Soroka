@@ -258,6 +258,14 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 [InlineKeyboardButton(
                     text=f"{'✅ ' if settings.transcription_mode == 'speechmatics' else ''}🎯 Speechmatics",
                     callback_data="set_transcription_mode_speechmatics"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'deepgram' else ''}🎤 Deepgram",
+                    callback_data="set_transcription_mode_deepgram"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'leopard' else ''}🐆 Leopard (Picovoice)",
+                    callback_data="set_transcription_mode_leopard"
                 )]
             ])
             
@@ -266,7 +274,9 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 "local": "Локальная транскрипция через Whisper",
                 "cloud": "Облачная транскрипция через Groq API",
                 "hybrid": "Гибридная: облачная транскрипция + локальная диаризация",
-                "speechmatics": "Транскрипция и диаризация через Speechmatics API"
+                "speechmatics": "Транскрипция и диаризация через Speechmatics API",
+                "deepgram": "Транскрипция и диаризация через Deepgram API",
+                "leopard": "Локальная транскрипция через Picovoice Leopard"
             }
             
             current_description = mode_descriptions.get(current_mode, "Неизвестный режим")

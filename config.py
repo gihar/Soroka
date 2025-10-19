@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
     
     # Транскрипция
-    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако), hybrid (гибридный), speechmatics или leopard")
+    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако), hybrid (гибридный), speechmatics, deepgram или leopard")
     groq_api_key: Optional[str] = Field(None, description="API ключ Groq для облачной транскрипции")
     groq_model: str = Field("whisper-large-v3-turbo", description="Модель Groq для транскрипции")
     
@@ -86,6 +86,11 @@ class Settings(BaseSettings):
         if v not in valid_points:
             raise ValueError(f"speechmatics_operating_point должен быть одним из: {', '.join(valid_points)}")
         return v
+    
+    # Deepgram
+    deepgram_api_key: Optional[str] = Field(None, description="API ключ Deepgram для транскрипции и диаризации")
+    deepgram_model: str = Field("nova-2", description="Модель Deepgram для транскрипции (nova-2, whisper-cloud, enhanced, base)")
+    deepgram_language: str = Field("ru", description="Язык для Deepgram API")
     
     # Диаризация
     enable_diarization: bool = Field(False, description="Включить диаризацию (разделение говорящих). По умолчанию отключено для стабильности.")

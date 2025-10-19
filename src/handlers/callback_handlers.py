@@ -299,7 +299,9 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 "local": "Локальная (Whisper)",
                 "cloud": "Облачная (Groq)",
                 "hybrid": "Гибридная (Groq + диаризация)",
-                "speechmatics": "Speechmatics"
+                "speechmatics": "Speechmatics",
+                "deepgram": "Deepgram",
+                "leopard": "Leopard (Picovoice)"
             }
             
             mode_name = mode_names.get(mode, mode)

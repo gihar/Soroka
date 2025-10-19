@@ -82,7 +82,7 @@ SSL_VERIFY=false
 # ТРАНСКРИПЦИЯ
 # =============================================================================
 
-# Режим транскрипции: local, cloud, hybrid, speechmatics, leopard
+# Режим транскрипции: local, cloud, hybrid, speechmatics, deepgram, leopard
 TRANSCRIPTION_MODE=hybrid
 
 # Groq API для облачной транскрипции
@@ -95,6 +95,11 @@ SPEECHMATICS_LANGUAGE=ru
 SPEECHMATICS_DOMAIN=
 # Операционная точка Speechmatics: standard (быстро) или enhanced (точнее)
 SPEECHMATICS_OPERATING_POINT=standard
+
+# Deepgram API для высококачественной транскрипции
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+DEEPGRAM_MODEL=nova-2
+DEEPGRAM_LANGUAGE=ru
 
 # =============================================================================
 # ДИАРИЗАЦИЯ (РАЗДЕЛЕНИЕ ГОВОРЯЩИХ)

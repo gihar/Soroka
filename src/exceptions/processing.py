@@ -57,6 +57,15 @@ class SpeechmaticsAPIError(CloudTranscriptionError):
         self.details.update({"api_error": api_error})
 
 
+class DeepgramAPIError(CloudTranscriptionError):
+    """Ошибка Deepgram API"""
+    
+    def __init__(self, message: str, file_path: str = None, api_error: str = None):
+        super().__init__(message, file_path, "deepgram")
+        self.error_code = "DEEPGRAM_API_ERROR"
+        self.details.update({"api_error": api_error})
+
+
 class LLMError(BotException):
     """Ошибка работы с LLM"""
     
