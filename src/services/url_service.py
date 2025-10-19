@@ -189,11 +189,11 @@ class URLService:
                 content_length = response.headers.get('content-length')
                 if content_length:
                     file_size = int(content_length)
-                    logger.error(f"Размер файла получен из content-length: {file_size}")
+                    logger.info(f"Размер файла получен из content-length: {file_size}")
                 else:
                     # Если размер неизвестен, делаем частичный GET запрос
                     file_size = await self._get_file_size_by_range(direct_url)
-                    logger.error(f"Размер файла получен из range запроса: {file_size}")
+                    logger.info(f"Размер файла получен из range запроса: {file_size}")
                 
                 # Получаем имя файла
                 content_disposition = response.headers.get('content-disposition', '')

@@ -818,8 +818,9 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     f"⬇️ Начинаю скачивание..."
                 )
                 
-                # Скачиваем файл
-                temp_path, original_filename = await url_service.process_url(url)
+                # Скачиваем файл (используем уже полученный direct_url, чтобы не делать повторный запрос)
+                temp_path = await url_service.download_file(direct_url, filename)
+                original_filename = filename
                 
                 # Сохраняем информацию в состоянии
                 await state.update_data(
