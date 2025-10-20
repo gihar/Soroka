@@ -10,6 +10,18 @@ from loguru import logger
 from services import UserService, TemplateService, EnhancedLLMService, OptimizedProcessingService
 
 
+async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
+    """Безопасный ответ на callback query с обработкой устаревших запросов"""
+    try:
+        await callback.answer(text=text)
+    except Exception as e:
+        error_str = str(e).lower()
+        if "query is too old" in error_str or "query id is invalid" in error_str:
+            logger.debug(f"Callback query устарел: {e}")
+        else:
+            logger.warning(f"Ошибка ответа на callback: {e}")
+
+
 def _convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
     """
     Конвертирует markdown текст в PDF файл с поддержкой кириллицы
@@ -214,6 +226,9 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
     async def select_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик выбора шаблона"""
         try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
             template_id = int(callback.data.replace("select_template_", ""))
             await state.update_data(template_id=template_id)
             
@@ -222,12 +237,15 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
         except Exception as e:
             logger.error(f"Ошибка в select_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при выборе шаблона")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при выборе шаблона")
     
     @router.callback_query(F.data.startswith("use_default_template_"))
     async def use_default_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик использования шаблона по умолчанию"""
         try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
             template_id = int(callback.data.replace("use_default_template_", ""))
             await state.update_data(template_id=template_id)
             
@@ -236,7 +254,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
         except Exception as e:
             logger.error(f"Ошибка в use_default_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при использовании шаблона по умолчанию")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при использовании шаблона по умолчанию")
     
     @router.callback_query(F.data == "show_all_templates")
     async def show_all_templates_callback(callback: CallbackQuery, state: FSMContext):
@@ -272,6 +290,9 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
     async def select_llm_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик выбора LLM для обработки"""
         try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
             llm_provider = callback.data.replace("select_llm_", "")
             
             # Сохраняем выбор пользователя как предпочтение
@@ -283,7 +304,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
         except Exception as e:
             logger.error(f"Ошибка в select_llm_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при выборе LLM")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при выборе LLM")
     
     @router.callback_query(F.data.startswith("set_transcription_mode_"))
     async def set_transcription_mode_callback(callback: CallbackQuery):
@@ -904,6 +925,9 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
     async def smart_template_selection_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик умного выбора шаблона через ML"""
         try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
             # Не устанавливаем template_id - позволяем ML-селектору выбрать после транскрипции
             await state.update_data(template_id=None, use_smart_selection=True)
             
@@ -917,11 +941,10 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             # Показываем выбор LLM используя функцию для callback
             await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
-            await callback.answer()
             
         except Exception as e:
             logger.error(f"Ошибка в smart_template_selection_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при активации умного выбора")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при активации умного выбора")
     
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
@@ -1195,6 +1218,8 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
                 f"🤖 Используется LLM: {llm_display}\n\n"
                 "⏳ Начинаю обработку..."
             )
+            # Отвечаем на callback перед длительной обработкой
+            await _safe_callback_answer(callback)
             await _process_file(callback, state, processing_service)
             return
     
