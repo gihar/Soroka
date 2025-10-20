@@ -276,7 +276,7 @@ class OptimizedProcessingService(BaseProcessingService):
         # ML-based рекомендация
         suggestions = await smart_selector.suggest_templates(
             transcription=transcription_result.transcription,
-            templates=[self.template_service._convert_dict_to_template(t) for t in templates],
+            templates=templates,  # уже список объектов Template
             top_k=3,
             user_history=template_history
         )
@@ -291,8 +291,8 @@ class OptimizedProcessingService(BaseProcessingService):
             # Возвращаем лучший вариант
             return best_template
         
-        # Fallback
-        return self.template_service._convert_dict_to_template(templates[0])
+        # Fallback - templates[0] уже объект Template
+        return templates[0]
     
     @cache_transcription()
     async def _optimized_transcription(self, file_path: str, request: ProcessingRequest,

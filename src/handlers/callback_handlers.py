@@ -915,13 +915,8 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 parse_mode="Markdown"
             )
             
-            # Показываем выбор LLM
-            from handlers.message_handlers import _show_llm_selection_for_file
-            # Создаём фейковое сообщение для совместимости
-            fake_message = callback.message
-            fake_message.from_user = callback.from_user
-            
-            await _show_llm_selection_for_file(fake_message, state, llm_service, processing_service)
+            # Показываем выбор LLM используя функцию для callback
+            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
             await callback.answer()
             
         except Exception as e:

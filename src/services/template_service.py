@@ -148,6 +148,9 @@ class TemplateService:
     
     def _convert_dict_to_template(self, template_dict: Dict[str, Any]) -> Template:
         """Преобразовать словарь в объект Template"""
+        # Если уже Template, возвращаем как есть
+        if isinstance(template_dict, Template):
+            return template_dict
         return Template(**template_dict)
     
     async def init_default_templates(self) -> None:
