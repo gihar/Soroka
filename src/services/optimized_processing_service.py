@@ -263,12 +263,15 @@ class OptimizedProcessingService(BaseProcessingService):
             all_templates = await self.template_service.get_all_templates()
             return all_templates[0] if all_templates else None
         
-        # Получаем историю использования
+        # Получаем историю использования с защитой от ошибок
         user_stats = await db.get_user_stats(request.user_id)
         template_history = []
         if user_stats and user_stats.get('favorite_templates'):
-            # Извлекаем ID шаблонов из истории
-            template_history = [t['id'] for t in user_stats['favorite_templates']]
+            # Безопасно извлекаем ID, пропуская записи без id
+            template_history = [
+                t['id'] for t in user_stats['favorite_templates'] 
+                if isinstance(t, dict) and 'id' in t
+            ]
         
         # ML-based рекомендация
         suggestions = await smart_selector.suggest_templates(

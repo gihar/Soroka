@@ -409,11 +409,11 @@ class Database:
             
             # Статистика по шаблонам
             cursor = await db.execute("""
-                SELECT t.name, COUNT(*) as count
+                SELECT t.id, t.name, COUNT(*) as count
                 FROM processing_history ph
                 JOIN templates t ON ph.template_id = t.id
                 WHERE ph.user_id = ?
-                GROUP BY t.name
+                GROUP BY t.id, t.name
                 ORDER BY count DESC
                 LIMIT 5
             """, (user_id,))
