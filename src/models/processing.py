@@ -12,7 +12,7 @@ class ProcessingRequest(BaseModel):
     file_id: Optional[str] = Field(None, description="ID файла в Telegram")
     file_path: Optional[str] = Field(None, description="Путь к локальному файлу")
     file_name: str = Field(..., description="Имя файла")
-    template_id: int = Field(..., description="ID шаблона")
+    template_id: Optional[int] = Field(None, description="ID шаблона (None для умного выбора)")
     llm_provider: str = Field(..., description="LLM провайдер")
     user_id: int = Field(..., description="ID пользователя")
     language: str = Field("ru", description="Язык транскрипции")

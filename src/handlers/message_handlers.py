@@ -393,10 +393,18 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         # Получаем данные из состояния
         data = await state.get_data()
         
-        # Проверяем наличие обязательных данных
-        if not data.get('template_id') or not data.get('llm_provider'):
+        # Проверяем наличие LLM (template_id может быть None для умного выбора)
+        if not data.get('llm_provider'):
             await message.answer(
-                "❌ Ошибка: отсутствуют обязательные данные. Пожалуйста, повторите процесс."
+                "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
+            )
+            await state.clear()
+            return
+        
+        # Если не используется умный выбор, проверяем наличие template_id
+        if not data.get('use_smart_selection') and not data.get('template_id'):
+            await message.answer(
+                "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
             )
             await state.clear()
             return
@@ -722,13 +730,14 @@ async def _show_template_selection(message: Message, template_service: TemplateS
         # Если у пользователя есть шаблон по умолчанию, автоматически используем его
         if user and user.default_template_id and state:
             try:
-                default_template = await template_service.get_template_by_id(user.default_template_id)
-                if default_template:
-                    # Сохраняем шаблон в состоянии
-                    await state.update_data(template_id=default_template.id)
+                # Если template_id = 0, это "Умный выбор"
+                if user.default_template_id == 0:
+                    # Активируем умный выбор
+                    await state.update_data(template_id=None, use_smart_selection=True)
                     
                     await message.answer(
-                        f"🚀 **Обработка по выбранному шаблону: {default_template.name}**",
+                        "🤖 **Используется Умный выбор шаблона**\n\n"
+                        "ИИ автоматически подберёт подходящий шаблон после транскрипции.",
                         parse_mode="Markdown"
                     )
                     
@@ -741,28 +750,84 @@ async def _show_template_selection(message: Message, template_service: TemplateS
                     await _show_llm_selection_for_file(message, state, llm_service, processing_service)
                     
                     return
+                else:
+                    # Обычный конкретный шаблон
+                    default_template = await template_service.get_template_by_id(user.default_template_id)
+                    if default_template:
+                        # Сохраняем шаблон в состоянии
+                        await state.update_data(template_id=default_template.id)
+                        
+                        await message.answer(
+                            f"🚀 **Обработка по выбранному шаблону: {default_template.name}**",
+                            parse_mode="Markdown"
+                        )
+                        
+                        # Показываем выбор LLM
+                        from services import EnhancedLLMService, OptimizedProcessingService
+                        llm_service = EnhancedLLMService()
+                        processing_service = OptimizedProcessingService()
+                        
+                        # Показываем выбор LLM для обработки
+                        await _show_llm_selection_for_file(message, state, llm_service, processing_service)
+                        
+                        return
             except Exception as e:
                 logger.warning(f"Не удалось получить шаблон по умолчанию: {e}")
                 # Продолжаем с обычным выбором шаблонов
         
-        # Показываем все доступные шаблоны
+        # Показываем категории шаблонов
         templates = await template_service.get_all_templates()
         
         if not templates:
             await message.answer("❌ Шаблоны не найдены. Обратитесь к администратору.")
             return
         
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                callback_data=f"select_template_{t.id}"
-            )]
-            for t in templates
-        ])
+        # Группируем шаблоны по категориям
+        from collections import defaultdict
+        categories = defaultdict(list)
+        for template in templates:
+            category = template.category or 'general'
+            categories[category].append(template)
+        
+        # Создаем клавиатуру с категориями
+        category_names = {
+            'management': '👔 Управленческие',
+            'product': '🚀 Продуктовые',
+            'technical': '⚙️ Технические',
+            'general': '📋 Общие',
+            'sales': '💼 Продажи'
+        }
+        
+        keyboard_buttons = []
+        
+        # Добавляем кнопку умного выбора
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="🤖 Умный выбор шаблона",
+            callback_data="smart_template_selection"
+        )])
+        
+        # Добавляем категории
+        for category, cat_templates in sorted(categories.items()):
+            category_name = category_names.get(category, f'📁 {category.title()}')
+            keyboard_buttons.append([InlineKeyboardButton(
+                text=f"{category_name} ({len(cat_templates)})",
+                callback_data=f"file_template_category_{category}"
+            )])
+        
+        # Добавляем кнопку "Все шаблоны"
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="📝 Все шаблоны",
+            callback_data="file_template_category_all"
+        )])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
         await message.answer(
-            "📝 Выберите шаблон для протокола:",
-            reply_markup=keyboard
+            "📝 **Выберите шаблон для протокола:**\n\n"
+            "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
+            "📁 **Категории** - выберите тип встречи",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
         )
         
     except Exception as e:

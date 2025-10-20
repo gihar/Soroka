@@ -317,6 +317,61 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в set_transcription_mode_callback: {e}")
             await callback.answer("❌ Произошла ошибка при изменении режима транскрипции")
     
+    @router.callback_query(F.data.startswith("view_template_category_"))
+    async def view_template_category_callback(callback: CallbackQuery):
+        """Обработчик просмотра шаблонов по категории"""
+        try:
+            category = callback.data.replace("view_template_category_", "")
+            
+            # Получаем все шаблоны
+            all_templates = await template_service.get_all_templates()
+            
+            # Фильтруем по категории
+            if category == "all":
+                templates = all_templates
+                category_title = "Все шаблоны"
+            else:
+                templates = [t for t in all_templates if (t.category or 'general') == category]
+                category_names = {
+                    'management': '👔 Управленческие',
+                    'product': '🚀 Продуктовые',
+                    'technical': '⚙️ Технические',
+                    'general': '📋 Общие',
+                    'sales': '💼 Продажи'
+                }
+                category_title = category_names.get(category, category.title())
+            
+            # Сортируем шаблоны: is_default сначала, затем по имени
+            templates.sort(key=lambda t: (not t.is_default, t.name))
+            
+            # Создаем клавиатуру с шаблонами
+            keyboard_buttons = [
+                [InlineKeyboardButton(
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"view_template_{t.id}"
+                )] for t in templates
+            ]
+            
+            keyboard_buttons.extend([
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к категориям",
+                    callback_data="back_to_templates"
+                )]
+            ])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                f"📝 **{category_title}**\n\n"
+                f"Найдено шаблонов: {len(templates)}",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в view_template_category_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при загрузке шаблонов")
+    
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
         """Обработчик просмотра шаблона"""
@@ -413,25 +468,53 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
     
     @router.callback_query(F.data == "back_to_templates")
     async def back_to_templates_callback(callback: CallbackQuery):
-        """Возврат к списку шаблонов"""
+        """Возврат к категориям шаблонов"""
         try:
             templates = await template_service.get_all_templates()
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"view_template_{t.id}"
-                )]
-                for t in templates
-            ] + [
-                [InlineKeyboardButton(
-                    text="➕ Добавить шаблон",
-                    callback_data="add_template"
-                )]
-            ])
+            # Группируем шаблоны по категориям
+            from collections import defaultdict
+            categories = defaultdict(list)
+            for template in templates:
+                category = template.category or 'general'
+                categories[category].append(template)
+            
+            # Создаем клавиатуру с категориями
+            category_names = {
+                'management': '👔 Управленческие',
+                'product': '🚀 Продуктовые',
+                'technical': '⚙️ Технические',
+                'general': '📋 Общие',
+                'sales': '💼 Продажи'
+            }
+            
+            keyboard_buttons = []
+            
+            # Добавляем категории
+            for category, cat_templates in sorted(categories.items()):
+                category_name = category_names.get(category, f'📁 {category.title()}')
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text=f"{category_name} ({len(cat_templates)})",
+                    callback_data=f"view_template_category_{category}"
+                )])
+            
+            # Добавляем кнопку "Все шаблоны"
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="📝 Все шаблоны",
+                callback_data="view_template_category_all"
+            )])
+            
+            # Добавляем кнопку создания шаблона
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="➕ Добавить шаблон",
+                callback_data="add_template"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
             await callback.message.edit_text(
-                "📝 **Доступные шаблоны:**",
+                f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
+                "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -584,13 +667,43 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     reply_markup=keyboard
                 )
             else:
-                # Создаем клавиатуру с доступными шаблонами
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                # Группируем шаблоны по категориям
+                from collections import defaultdict
+                categories = defaultdict(list)
+                for template in all_templates:
+                    category = template.category or 'general'
+                    categories[category].append(template)
+                
+                # Создаем клавиатуру с категориями
+                category_names = {
+                    'management': '👔 Управленческие',
+                    'product': '🚀 Продуктовые',
+                    'technical': '⚙️ Технические',
+                    'general': '📋 Общие',
+                    'sales': '💼 Продажи'
+                }
+                
+                keyboard_buttons = []
+                
+                # ПЕРВАЯ кнопка - Умный выбор (рекомендуется)
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text="🤖 Умный выбор (рекомендуется)",
+                    callback_data="set_default_template_0"  # 0 = умный выбор
+                )])
+                
+                # Категории шаблонов
+                for category, templates in sorted(categories.items()):
+                    category_name = category_names.get(category, f'📁 {category.title()}')
+                    keyboard_buttons.append([InlineKeyboardButton(
+                        text=f"{category_name} ({len(templates)})",
+                        callback_data=f"template_category_{category}"
+                    )])
+                
+                keyboard_buttons.extend([
                     [InlineKeyboardButton(
-                        text=f"{'⭐ ' if template.is_default else '📝 '}{template.name}",
-                        callback_data=f"set_default_template_{template.id}"
-                    )] for template in all_templates[:5]  # Показываем первые 5
-                ] + [
+                        text="📝 Все шаблоны",
+                        callback_data="template_category_all"
+                    )],
                     [InlineKeyboardButton(
                         text="🔄 Сбросить шаблон по умолчанию",
                         callback_data="reset_default_template"
@@ -601,10 +714,15 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )]
                 ])
                 
+                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+                
                 await callback.message.edit_text(
                     "📝 **Шаблон по умолчанию**\n\n"
-                    "Выберите шаблон, который будет использоваться автоматически:",
-                    reply_markup=keyboard
+                    "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
+                    "📁 **Категории** - выберите конкретный шаблон\n\n"
+                    "Выберите режим работы:",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
                 )
             
             await callback.answer()
@@ -612,6 +730,203 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         except Exception as e:
             logger.error(f"Ошибка в settings_default_template_callback: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке настроек")
+    
+    @router.callback_query(F.data.startswith("template_category_"))
+    async def template_category_callback(callback: CallbackQuery):
+        """Обработчик выбора категории шаблонов"""
+        try:
+            category = callback.data.replace("template_category_", "")
+            
+            # Получаем все шаблоны
+            all_templates = await template_service.get_all_templates()
+            
+            # Фильтруем по категории
+            if category == "all":
+                templates = all_templates
+                category_title = "Все шаблоны"
+            else:
+                templates = [t for t in all_templates if (t.category or 'general') == category]
+                category_names = {
+                    'management': '👔 Управленческие',
+                    'product': '🚀 Продуктовые',
+                    'technical': '⚙️ Технические',
+                    'general': '📋 Общие',
+                    'sales': '💼 Продажи'
+                }
+                category_title = category_names.get(category, category.title())
+            
+            # Сортируем шаблоны: is_default сначала, затем по имени
+            templates.sort(key=lambda t: (not t.is_default, t.name))
+            
+            # Создаем клавиатуру с шаблонами
+            keyboard_buttons = [
+                [InlineKeyboardButton(
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"set_default_template_{t.id}"
+                )] for t in templates
+            ]
+            
+            keyboard_buttons.extend([
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к категориям",
+                    callback_data="settings_default_template"
+                )]
+            ])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                f"📝 **{category_title}**\n\n"
+                f"Найдено шаблонов: {len(templates)}\n"
+                "Выберите шаблон для установки по умолчанию:",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в template_category_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при загрузке шаблонов")
+    
+    @router.callback_query(F.data.startswith("file_template_category_"))
+    async def file_template_category_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик выбора категории шаблонов для файла"""
+        try:
+            category = callback.data.replace("file_template_category_", "")
+            
+            # Получаем все шаблоны
+            all_templates = await template_service.get_all_templates()
+            
+            # Фильтруем по категории
+            if category == "all":
+                templates = all_templates
+                category_title = "Все шаблоны"
+            else:
+                templates = [t for t in all_templates if (t.category or 'general') == category]
+                category_names = {
+                    'management': '👔 Управленческие',
+                    'product': '🚀 Продуктовые',
+                    'technical': '⚙️ Технические',
+                    'general': '📋 Общие',
+                    'sales': '💼 Продажи'
+                }
+                category_title = category_names.get(category, category.title())
+            
+            # Сортируем шаблоны: is_default сначала, затем по имени
+            templates.sort(key=lambda t: (not t.is_default, t.name))
+            
+            # Создаем клавиатуру с шаблонами
+            keyboard_buttons = [
+                [InlineKeyboardButton(
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"select_template_{t.id}"
+                )] for t in templates
+            ]
+            
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="⬅️ Назад к категориям",
+                callback_data="back_to_template_categories"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                f"📝 **{category_title}**\n\n"
+                f"Найдено шаблонов: {len(templates)}\n"
+                "Выберите шаблон:",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в file_template_category_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при загрузке шаблонов")
+    
+    @router.callback_query(F.data == "back_to_template_categories")
+    async def back_to_template_categories_callback(callback: CallbackQuery, state: FSMContext):
+        """Возврат к выбору категорий шаблонов"""
+        try:
+            templates = await template_service.get_all_templates()
+            
+            # Группируем шаблоны по категориям
+            from collections import defaultdict
+            categories = defaultdict(list)
+            for template in templates:
+                category = template.category or 'general'
+                categories[category].append(template)
+            
+            # Создаем клавиатуру с категориями
+            category_names = {
+                'management': '👔 Управленческие',
+                'product': '🚀 Продуктовые',
+                'technical': '⚙️ Технические',
+                'general': '📋 Общие',
+                'sales': '💼 Продажи'
+            }
+            
+            keyboard_buttons = []
+            
+            # Добавляем кнопку умного выбора
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="🤖 Умный выбор шаблона",
+                callback_data="smart_template_selection"
+            )])
+            
+            # Добавляем категории
+            for category, cat_templates in sorted(categories.items()):
+                category_name = category_names.get(category, f'📁 {category.title()}')
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text=f"{category_name} ({len(cat_templates)})",
+                    callback_data=f"file_template_category_{category}"
+                )])
+            
+            # Добавляем кнопку "Все шаблоны"
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="📝 Все шаблоны",
+                callback_data="file_template_category_all"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                "📝 **Выберите шаблон для протокола:**\n\n"
+                "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
+                "📁 **Категории** - выберите тип встречи",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в back_to_template_categories_callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+    
+    @router.callback_query(F.data == "smart_template_selection")
+    async def smart_template_selection_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик умного выбора шаблона через ML"""
+        try:
+            # Не устанавливаем template_id - позволяем ML-селектору выбрать после транскрипции
+            await state.update_data(template_id=None, use_smart_selection=True)
+            
+            await callback.message.edit_text(
+                "🤖 **Умный выбор шаблона активирован!**\n\n"
+                "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
+                "наиболее подходящий шаблон после транскрипции.\n\n"
+                "⏳ Переходим к выбору ИИ для обработки...",
+                parse_mode="Markdown"
+            )
+            
+            # Показываем выбор LLM
+            from handlers.message_handlers import _show_llm_selection_for_file
+            # Создаём фейковое сообщение для совместимости
+            fake_message = callback.message
+            fake_message.from_user = callback.from_user
+            
+            await _show_llm_selection_for_file(fake_message, state, llm_service, processing_service)
+            await callback.answer()
+            
+        except Exception as e:
+            logger.error(f"Ошибка в smart_template_selection_callback: {e}")
+            await callback.answer("❌ Произошла ошибка при активации умного выбора")
     
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
@@ -751,9 +1066,6 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             success = await template_service.set_user_default_template(callback.from_user.id, template_id)
             
             if success:
-                # Получаем информацию о шаблоне
-                template = await template_service.get_template_by_id(template_id)
-                
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
                         text="⬅️ Назад к настройкам",
@@ -761,14 +1073,33 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )]
                 ])
                 
-                await callback.message.edit_text(
-                    f"✅ **Шаблон по умолчанию установлен!**\n\n"
-                    f"Теперь шаблон **{template.name}** будет использоваться автоматически "
-                    f"при обработке файлов.\n\n"
-                    f"Вы можете изменить это в любое время в настройках.",
-                    reply_markup=keyboard,
-                    parse_mode="Markdown"
-                )
+                # Если template_id = 0, это "Умный выбор"
+                if template_id == 0:
+                    await callback.message.edit_text(
+                        "✅ **Установлен режим: Умный выбор**\n\n"
+                        "🤖 ИИ будет автоматически подбирать подходящий шаблон "
+                        "на основе содержания каждой встречи.\n\n"
+                        "📊 Анализируется:\n"
+                        "• Тематика встречи\n"
+                        "• Ключевые слова\n"
+                        "• История использования\n\n"
+                        "Это рекомендуемый режим для большинства пользователей.\n\n"
+                        "💡 Вы можете в любое время вернуться к конкретному шаблону.",
+                        reply_markup=keyboard,
+                        parse_mode="Markdown"
+                    )
+                else:
+                    # Получаем информацию о конкретном шаблоне
+                    template = await template_service.get_template_by_id(template_id)
+                    
+                    await callback.message.edit_text(
+                        f"✅ **Шаблон по умолчанию установлен!**\n\n"
+                        f"Теперь шаблон **{template.name}** будет использоваться автоматически "
+                        f"при обработке файлов.\n\n"
+                        f"Вы можете изменить это в любое время в настройках.",
+                        reply_markup=keyboard,
+                        parse_mode="Markdown"
+                    )
             else:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
@@ -810,8 +1141,11 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 await callback.message.edit_text(
                     "🔄 **Шаблон по умолчанию сброшен**\n\n"
                     "Теперь бот будет спрашивать выбор шаблона при каждой обработке файла.\n\n"
-                    "Вы можете установить новый шаблон по умолчанию в любое время.",
-                    reply_markup=keyboard
+                    "💡 **Рекомендуем:** Установите '🤖 Умный выбор' для автоматического подбора "
+                    "подходящего шаблона на основе содержания встречи.\n\n"
+                    "Вы можете установить новый шаблон в любое время.",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
                 )
                 await callback.answer()
             else:
@@ -894,10 +1228,18 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         # Получаем данные из состояния
         data = await state.get_data()
         
-        # Проверяем наличие обязательных данных
-        if not data.get('template_id') or not data.get('llm_provider'):
+        # Проверяем наличие LLM (template_id может быть None для умного выбора)
+        if not data.get('llm_provider'):
             await callback.message.edit_text(
-                "❌ Ошибка: отсутствуют обязательные данные. Пожалуйста, повторите процесс."
+                "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
+            )
+            await state.clear()
+            return
+        
+        # Если не используется умный выбор, проверяем наличие template_id
+        if not data.get('use_smart_selection') and not data.get('template_id'):
+            await callback.message.edit_text(
+                "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
             )
             await state.clear()
             return

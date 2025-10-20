@@ -134,21 +134,49 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 await message.answer("📝 Шаблоны не найдены.")
                 return
             
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"view_template_{t.id}"
-                )]
-                for t in templates
-            ] + [
-                [InlineKeyboardButton(
-                    text="➕ Добавить шаблон",
-                    callback_data="add_template"
-                )]
-            ])
+            # Группируем шаблоны по категориям
+            from collections import defaultdict
+            categories = defaultdict(list)
+            for template in templates:
+                category = template.category or 'general'
+                categories[category].append(template)
+            
+            # Создаем клавиатуру с категориями
+            category_names = {
+                'management': '👔 Управленческие',
+                'product': '🚀 Продуктовые',
+                'technical': '⚙️ Технические',
+                'general': '📋 Общие',
+                'sales': '💼 Продажи'
+            }
+            
+            keyboard_buttons = []
+            
+            # Добавляем категории
+            for category, cat_templates in sorted(categories.items()):
+                category_name = category_names.get(category, f'📁 {category.title()}')
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text=f"{category_name} ({len(cat_templates)})",
+                    callback_data=f"view_template_category_{category}"
+                )])
+            
+            # Добавляем кнопку "Все шаблоны"
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="📝 Все шаблоны",
+                callback_data="view_template_category_all"
+            )])
+            
+            # Добавляем кнопку создания шаблона
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="➕ Добавить шаблон",
+                callback_data="add_template"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
             await message.answer(
-                "📝 **Доступные шаблоны:**",
+                f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
+                "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )

@@ -457,13 +457,15 @@ class Database:
             user_id = user_row['id']
             
             # Проверяем, что шаблон существует и доступен пользователю
-            cursor = await db.execute("""
-                SELECT id FROM templates 
-                WHERE id = ? AND (created_by = ? OR is_default = 1)
-            """, (template_id, user_id))
-            
-            if not await cursor.fetchone():
-                return False
+            # template_id = 0 - специальное значение для "Умного выбора", пропускаем проверку
+            if template_id != 0:
+                cursor = await db.execute("""
+                    SELECT id FROM templates 
+                    WHERE id = ? AND (created_by = ? OR is_default = 1)
+                """, (template_id, user_id))
+                
+                if not await cursor.fetchone():
+                    return False
             
             # Обновляем предпочтения пользователя
             await db.execute("""
