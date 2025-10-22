@@ -865,17 +865,40 @@ async def generate_protocol_two_stage(
         
         response2 = await _call_openai_stage2()
         content2 = response2.choices[0].message.content
+        finish_reason = response2.choices[0].finish_reason
+        
+        # Логирование полученного ответа
+        logger.info(f"Этап 2: получен ответ длиной {len(content2) if content2 else 0} символов, finish_reason={finish_reason}")
+        
+        # Проверка на пустой ответ
+        if not content2 or not content2.strip():
+            logger.warning(f"Этап 2: получен пустой ответ от API. Используем результат этапа 1")
+            logger.debug(f"Response details: finish_reason={finish_reason}, model={selected_model}")
+            return extracted_data
         
         try:
             improved_data = json.loads(content2)
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка парсинга JSON на этапе 2: {e}")
+            logger.error(f"Content preview (первые 500 символов): {content2[:500]}")
+            
+            # Попытка извлечь JSON из текста
             start_idx = content2.find('{')
             end_idx = content2.rfind('}') + 1
-            json_str = content2[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content2
-            improved_data = json.loads(json_str)
+            
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = content2[start_idx:end_idx]
+                try:
+                    improved_data = json.loads(json_str)
+                    logger.info("JSON успешно извлечен из текста")
+                except json.JSONDecodeError as e2:
+                    logger.error(f"Не удалось извлечь JSON: {e2}. Возвращаем результат этапа 1")
+                    return extracted_data
+            else:
+                logger.error("JSON не найден в ответе. Возвращаем результат этапа 1")
+                return extracted_data
         
-        logger.info(f"Этап 2 завершен, протокол улучшен")
+        logger.info(f"Этап 2 завершен успешно")
         return improved_data
     
     else:
