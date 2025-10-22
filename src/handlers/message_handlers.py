@@ -4,6 +4,7 @@
 
 import re
 import os
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import StateFilter
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,163 +14,7 @@ from loguru import logger
 from services import FileService, TemplateService, OptimizedProcessingService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
-
-
-def _convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
-    """
-    Конвертирует markdown текст в PDF файл с поддержкой кириллицы
-    
-    Args:
-        markdown_text: текст в формате markdown
-        output_path: путь к выходному PDF файлу
-    """
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_LEFT
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    import re
-    
-    # Регистрируем шрифты с поддержкой кириллицы
-    # Ищем системные шрифты
-    font_registered = False
-    
-    # Попробуем найти и зарегистрировать системные шрифты для macOS
-    possible_fonts = [
-        # macOS
-        '/System/Library/Fonts/Helvetica.ttc',
-        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-        '/Library/Fonts/Arial Unicode.ttf',
-        # Linux
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ]
-    
-    for font_path in possible_fonts:
-        if os.path.exists(font_path):
-            try:
-                if font_path.endswith('.ttc'):
-                    # TrueType Collection - используем первый шрифт
-                    pdfmetrics.registerFont(TTFont('CustomFont', font_path, subfontIndex=0))
-                    pdfmetrics.registerFont(TTFont('CustomFont-Bold', font_path, subfontIndex=1))
-                else:
-                    pdfmetrics.registerFont(TTFont('CustomFont', font_path))
-                    pdfmetrics.registerFont(TTFont('CustomFont-Bold', font_path))
-                font_registered = True
-                break
-            except Exception:
-                continue
-    
-    # Если не нашли системный шрифт, используем стандартный Helvetica
-    font_name = 'CustomFont' if font_registered else 'Helvetica'
-    font_name_bold = 'CustomFont-Bold' if font_registered else 'Helvetica-Bold'
-    
-    # Создаем PDF документ
-    doc = SimpleDocTemplate(
-        output_path,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
-    )
-    
-    # Стили с кастомными шрифтами
-    styles = getSampleStyleSheet()
-    
-    # Кастомные стили с поддержкой кириллицы
-    styles.add(ParagraphStyle(
-        name='CustomTitle',
-        fontName=font_name_bold,
-        fontSize=24,
-        textColor=colors.HexColor('#2c3e50'),
-        spaceAfter=12,
-        spaceBefore=12,
-        leading=28
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='CustomHeading2',
-        fontName=font_name_bold,
-        fontSize=18,
-        textColor=colors.HexColor('#34495e'),
-        spaceAfter=10,
-        spaceBefore=10,
-        leading=22
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='CustomHeading3',
-        fontName=font_name_bold,
-        fontSize=14,
-        textColor=colors.HexColor('#7f8c8d'),
-        spaceAfter=8,
-        spaceBefore=8,
-        leading=18
-    ))
-    
-    styles.add(ParagraphStyle(
-        name='CustomBody',
-        fontName=font_name,
-        fontSize=12,
-        leading=16,
-        alignment=TA_LEFT
-    ))
-    
-    # Парсинг markdown и создание элементов
-    story = []
-    lines = markdown_text.split('\n')
-    
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        
-        # Пропускаем пустые строки
-        if not line:
-            story.append(Spacer(1, 0.3*cm))
-            i += 1
-            continue
-        
-        # Заголовки
-        if line.startswith('# '):
-            text = line[2:].strip()
-            story.append(Paragraph(text, styles['CustomTitle']))
-        elif line.startswith('## '):
-            text = line[3:].strip()
-            story.append(Paragraph(text, styles['CustomHeading2']))
-        elif line.startswith('### '):
-            text = line[4:].strip()
-            story.append(Paragraph(text, styles['CustomHeading3']))
-        
-        # Списки
-        elif line.startswith('- ') or line.startswith('* '):
-            text = '• ' + line[2:].strip()
-            # Обрабатываем жирный текст в списках
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            story.append(Paragraph(text, styles['CustomBody']))
-        elif re.match(r'^\d+\.\s', line):
-            text = line
-            # Обрабатываем жирный текст в нумерованных списках
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            story.append(Paragraph(text, styles['CustomBody']))
-        
-        # Обычный текст
-        else:
-            # Обрабатываем жирный текст **text**
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
-            # Обрабатываем курсив *text*
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            story.append(Paragraph(text, styles['CustomBody']))
-        
-        i += 1
-    
-    # Генерируем PDF
-    doc.build(story)
+from src.utils.pdf_converter import convert_markdown_to_pdf
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
@@ -388,6 +233,9 @@ async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_
 async def _start_file_processing(message: Message, state: FSMContext, processing_service):
     """Начать обработку файла"""
     from src.models.processing import ProcessingRequest
+    from src.services.task_queue_manager import task_queue_manager
+    from src.models.task_queue import TaskPriority
+    from src.ux.queue_tracker import QueueTrackerFactory
     
     try:
         # Получаем данные из состояния
@@ -438,157 +286,76 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             is_external_file=is_external_file
         )
         
-        # Создаем прогресс-трекер
-        from ux.progress_tracker import ProgressFactory
-        from ux.message_builder import MessageBuilder
-        from ux.feedback_system import QuickFeedbackManager, feedback_collector
-        from config import settings
-        
-        progress_tracker = await ProgressFactory.create_file_processing_tracker(
-            message.bot, message.chat.id, settings.enable_diarization
+        # Добавляем задачу в очередь
+        queued_task = await task_queue_manager.add_task(
+            request=request,
+            chat_id=message.chat.id,
+            priority=TaskPriority.NORMAL
         )
         
-        try:
-            # Обрабатываем файл с отображением прогресса
-            result = await processing_service.process_file(request, progress_tracker)
-
-            await progress_tracker.complete_all()
-
-            # Определяем красивое имя модели для отображения
-            llm_model_name = result.llm_provider_used
-            try:
-                if result.llm_provider_used == 'openai':
-                    from config import settings as app_settings
-                    from src.services.user_service import UserService
-                    user_service = UserService()
-                    user = await user_service.get_user_by_telegram_id(message.from_user.id)
-                    selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
-                    preset = None
-                    if selected_key:
-                        preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == selected_key), None)
-                    if not preset:
-                        models = getattr(app_settings, 'openai_models', [])
-                        if models:
-                            preset = models[0]
-                    if preset:
-                        llm_model_name = preset.name
-            except Exception:
-                # В случае ошибок оставляем провайдера по умолчанию
-                pass
-
-            # Показываем результат с улучшенным форматированием
-            result_dict = {
-                "template_used": {"name": result.template_used.get('name', 'Неизвестный')},
-                "llm_provider_used": result.llm_provider_used,
-                "llm_model_name": llm_model_name,
-                "processing_time": result.processing_duration,
-                "file_name": result.transcription_result.transcription[:100] + "..." if len(result.transcription_result.transcription) > 100 else result.transcription_result.transcription,
-                "summary": result.protocol_text,
-                "key_points": [],  # Будет заполнено из протокола
-                "action_items": [],  # Будет заполнено из протокола
-                "sentiment": "neutral",  # По умолчанию
-                "language": "ru",
-                "word_count": len(result.transcription_result.transcription.split()),
-                "speaker_count": len(result.transcription_result.speakers_text) if result.transcription_result.speakers_text else 1,
-                "confidence_score": 0.9  # По умолчанию
-            }
-            
-            # Создаем сообщение с результатом
-            result_message = MessageBuilder.processing_complete_message(result_dict)
-            
-            # Отправляем результат
-            await message.answer(result_message, parse_mode="Markdown")
-            
-            # Отправляем протокол согласно пользовательской настройке
-            if not result.protocol_text:
-                logger.warning("protocol_text пустой или None")
-                await message.answer("❌ Протокол не был сгенерирован")
-            else:
-                try:
-                    from src.services.user_service import UserService as _US
-                    user_pref_service = _US()
-                    user = await user_pref_service.get_user_by_telegram_id(message.from_user.id)
-                    output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
-
-                    if output_mode in ('file', 'pdf'):
-                        import tempfile
-                        from aiogram.types import FSInputFile
-                        
-                        suffix = '.pdf' if output_mode == 'pdf' else '.md'
-                        safe_name = 'protocol'
-                        try:
-                            original = result.transcription_result and data.get('file_name') or 'protocol'
-                            safe_name = os.path.splitext(os.path.basename(original))[0][:40] or 'protocol'
-                        except Exception:
-                            pass
-                        
-                        if output_mode == 'pdf':
-                            # Генерируем PDF
-                            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
-                                temp_path = f.name
-                            try:
-                                _convert_markdown_to_pdf(result.protocol_text or '', temp_path)
-                                file_input = FSInputFile(temp_path, filename=f"{safe_name}.pdf")
-                                await message.answer_document(
-                                    file_input,
-                                    caption="📄 Протокол встречи (PDF)"
-                                )
-                            finally:
-                                try:
-                                    os.unlink(temp_path)
-                                except Exception:
-                                    pass
-                        else:
-                            # Сохраняем как MD файл
-                            with tempfile.NamedTemporaryFile('w', suffix='.md', delete=False, encoding='utf-8') as f:
-                                f.write(result.protocol_text or '')
-                                temp_path = f.name
-                            try:
-                                file_input = FSInputFile(temp_path, filename=f"{safe_name}.md")
-                                await message.answer_document(
-                                    file_input,
-                                    caption="📎 Протокол встречи (Markdown)"
-                                )
-                            finally:
-                                try:
-                                    os.unlink(temp_path)
-                                except Exception:
-                                    pass
-                    else:
-                        # В сообщения: разбиваем при необходимости
-                        protocol_length = len(result.protocol_text)
-                        logger.info(f"Длина протокола: {protocol_length} символов")
-                        logger.info(f"Тип protocol_text: {type(result.protocol_text)}")
-                        if protocol_length > 4000:
-                            logger.info(f"Протокол длинный ({protocol_length} символов), разбиваем на части")
-                            await _send_long_protocol(message, result.protocol_text)
-                        else:
-                            logger.info(f"Протокол короткий ({protocol_length} символов), отправляем как есть")
-                            await message.answer(result.protocol_text, parse_mode="Markdown")
-                except Exception as send_err:
-                    logger.error(f"Ошибка при отправке протокола: {send_err}")
-                    await message.answer("⚠️ Не удалось отправить протокол. Попробуйте позже.")
-            
-            # Показываем кнопки быстрой обратной связи
-            from ux.feedback_system import feedback_collector
-            feedback_manager = QuickFeedbackManager(feedback_collector)
-            await feedback_manager.request_quick_feedback(message.chat.id, message.bot, result_dict)
-            
-            # Очищаем состояние
-            await state.clear()
-            
-        except Exception as e:
-            logger.error(f"Ошибка при обработке файла: {e}")
-            await progress_tracker.complete_all()
-            await message.answer(
-                "❌ Произошла ошибка при обработке файла. Попробуйте еще раз или обратитесь к администратору."
-            )
-            await state.clear()
+        # Получаем позицию в очереди
+        position = await task_queue_manager.get_queue_position(str(queued_task.task_id))
+        total_in_queue = await task_queue_manager.get_queue_size()
+        
+        # Создаем трекер позиции в очереди
+        queue_tracker = await QueueTrackerFactory.create_tracker(
+            bot=message.bot,
+            chat_id=message.chat.id,
+            task_id=str(queued_task.task_id),
+            initial_position=position if position is not None else 0,
+            total_in_queue=total_in_queue
+        )
+        
+        # Сохраняем message_id в задаче
+        if queue_tracker.message_id:
+            queued_task.message_id = queue_tracker.message_id
+            from database import db
+            await db.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
+        
+        # Запускаем фоновое обновление позиции в очереди
+        asyncio.create_task(_monitor_queue_position(
+            queue_tracker, queued_task.task_id, task_queue_manager
+        ))
+        
+        # Очищаем состояние
+        await state.clear()
+        
+        logger.info(f"Задача {queued_task.task_id} успешно добавлена в очередь")
             
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
         await message.answer("❌ Произошла ошибка при подготовке обработки файла.")
         await state.clear()
+
+
+async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
+    """Мониторинг изменения позиции задачи в очереди"""
+    from config import settings
+    
+    try:
+        while queue_tracker.is_active:
+            # Получаем текущую позицию
+            position = await queue_manager.get_queue_position(str(task_id))
+            
+            # Если задачи больше нет в очереди (началась обработка или завершена)
+            if position is None:
+                # Удаляем сообщение про очередь
+                await queue_tracker.delete_message()
+                break
+            
+            # Получаем общий размер очереди
+            total = await queue_manager.get_queue_size()
+            
+            # Обновляем отображение только если позиция изменилась
+            await queue_tracker.update_position(position, total)
+            
+            # Ждем перед следующей проверкой
+            await asyncio.sleep(settings.queue_update_interval)
+    
+    except asyncio.CancelledError:
+        logger.debug(f"Мониторинг позиции задачи {task_id} отменен")
+    except Exception as e:
+        logger.error(f"Ошибка в мониторинге позиции задачи {task_id}: {e}")
 
 
 async def _send_long_protocol(message: Message, protocol_text: str):
