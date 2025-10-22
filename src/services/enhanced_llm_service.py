@@ -151,7 +151,8 @@ class EnhancedLLMService:
     async def generate_protocol_with_fallback(self, preferred_provider: str, transcription: str, 
                                             template_variables: Dict[str, str], 
                                             diarization_data: Optional[Dict[str, Any]] = None,
-                                            openai_model_key: Optional[str] = None) -> Dict[str, Any]:
+                                            openai_model_key: Optional[str] = None,
+                                            **kwargs) -> Dict[str, Any]:
         """Генерировать протокол с автоматическим переключением провайдеров"""
         available_providers = list(self.get_available_providers().keys())
         
@@ -162,7 +163,8 @@ class EnhancedLLMService:
             return await self.fallback_manager.execute(
                 None, transcription, template_variables, diarization_data,
                 cache_key=cache_key,
-                openai_model_key=openai_model_key
+                openai_model_key=openai_model_key,
+                **kwargs
             )
         
         # Упорядочиваем провайдеры: предпочитаемый первым
@@ -184,7 +186,8 @@ class EnhancedLLMService:
                 result = await self.fallback_manager.execute(
                     provider, transcription, template_variables, diarization_data,
                     cache_key=cache_key,
-                    openai_model_key=openai_model_key
+                    openai_model_key=openai_model_key,
+                    **kwargs
                 )
                 exec_info = getattr(self.fallback_manager, 'last_execution', {})
                 if exec_info.get('mode') == 'fallback':
@@ -215,7 +218,8 @@ class EnhancedLLMService:
             return await self.fallback_manager.execute(
                 None, transcription, template_variables, diarization_data,
                 cache_key=cache_key,
-                openai_model_key=openai_model_key
+                openai_model_key=openai_model_key,
+                **kwargs
             )
         except Exception as fallback_error:
             logger.error(f"Fallback также не сработал: {fallback_error}")
