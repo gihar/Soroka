@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     structure_extraction_model: Optional[str] = Field(None, description="Модель для извлечения структурированных данных (по умолчанию используется основная модель)")
     cache_meeting_structures: bool = Field(True, description="Кэшировать структурированные представления встреч")
     
+    # Настройки очереди задач
+    max_concurrent_tasks: Optional[int] = Field(None, description="Максимальное количество одновременно обрабатываемых задач (по умолчанию рассчитывается по CPU/RAM)")
+    max_queue_size: int = Field(100, description="Максимальный размер очереди задач")
+    queue_update_interval: float = Field(2.0, description="Интервал проверки изменений позиции в очереди (в секундах)")
+    queue_cleanup_interval_hours: int = Field(24, description="Интервал очистки завершенных задач из очереди (в часах)")
+    
     @validator('openai_models', pre=True, always=True)
     def ensure_openai_models(cls, v, values):
         """Гарантируем наличие хотя бы одного пресета OpenAI.

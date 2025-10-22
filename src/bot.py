@@ -71,6 +71,10 @@ class EnhancedTelegramBot:
         self.llm_service = EnhancedLLMService()
         self.processing_service = OptimizedProcessingService()
         
+        # Инициализация менеджера очереди задач
+        from src.services.task_queue_manager import task_queue_manager
+        self.task_queue_manager = task_queue_manager
+        
         # Настройка middleware и обработчиков
         self._setup_middleware()
         self._setup_handlers()
@@ -261,6 +265,10 @@ class EnhancedTelegramBot:
             elif not settings.enable_cleanup:
                 logger.info("Сервис очистки файлов отключен в настройках")
             
+            # 7.5. Запускаем воркеры очереди задач
+            await self.task_queue_manager.start_workers()
+            logger.info("Воркеры очереди задач запущены")
+            
             # 8. Проверяем доступность компонентов
             await self._perform_startup_checks()
             
@@ -314,12 +322,16 @@ class EnhancedTelegramBot:
         try:
             logger.info("Начало graceful shutdown...")
             
-            # 1. Останавливаем сервис очистки файлов
+            # 1. Останавливаем воркеры очереди задач
+            await self.task_queue_manager.stop_workers()
+            logger.info("Воркеры очереди задач остановлены")
+            
+            # 2. Останавливаем сервис очистки файлов
             if CLEANUP_SERVICE_AVAILABLE:
                 await cleanup_service.stop_cleanup()
                 logger.info("Сервис очистки файлов остановлен")
             
-            # 2. Останавливаем мониторинг здоровья
+            # 3. Останавливаем мониторинг здоровья
             await health_checker.stop_monitoring()
             logger.info("Мониторинг здоровья остановлен")
             

@@ -376,20 +376,24 @@ class TaskQueueManager:
                     suffix = '.pdf' if output_mode == 'pdf' else '.md'
                     safe_name = os.path.splitext(os.path.basename(task.request.file_name))[0][:40] or 'protocol'
                     
-                    with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False, encoding='utf-8') as f:
-                        temp_path = f.name
-                        
-                        if output_mode == 'pdf':
-                            # Конвертируем в PDF
-                            try:
-                                import markdown
-                                from weasyprint import HTML
-                                html_content = markdown.markdown(result.protocol_text)
-                                HTML(string=html_content).write_pdf(temp_path)
-                            except Exception as e:
-                                logger.error(f"Ошибка конвертации в PDF: {e}")
+                    if output_mode == 'pdf':
+                        # Для PDF создаем временный файл и конвертируем
+                        import tempfile as tmp
+                        temp_path = tmp.mktemp(suffix='.pdf')
+                        try:
+                            from src.utils.pdf_converter import convert_markdown_to_pdf
+                            convert_markdown_to_pdf(result.protocol_text, temp_path)
+                        except Exception as e:
+                            logger.error(f"Ошибка конвертации в PDF: {e}")
+                            # Если не получилось, сохраняем как markdown файл
+                            temp_path = tmp.mktemp(suffix='.md')
+                            suffix = '.md'
+                            with open(temp_path, 'w', encoding='utf-8') as f:
                                 f.write(result.protocol_text)
-                        else:
+                    else:
+                        # Для markdown просто сохраняем текст
+                        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False, encoding='utf-8') as f:
+                            temp_path = f.name
                             f.write(result.protocol_text)
                     
                     try:
