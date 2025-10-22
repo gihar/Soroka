@@ -946,6 +946,257 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в smart_template_selection_callback: {e}")
             await _safe_callback_answer(callback, "❌ Произошла ошибка при активации умного выбора")
     
+    @router.callback_query(F.data == "quick_smart_select")
+    async def quick_smart_selection_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик быстрого умного выбора шаблона"""
+        try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
+            # Устанавливаем умный выбор
+            await state.update_data(template_id=None, use_smart_selection=True)
+            
+            await callback.message.edit_text(
+                "🤖 **Умный выбор шаблона**\n\n"
+                "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
+                "⏳ Переходим к выбору ИИ для обработки...",
+                parse_mode="Markdown"
+            )
+            
+            # Показываем выбор LLM
+            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в quick_smart_selection_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при выборе умного шаблона")
+    
+    @router.callback_query(F.data == "use_saved_default")
+    async def use_saved_default_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик использования сохранённого шаблона по умолчанию"""
+        try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
+            # Получаем пользователя и его шаблон по умолчанию
+            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+            
+            if not user or not user.default_template_id:
+                await callback.message.edit_text(
+                    "❌ **Ошибка**\n\n"
+                    "У вас не установлен шаблон по умолчанию.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Если сохранён умный выбор (template_id = 0)
+            if user.default_template_id == 0:
+                await state.update_data(template_id=None, use_smart_selection=True)
+                await callback.message.edit_text(
+                    "🤖 **Используется Умный выбор шаблона**\n\n"
+                    "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
+                    "⏳ Переходим к выбору ИИ для обработки...",
+                    parse_mode="Markdown"
+                )
+            else:
+                # Используем конкретный шаблон
+                template = await template_service.get_template_by_id(user.default_template_id)
+                if not template:
+                    await callback.message.edit_text(
+                        "❌ **Ошибка**\n\n"
+                        "Сохранённый шаблон не найден.",
+                        parse_mode="Markdown"
+                    )
+                    return
+                
+                await state.update_data(template_id=template.id, use_smart_selection=False)
+                await callback.message.edit_text(
+                    f"📋 **Используется шаблон: {template.name}**\n\n"
+                    "⏳ Переходим к выбору ИИ для обработки...",
+                    parse_mode="Markdown"
+                )
+            
+            # Показываем выбор LLM
+            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в use_saved_default_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при использовании шаблона")
+    
+    @router.callback_query(F.data == "quick_set_default")
+    async def quick_set_default_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик быстрой установки шаблона по умолчанию"""
+        try:
+            # Немедленно отвечаем на callback query
+            await _safe_callback_answer(callback)
+            
+            # Получаем все шаблоны
+            templates = await template_service.get_all_templates()
+            
+            if not templates:
+                await callback.message.edit_text(
+                    "❌ **Шаблоны не найдены**\n\n"
+                    "Обратитесь к администратору.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Группируем шаблоны по категориям
+            from collections import defaultdict
+            categories = defaultdict(list)
+            for template in templates:
+                category = template.category or 'general'
+                categories[category].append(template)
+            
+            # Создаем клавиатуру с категориями
+            category_names = {
+                'management': '👔 Управленческие',
+                'product': '🚀 Продуктовые',
+                'technical': '⚙️ Технические',
+                'general': '📋 Общие',
+                'sales': '💼 Продажи'
+            }
+            
+            keyboard_buttons = []
+            
+            # Добавляем опцию "Умный выбор" первой
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="🤖 Умный выбор (рекомендуется)",
+                callback_data="quick_template_smart"
+            )])
+            
+            # Добавляем категории
+            for category, cat_templates in sorted(categories.items()):
+                category_name = category_names.get(category, f'📁 {category.title()}')
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text=f"{category_name} ({len(cat_templates)})",
+                    callback_data=f"quick_category_{category}"
+                )])
+            
+            # Добавляем кнопку "Все шаблоны"
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="📝 Все шаблоны",
+                callback_data="quick_category_all"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                "⚙️ **Выберите шаблон по умолчанию:**\n\n"
+                "Выбранный шаблон будет сохранён и использован для обработки этого файла.",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка в quick_set_default_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при загрузке шаблонов")
+    
+    @router.callback_query(F.data.startswith("quick_category_"))
+    async def quick_category_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик выбора категории для быстрой установки шаблона"""
+        try:
+            await _safe_callback_answer(callback)
+            
+            category = callback.data.replace("quick_category_", "")
+            
+            # Получаем все шаблоны
+            all_templates = await template_service.get_all_templates()
+            
+            # Фильтруем по категории
+            if category == "all":
+                templates = all_templates
+                category_title = "Все шаблоны"
+            else:
+                templates = [t for t in all_templates if (t.category or 'general') == category]
+                category_names = {
+                    'management': '👔 Управленческие',
+                    'product': '🚀 Продуктовые',
+                    'technical': '⚙️ Технические',
+                    'general': '📋 Общие',
+                    'sales': '💼 Продажи'
+                }
+                category_title = category_names.get(category, category.title())
+            
+            # Сортируем шаблоны
+            templates.sort(key=lambda t: (not t.is_default, t.name))
+            
+            # Создаем клавиатуру с шаблонами
+            keyboard_buttons = [
+                [InlineKeyboardButton(
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"quick_template_{t.id}"
+                )] for t in templates
+            ]
+            
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="⬅️ Назад к категориям",
+                callback_data="quick_set_default"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                f"⚙️ **{category_title}**\n\n"
+                f"Выберите шаблон ({len(templates)}):",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка в quick_category_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при загрузке шаблонов")
+    
+    @router.callback_query(F.data.startswith("quick_template_"))
+    async def quick_template_callback(callback: CallbackQuery, state: FSMContext):
+        """Обработчик выбора конкретного шаблона для быстрой установки"""
+        try:
+            await _safe_callback_answer(callback)
+            
+            template_ref = callback.data.replace("quick_template_", "")
+            
+            # Обрабатываем специальный случай "smart"
+            if template_ref == "smart":
+                # Сохраняем умный выбор как шаблон по умолчанию (id = 0)
+                await template_service.set_user_default_template(callback.from_user.id, 0)
+                await state.update_data(template_id=None, use_smart_selection=True)
+                
+                await callback.message.edit_text(
+                    "✅ **Умный выбор установлен по умолчанию**\n\n"
+                    "🤖 ИИ автоматически подберёт подходящий шаблон.\n\n"
+                    "⏳ Переходим к выбору ИИ для обработки...",
+                    parse_mode="Markdown"
+                )
+            else:
+                # Обрабатываем выбор конкретного шаблона
+                template_id = int(template_ref)
+                template = await template_service.get_template_by_id(template_id)
+                
+                if not template:
+                    await callback.message.edit_text(
+                        "❌ **Ошибка**\n\n"
+                        "Шаблон не найден.",
+                        parse_mode="Markdown"
+                    )
+                    return
+                
+                # Сохраняем шаблон как по умолчанию
+                await template_service.set_user_default_template(callback.from_user.id, template_id)
+                await state.update_data(template_id=template_id, use_smart_selection=False)
+                
+                await callback.message.edit_text(
+                    f"✅ **Шаблон установлен: {template.name}**\n\n"
+                    f"Шаблон сохранён по умолчанию и будет использован для обработки.\n\n"
+                    "⏳ Переходим к выбору ИИ для обработки...",
+                    parse_mode="Markdown"
+                )
+            
+            # Показываем выбор LLM
+            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в quick_template_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при установке шаблона")
+    
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
         """Обработчик сброса всех настроек"""
