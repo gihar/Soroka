@@ -1,7 +1,7 @@
 # Исправление передачи параметров встречи в LLM
 
 **Дата**: 23 октября 2025  
-**Статус**: ✅ Исправлено
+**Статус**: ✅ Исправлено (обновлено: критическое дополнение)
 
 ## Проблема
 
@@ -16,40 +16,40 @@
 
 ## Корневая причина
 
+**Первоначальная проблема:**
 Метод `generate_protocol_with_fallback` в `EnhancedLLMService`:
-
 1. **Не принимал** `**kwargs` в сигнатуре
 2. **Не передавал** параметры встречи в `fallback_manager.execute()`
-3. Параметры терялись на этом уровне, хотя `OptimizedProcessingService` их правильно передавал
 
-### Цепочка вызовов (до исправления)
+**Критическая дополнительная проблема (обнаружена при тестировании):**
+Метод `_generate_protocol_primary` (primary handler для fallback_manager):
+1. **Не принимал** `**kwargs` в сигнатуре
+2. **Не передавал** kwargs в `llm_manager.generate_protocol()`
+3. Параметры терялись даже после первого исправления!
+
+### Цепочка вызовов (до исправлений)
 
 ```
-OptimizedProcessingService._generate_llm_response(
-    speaker_mapping=...,
-    meeting_topic=...,
-    meeting_date=...,
-    meeting_time=...
-)
+OptimizedProcessingService._generate_llm_response(speaker_mapping, meeting_topic, ...)
     ↓
-EnhancedLLMService.generate_protocol_with_fallback(
-    ..., openai_model_key=...
-)  ❌ kwargs теряются здесь
+EnhancedLLMService.generate_protocol_with_fallback() ❌ НЕ принимает **kwargs (исправлено в коммите 1)
     ↓
-FallbackManager.execute(
-    ..., **kwargs
-)  ✅ готов принять kwargs, но их нет
+FallbackManager.execute(**kwargs) ✅
     ↓
-LLM Provider.generate_protocol(
-    ..., **kwargs
-)  ✅ готов использовать kwargs, но их нет
+_generate_protocol_primary() ❌ НЕ принимает **kwargs (исправлено в коммите 2)
+    ↓
+llm_manager.generate_protocol() ❌ не получает kwargs
+    ↓
+OpenAIProvider.generate_protocol() ❌ не получает kwargs
 ```
 
 ## Решение
 
 ### Изменения в файле `src/services/enhanced_llm_service.py`
 
-#### 1. Сигнатура метода (строка 151-155)
+#### Коммит 1: Исправление generate_protocol_with_fallback
+
+**1. Сигнатура метода (строка 151-155)**
 
 **Было:**
 ```python
@@ -68,9 +68,72 @@ async def generate_protocol_with_fallback(self, preferred_provider: str, transcr
                                         **kwargs) -> Dict[str, Any]:  # ← Добавлено
 ```
 
-#### 2. Передача kwargs в fallback_manager.execute()
+**2. Передача kwargs в fallback_manager.execute()**
 
 Добавлена передача `**kwargs` в **4 местах**:
+
+#### Коммит 2: Исправление _generate_protocol_primary (КРИТИЧЕСКОЕ)
+
+**1. Сигнатура метода (строка 80-84)**
+
+**Было:**
+```python
+async def _generate_protocol_primary(self, provider: str, transcription: str, 
+                                   template_variables: Dict[str, str],
+                                   diarization_data: Optional[Dict[str, Any]] = None,
+                                   openai_model_key: Optional[str] = None) -> Dict[str, Any]:
+```
+
+**Стало:**
+```python
+async def _generate_protocol_primary(self, provider: str, transcription: str, 
+                                   template_variables: Dict[str, str],
+                                   diarization_data: Optional[Dict[str, Any]] = None,
+                                   openai_model_key: Optional[str] = None,
+                                   **kwargs) -> Dict[str, Any]:
+```
+
+**2. Вызов через retry_manager (строки 97-103)**
+
+**Было:**
+```python
+return await retry_manager.execute_with_retry(
+    self.llm_manager.generate_protocol,
+    provider, transcription, template_variables, diarization_data,
+    openai_model_key=openai_model_key
+)
+```
+
+**Стало:**
+```python
+return await retry_manager.execute_with_retry(
+    self.llm_manager.generate_protocol,
+    provider, transcription, template_variables, diarization_data,
+    openai_model_key=openai_model_key,
+    **kwargs
+)
+```
+
+**3. Прямой вызов llm_manager (строки 108-112)**
+
+**Было:**
+```python
+return await self.llm_manager.generate_protocol(
+    provider, transcription, template_variables, diarization_data,
+    openai_model_key=openai_model_key
+)
+```
+
+**Стало:**
+```python
+return await self.llm_manager.generate_protocol(
+    provider, transcription, template_variables, diarization_data,
+    openai_model_key=openai_model_key,
+    **kwargs
+)
+```
+
+## Итоговые изменения
 
 **Место 1** (строки 163-168) - когда нет доступных провайдеров:
 ```python

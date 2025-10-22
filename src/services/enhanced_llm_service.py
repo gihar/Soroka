@@ -80,7 +80,8 @@ class EnhancedLLMService:
     async def _generate_protocol_primary(self, provider: str, transcription: str, 
                                        template_variables: Dict[str, str],
                                        diarization_data: Optional[Dict[str, Any]] = None,
-                                       openai_model_key: Optional[str] = None) -> Dict[str, Any]:
+                                       openai_model_key: Optional[str] = None,
+                                       **kwargs) -> Dict[str, Any]:
         """Основной метод генерации протокола с защитой"""
         # Проверяем rate limiter
         rate_limiter = self.rate_limiters.get(provider)
@@ -97,7 +98,8 @@ class EnhancedLLMService:
                 return await retry_manager.execute_with_retry(
                     self.llm_manager.generate_protocol,
                     provider, transcription, template_variables, diarization_data,
-                    openai_model_key=openai_model_key
+                    openai_model_key=openai_model_key,
+                    **kwargs
                 )
             
             return await circuit_breaker.call(protected_call)
@@ -105,7 +107,8 @@ class EnhancedLLMService:
             # Fallback к прямому вызову
             return await self.llm_manager.generate_protocol(
                 provider, transcription, template_variables, diarization_data,
-                openai_model_key=openai_model_key
+                openai_model_key=openai_model_key,
+                **kwargs
             )
     
     async def generate_protocol(self, request: LLMRequest) -> LLMResponse:
