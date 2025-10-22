@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     structure_extraction_model: Optional[str] = Field(None, description="Модель для извлечения структурированных данных (по умолчанию используется основная модель)")
     cache_meeting_structures: bool = Field(True, description="Кэшировать структурированные представления встреч")
     
+    # Сопоставление участников (speaker mapping)
+    enable_speaker_mapping: bool = Field(True, description="Включить автоматическое сопоставление спикеров с участниками")
+    speaker_mapping_confidence_threshold: float = Field(0.7, description="Порог уверенности для сопоставления спикеров (0.0-1.0)")
+    max_participants: int = Field(20, description="Максимальное количество участников в списке")
+    
     # Настройки очереди задач
     max_concurrent_tasks: Optional[int] = Field(None, description="Максимальное количество одновременно обрабатываемых задач (по умолчанию рассчитывается по CPU/RAM)")
     max_queue_size: int = Field(100, description="Максимальный размер очереди задач")

@@ -140,6 +140,10 @@ def _build_user_prompt(
     transcription: str,
     template_variables: Dict[str, str],
     diarization_data: Optional[Dict[str, Any]] = None,
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    meeting_topic: Optional[str] = None,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None,
 ) -> str:
     """Формирует пользовательский промпт с контекстом и требованиями к формату."""
     # Блок контекста (с учётом диаризации)
@@ -159,6 +163,34 @@ def _build_user_prompt(
             f"{transcription}\n\n"
             "Примечание: Диаризация (разделение говорящих) недоступна для этой записи.\n"
         )
+    
+    # Добавляем информацию о сопоставлении спикеров с участниками
+    participants_info = ""
+    if speaker_mapping:
+        participants_info = "\n\n" + "═" * 63 + "\n"
+        participants_info += "ИЗВЕСТНЫЕ УЧАСТНИКИ ВСТРЕЧИ\n"
+        participants_info += "═" * 63 + "\n\n"
+        participants_info += "Сопоставление говорящих с участниками:\n"
+        for speaker_id, participant_name in speaker_mapping.items():
+            participants_info += f"- {speaker_id} = {participant_name}\n"
+        participants_info += "\n"
+        participants_info += "⚠️ ВАЖНО: Используй РЕАЛЬНЫЕ ИМЕНА участников вместо меток спикеров!\n"
+        participants_info += "Вместо 'SPEAKER_1' или 'Спикер 1' пиши имя участника.\n"
+
+    # Добавляем информацию о встрече
+    meeting_info = ""
+    if meeting_topic or meeting_date or meeting_time:
+        meeting_info = "\n\n" + "═" * 63 + "\n"
+        meeting_info += "ИНФОРМАЦИЯ О ВСТРЕЧЕ\n"
+        meeting_info += "═" * 63 + "\n\n"
+
+        if meeting_topic:
+            meeting_info += f"📋 Тема: {meeting_topic}\n"
+        if meeting_date:
+            meeting_info += f"📅 Дата: {meeting_date}\n"
+        if meeting_time:
+            meeting_info += f"🕐 Время: {meeting_time}\n"
+        meeting_info += "\n"
 
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
 
@@ -168,6 +200,8 @@ def _build_user_prompt(
         "ИСХОДНЫЕ ДАННЫЕ ДЛЯ АНАЛИЗА\n"
         "═══════════════════════════════════════════════════════════\n\n"
         f"{transcription_text}\n"
+        f"{participants_info}"
+        f"{meeting_info}"
         "═══════════════════════════════════════════════════════════\n"
         "ПОЛЯ ДЛЯ ИЗВЛЕЧЕНИЯ\n"
         "═══════════════════════════════════════════════════════════\n\n"
@@ -292,10 +326,24 @@ class OpenAIProvider(LLMProvider):
         """Генерировать протокол используя OpenAI GPT"""
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
-        
+
+        # Извлекаем параметры из kwargs
+        speaker_mapping = kwargs.get('speaker_mapping')
+        meeting_topic = kwargs.get('meeting_topic')
+        meeting_date = kwargs.get('meeting_date')
+        meeting_time = kwargs.get('meeting_time')
+
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        user_prompt = _build_user_prompt(transcription, template_variables, diarization_data)
+        user_prompt = _build_user_prompt(
+            transcription,
+            template_variables,
+            diarization_data,
+            speaker_mapping,
+            meeting_topic,
+            meeting_date,
+            meeting_time
+        )
         
         try:
             # Выбор пресета модели, если передан ключ
@@ -407,10 +455,24 @@ class AnthropicProvider(LLMProvider):
         """Генерировать протокол используя Anthropic Claude"""
         if not self.is_available():
             raise ValueError("Anthropic API не настроен")
-        
+
+        # Извлекаем параметры из kwargs
+        speaker_mapping = kwargs.get('speaker_mapping')
+        meeting_topic = kwargs.get('meeting_topic')
+        meeting_date = kwargs.get('meeting_date')
+        meeting_time = kwargs.get('meeting_time')
+
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        prompt = _build_user_prompt(transcription, template_variables, diarization_data)
+        prompt = _build_user_prompt(
+            transcription,
+            template_variables,
+            diarization_data,
+            speaker_mapping,
+            meeting_topic,
+            meeting_date,
+            meeting_time
+        )
         
         try:
             base_url = "Anthropic SDK"
@@ -483,10 +545,24 @@ class YandexGPTProvider(LLMProvider):
         """Генерировать протокол используя Yandex GPT"""
         if not self.is_available():
             raise ValueError("Yandex GPT API не настроен")
-        
+
+        # Извлекаем параметры из kwargs
+        speaker_mapping = kwargs.get('speaker_mapping')
+        meeting_topic = kwargs.get('meeting_topic')
+        meeting_date = kwargs.get('meeting_date')
+        meeting_time = kwargs.get('meeting_time')
+
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        prompt = _build_user_prompt(transcription, template_variables, diarization_data)
+        prompt = _build_user_prompt(
+            transcription,
+            template_variables,
+            diarization_data,
+            speaker_mapping,
+            meeting_topic,
+            meeting_date,
+            meeting_time
+        )
         
         headers = {
             "Authorization": f"Api-Key {self.api_key}",
@@ -590,7 +666,7 @@ class LLMManager:
         return await provider.generate_protocol(transcription, template_variables, diarization_data, **kwargs)
     
     async def generate_protocol_with_fallback(self, preferred_provider: str, transcription: str, 
-                                            template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                                            template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
         """Генерировать протокол с переключением на резервный провайдер в случае ошибки"""
         available_providers = list(self.get_available_providers().keys())
         
@@ -608,7 +684,7 @@ class LLMManager:
         for provider_name in providers_to_try:
             try:
                 logger.info(f"Попытка генерации протокола с провайдером: {provider_name}")
-                result = await self.generate_protocol(provider_name, transcription, template_variables, diarization_data)
+                result = await self.generate_protocol(provider_name, transcription, template_variables, diarization_data, **kwargs)
                 logger.info(f"Успешно сгенерирован протокол с провайдером: {provider_name}")
                 return result
             except Exception as e:
@@ -628,6 +704,10 @@ def _build_extraction_prompt(
     transcription: str,
     template_variables: Dict[str, str],
     diarization_data: Optional[Dict[str, Any]] = None,
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    meeting_topic: Optional[str] = None,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None,
 ) -> str:
     """
     Промпт для первого этапа: извлечение и структурирование информации
@@ -644,11 +724,31 @@ def _build_extraction_prompt(
     else:
         transcription_text = f"Транскрипция:\n{transcription}\n\n"
     
+    # Добавляем информацию о сопоставлении спикеров
+    participants_info = ""
+    if speaker_mapping:
+        participants_info = "\nИЗВЕСТНЫЕ УЧАСТНИКИ:\n"
+        for speaker_id, participant_name in speaker_mapping.items():
+            participants_info += f"- {speaker_id} = {participant_name}\n"
+        participants_info += "\n⚠️ ВАЖНО: Используй реальные имена участников!\n\n"
+
+    # Добавляем информацию о встрече
+    meeting_info = ""
+    if meeting_topic or meeting_date or meeting_time:
+        meeting_info = "\nИНФОРМАЦИЯ О ВСТРЕЧЕ:\n"
+        if meeting_topic:
+            meeting_info += f"- Тема: {meeting_topic}\n"
+        if meeting_date:
+            meeting_info += f"- Дата: {meeting_date}\n"
+        if meeting_time:
+            meeting_info += f"- Время: {meeting_time}\n"
+        meeting_info += "\n"
+    
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     
     prompt = f"""ЭТАП 1: ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
 
-{transcription_text}
+{transcription_text}{participants_info}{meeting_info}
 
 ЗАДАЧА:
 Извлеки из транскрипции информацию для следующих полей:
@@ -775,10 +875,24 @@ async def generate_protocol_two_stage(
         Улучшенный протокол
     """
     logger.info("Начало двухэтапной генерации протокола")
-    
+
+    # Извлекаем параметры из kwargs
+    speaker_mapping = kwargs.get('speaker_mapping')
+    meeting_topic = kwargs.get('meeting_topic')
+    meeting_date = kwargs.get('meeting_date')
+    meeting_time = kwargs.get('meeting_time')
+
     # ЭТАП 1: Извлечение информации
     logger.info("Этап 1: Извлечение информации")
-    extraction_prompt = _build_extraction_prompt(transcription, template_variables, diarization_data)
+    extraction_prompt = _build_extraction_prompt(
+        transcription,
+        template_variables,
+        diarization_data,
+        speaker_mapping,
+        meeting_topic,
+        meeting_date,
+        meeting_time
+    )
     
     # Используем системный промпт (с учетом классификации если включена)
     system_prompt = _build_system_prompt(transcription, diarization_analysis)

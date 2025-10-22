@@ -283,7 +283,11 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             llm_provider=data['llm_provider'],
             user_id=message.from_user.id,
             language="ru",
-            is_external_file=is_external_file
+            is_external_file=is_external_file,
+            participants_list=data.get('participants_list'),  # список участников
+            meeting_topic=data.get('meeting_topic'),  # тема встречи
+            meeting_date=data.get('meeting_date'),  # дата встречи
+            meeting_time=data.get('meeting_time')  # время встречи
         )
         
         # Добавляем задачу в очередь
@@ -531,13 +535,20 @@ async def _show_template_selection(message: Message, template_service: TemplateS
             callback_data="quick_set_default"
         )])
         
+        # Кнопка 4: Добавить участников встречи
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="👥 Указать участников встречи",
+            callback_data="add_participants"
+        )])
+        
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
         await message.answer(
             "📝 **Выберите способ создания протокола:**\n\n"
             "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
             "📋 **По шаблону** - использовать сохранённый шаблон\n"
-            "⚙️ **Задать шаблон** - выбрать и сохранить новый шаблон по умолчанию",
+            "⚙️ **Задать шаблон** - выбрать и сохранить новый шаблон по умолчанию\n"
+            "👥 **Указать участников** - добавить список для замены 'Спикер N' на имена",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )

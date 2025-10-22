@@ -194,6 +194,33 @@ class OptimizedProcessingService(BaseProcessingService):
                 temp_file_path, request, processing_metrics, progress_tracker
             )
             
+            # Этап 2.3: Сопоставление спикеров с участниками (если указан список)
+            if request.participants_list and transcription_result.diarization:
+                if progress_tracker:
+                    await progress_tracker.update_status("🎭 Сопоставление участников со спикерами...")
+                
+                try:
+                    from src.services.speaker_mapping_service import speaker_mapping_service
+                    
+                    logger.info(f"Начало сопоставления {len(request.participants_list)} участников")
+                    
+                    speaker_mapping = await speaker_mapping_service.map_speakers_to_participants(
+                        diarization_data=transcription_result.diarization,
+                        participants=request.participants_list,
+                        transcription_text=transcription_result.transcription,
+                        llm_provider=request.llm_provider
+                    )
+                    
+                    # Сохраняем mapping в request для дальнейшего использования
+                    request.speaker_mapping = speaker_mapping
+                    
+                    logger.info(f"Сопоставление завершено: {len(speaker_mapping)} спикеров")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка при сопоставлении спикеров: {e}")
+                    # Продолжаем без mapping
+                    request.speaker_mapping = None
+            
             # Этап 2.5: Умный выбор шаблона после транскрипции
             template = await self._suggest_template_if_needed(
                 request, transcription_result, progress_tracker
@@ -225,6 +252,12 @@ class OptimizedProcessingService(BaseProcessingService):
                 protocol_text = self._format_protocol(
                     template, llm_result, transcription_result
                 )
+                
+                # Применяем замену спикеров на реальные имена
+                if request.speaker_mapping:
+                    from src.utils.text_processing import replace_speakers_in_text
+                    protocol_text = replace_speakers_in_text(protocol_text, request.speaker_mapping)
+                    logger.info(f"Применена замена спикеров на имена участников")
             
             # Очистка временного файла в фоне (только для внешних файлов)
             if request.is_external_file:
@@ -520,7 +553,11 @@ class OptimizedProcessingService(BaseProcessingService):
                     segments=segments,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
-                    openai_model_key=openai_model_key
+                    openai_model_key=openai_model_key,
+                    speaker_mapping=request.speaker_mapping,
+                    meeting_topic=request.meeting_topic,
+                    meeting_date=request.meeting_date,
+                    meeting_time=request.meeting_time
                 )
                 
             elif settings.two_stage_processing and request.llm_provider == 'openai':
@@ -534,7 +571,11 @@ class OptimizedProcessingService(BaseProcessingService):
                     template_variables=template_variables,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
-                    openai_model_key=openai_model_key
+                    openai_model_key=openai_model_key,
+                    speaker_mapping=request.speaker_mapping,
+                    meeting_topic=request.meeting_topic,
+                    meeting_date=request.meeting_date,
+                    meeting_time=request.meeting_time
                 )
             else:
                 # Стандартная генерация
@@ -547,7 +588,11 @@ class OptimizedProcessingService(BaseProcessingService):
                     template,
                     template_variables,
                     request.llm_provider,
-                    openai_model_key
+                    openai_model_key,
+                    request.speaker_mapping,
+                    request.meeting_topic,
+                    request.meeting_date,
+                    request.meeting_time
                 )
                 
                 if not llm_result.success:
@@ -620,13 +665,18 @@ class OptimizedProcessingService(BaseProcessingService):
             # Возвращаем базовый набор переменных как fallback
             return self._get_template_variables()
 
-    async def _generate_llm_response(self, transcription_result, template, 
-                                   template_variables, llm_provider, openai_model_key=None):
+    async def _generate_llm_response(self, transcription_result, template,
+                                   template_variables, llm_provider, openai_model_key=None, speaker_mapping=None,
+                                   meeting_topic=None, meeting_date=None, meeting_time=None):
         """Генерация ответа LLM с постобработкой"""
         llm_result = await self.llm_service.generate_protocol_with_fallback(
             llm_provider, transcription_result.transcription, template_variables,
             transcription_result.diarization if hasattr(transcription_result, 'diarization') else None,
-            openai_model_key=openai_model_key
+            openai_model_key=openai_model_key,
+            speaker_mapping=speaker_mapping,
+            meeting_topic=meeting_topic,
+            meeting_date=meeting_date,
+            meeting_time=meeting_time
         )
         
         # Постобработка результатов - проверяем и исправляем неправильные JSON-структуры

@@ -20,6 +20,7 @@ class UserBase(BaseModel):
         None,
         description="Режим вывода протокола: 'messages' (в сообщения) или 'file' (в файл)"
     )
+    saved_participants: Optional[str] = Field(None, description="Сохраненный список участников в JSON")
 
 
 class UserCreate(UserBase):

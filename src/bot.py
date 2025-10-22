@@ -46,6 +46,7 @@ from handlers import (
     setup_command_handlers, setup_callback_handlers,
     setup_message_handlers, setup_template_handlers
 )
+from handlers.participants_handlers import setup_participants_handlers
 from handlers.admin_handlers import setup_admin_handlers
 from exceptions import BotException
 
@@ -186,6 +187,10 @@ class EnhancedTelegramBot:
             self.template_service
         )
         self.dp.include_router(template_router)
+        
+        # Обработчики участников
+        participants_router = setup_participants_handlers()
+        self.dp.include_router(participants_router)
         
         feedback_router = setup_feedback_handlers(feedback_collector)
         self.dp.include_router(feedback_router)

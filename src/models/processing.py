@@ -17,6 +17,11 @@ class ProcessingRequest(BaseModel):
     user_id: int = Field(..., description="ID пользователя")
     language: str = Field("ru", description="Язык транскрипции")
     is_external_file: bool = Field(False, description="Флаг внешнего файла")
+    participants_list: Optional[List[Dict[str, str]]] = Field(None, description="Список участников")
+    speaker_mapping: Optional[Dict[str, str]] = Field(None, description="Сопоставление спикеров с участниками")
+    meeting_topic: Optional[str] = Field(None, description="Тема встречи")
+    meeting_date: Optional[str] = Field(None, description="Дата встречи")
+    meeting_time: Optional[str] = Field(None, description="Время встречи")
 
 
 class TranscriptionResult(BaseModel):

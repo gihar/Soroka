@@ -1,0 +1,337 @@
+"""
+Сервис для работы со списком участников встречи
+"""
+
+import re
+import csv
+from typing import List, Dict, Optional
+from pathlib import Path
+from loguru import logger
+
+from src.models.meeting_info import MeetingInfo
+
+
+class ParticipantsService:
+    """Сервис для парсинга и валидации списка участников"""
+    
+    def __init__(self, max_participants: int = 20):
+        self.max_participants = max_participants
+    
+    def parse_participants_text(self, text: str) -> List[Dict[str, str]]:
+        """
+        Парсинг списка участников из текста
+        
+        Поддерживаемые форматы:
+        - "Иван Петров, менеджер"
+        - "Иван Петров"
+        - "Иван Петров - менеджер"
+        - "Иван Петров (менеджер)"
+        
+        Args:
+            text: Текст со списком участников
+            
+        Returns:
+            Список словарей с информацией об участниках
+        """
+        participants = []
+        lines = text.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            participant = self._parse_single_line(line)
+            if participant:
+                participants.append(participant)
+        
+        logger.info(f"Распарсено {len(participants)} участников из текста")
+        return participants
+    
+    def _parse_single_line(self, line: str) -> Optional[Dict[str, str]]:
+        """Парсинг одной строки с участником"""
+        # Убираем номера списков в начале (1., 2., -, •, etc)
+        line = re.sub(r'^[\d\-•*]+[\.\)]\s*', '', line).strip()
+        
+        if not line:
+            return None
+        
+        participant = {"name": "", "role": ""}
+        
+        # Паттерны для извлечения имени и роли
+        patterns = [
+            # "Иван Петров, менеджер"
+            r'^(.+?)\s*,\s*(.+)$',
+            # "Иван Петров - менеджер"
+            r'^(.+?)\s*-\s*(.+)$',
+            # "Иван Петров (менеджер)"
+            r'^(.+?)\s*\((.+?)\)\s*$',
+            # "Иван Петров | менеджер"
+            r'^(.+?)\s*\|\s*(.+)$',
+        ]
+        
+        parsed = False
+        for pattern in patterns:
+            match = re.match(pattern, line)
+            if match:
+                name = match.group(1).strip()
+                role = match.group(2).strip()
+                
+                # Валидация: имя должно содержать хотя бы 2 символа
+                if len(name) >= 2:
+                    participant["name"] = name
+                    participant["role"] = role
+                    parsed = True
+                    break
+        
+        # Если не удалось распарсить с ролью, берем всю строку как имя
+        if not parsed:
+            if len(line) >= 2:
+                participant["name"] = line
+                participant["role"] = ""
+        
+        # Возвращаем только если есть имя
+        if participant["name"]:
+            return participant
+        
+        return None
+    
+    def parse_participants_file(self, file_path: str) -> List[Dict[str, str]]:
+        """
+        Парсинг списка участников из файла
+        
+        Поддерживаемые форматы:
+        - .txt файлы (один участник на строку)
+        - .csv файлы (колонки: name, role)
+        
+        Args:
+            file_path: Путь к файлу
+            
+        Returns:
+            Список словарей с информацией об участниках
+        """
+        path = Path(file_path)
+        
+        if not path.exists():
+            raise FileNotFoundError(f"Файл не найден: {file_path}")
+        
+        # Определяем формат файла
+        extension = path.suffix.lower()
+        
+        if extension == '.csv':
+            return self._parse_csv_file(file_path)
+        elif extension in ['.txt', '.text']:
+            # Читаем как текст
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return self.parse_participants_text(content)
+        else:
+            # Пробуем прочитать как текст для других форматов
+            logger.warning(f"Неизвестный формат файла: {extension}. Пытаемся прочитать как текст")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return self.parse_participants_text(content)
+    
+    def _parse_csv_file(self, file_path: str) -> List[Dict[str, str]]:
+        """Парсинг CSV файла"""
+        participants = []
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            # Пробуем определить разделитель
+            sample = f.read(1024)
+            f.seek(0)
+            
+            # Определяем разделитель (запятая или точка с запятой)
+            delimiter = ',' if sample.count(',') > sample.count(';') else ';'
+            
+            reader = csv.DictReader(f, delimiter=delimiter)
+            
+            for row in reader:
+                # Ищем колонки с именем и ролью (поддержка разных вариантов названий)
+                name_keys = ['name', 'Name', 'имя', 'Имя', 'ФИО', 'фио']
+                role_keys = ['role', 'Role', 'роль', 'Роль', 'должность', 'Должность']
+                
+                name = ""
+                role = ""
+                
+                # Находим имя
+                for key in name_keys:
+                    if key in row and row[key]:
+                        name = row[key].strip()
+                        break
+                
+                # Находим роль
+                for key in role_keys:
+                    if key in row and row[key]:
+                        role = row[key].strip()
+                        break
+                
+                # Если не нашли по ключам, берем первые две колонки
+                if not name and len(row) > 0:
+                    first_value = list(row.values())[0]
+                    if first_value:
+                        name = first_value.strip()
+                
+                if not role and len(row) > 1:
+                    second_value = list(row.values())[1]
+                    if second_value:
+                        role = second_value.strip()
+                
+                if name:
+                    participants.append({
+                        "name": name,
+                        "role": role or ""
+                    })
+        
+        logger.info(f"Распарсено {len(participants)} участников из CSV файла")
+        return participants
+
+    def extract_from_meeting_text(self, text: str) -> Optional[MeetingInfo]:
+        """
+        Извлечь информацию о встрече из текста
+
+        Args:
+            text: Текст с информацией о встрече
+
+        Returns:
+            MeetingInfo или None если не удалось извлечь
+        """
+        try:
+            from src.services.meeting_info_service import meeting_info_service
+
+            meeting_info = meeting_info_service.extract_meeting_info(text)
+
+            if meeting_info:
+                logger.info(f"Извлечена информация о встрече: {meeting_info.topic}")
+                return meeting_info
+            else:
+                logger.warning("Не удалось извлечь информацию о встрече")
+                return None
+
+        except Exception as e:
+            logger.error(f"Ошибка при извлечении информации о встрече: {e}")
+            return None
+
+    def format_meeting_info_for_display(self, meeting_info: MeetingInfo) -> str:
+        """
+        Форматирование информации о встрече для отображения
+
+        Args:
+            meeting_info: Информация о встрече
+
+        Returns:
+            Отформатированная строка
+        """
+        from src.services.meeting_info_service import meeting_info_service
+        return meeting_info_service.format_meeting_info_for_display(meeting_info)
+
+    def validate_meeting_info(self, meeting_info: MeetingInfo) -> tuple[bool, str]:
+        """
+        Валидация информации о встрече
+
+        Args:
+            meeting_info: Информация о встрече
+
+        Returns:
+            Кортеж (валидна, сообщение)
+        """
+        from src.services.meeting_info_service import meeting_info_service
+        return meeting_info_service.validate_meeting_info(meeting_info)
+    
+    def validate_participants(self, participants: List[Dict[str, str]]) -> tuple[bool, Optional[str]]:
+        """
+        Валидация списка участников
+        
+        Args:
+            participants: Список участников
+            
+        Returns:
+            Кортеж (валиден, сообщение об ошибке)
+        """
+        if not participants:
+            return False, "Список участников пуст"
+        
+        if len(participants) > self.max_participants:
+            return False, f"Слишком много участников (максимум {self.max_participants})"
+        
+        # Проверка на дубликаты имен
+        names = [p["name"] for p in participants]
+        if len(names) != len(set(names)):
+            return False, "В списке есть дублирующиеся имена"
+        
+        # Проверка что все участники имеют имя
+        for i, participant in enumerate(participants):
+            if not participant.get("name"):
+                return False, f"Участник #{i+1} не имеет имени"
+            
+            # Проверка минимальной длины имени
+            if len(participant["name"]) < 2:
+                return False, f"Имя '{participant['name']}' слишком короткое"
+        
+        return True, None
+    
+    def format_participants_for_display(self, participants: List[Dict[str, str]]) -> str:
+        """
+        Форматирование списка участников для отображения пользователю
+        
+        Args:
+            participants: Список участников
+            
+        Returns:
+            Форматированная строка
+        """
+        lines = ["📋 **Список участников:**\n"]
+        
+        for i, participant in enumerate(participants, 1):
+            name = participant["name"]
+            role = participant.get("role", "")
+            
+            if role:
+                lines.append(f"{i}. {name} — {role}")
+            else:
+                lines.append(f"{i}. {name}")
+        
+        return "\n".join(lines)
+    
+    def format_participants_for_llm(self, participants: List[Dict[str, str]]) -> str:
+        """
+        Форматирование списка участников для передачи в LLM
+        
+        Args:
+            participants: Список участников
+            
+        Returns:
+            Форматированная строка для промпта
+        """
+        lines = []
+        
+        for participant in participants:
+            name = participant["name"]
+            role = participant.get("role", "")
+            
+            if role:
+                lines.append(f"- {name} ({role})")
+            else:
+                lines.append(f"- {name}")
+        
+        return "\n".join(lines)
+    
+    def participants_to_json(self, participants: List[Dict[str, str]]) -> str:
+        """Сериализация участников в JSON для сохранения"""
+        import json
+        return json.dumps(participants, ensure_ascii=False)
+    
+    def participants_from_json(self, json_str: str) -> List[Dict[str, str]]:
+        """Десериализация участников из JSON"""
+        import json
+        try:
+            return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Ошибка при десериализации участников: {e}")
+            return []
+
+
+# Глобальный экземпляр сервиса
+participants_service = ParticipantsService()
+
+

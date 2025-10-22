@@ -751,6 +751,54 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при очистке завершенных задач: {e}")
             return 0
+    
+    async def update_user_saved_participants(self, telegram_id: int, participants_json: str) -> bool:
+        """Обновить сохраненный список участников для пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Сначала проверяем, есть ли колонка saved_participants
+                cursor = await db.execute("PRAGMA table_info(users)")
+                columns = await cursor.fetchall()
+                column_names = [col[1] for col in columns]
+                
+                # Если колонки нет - добавляем её
+                if 'saved_participants' not in column_names:
+                    logger.info("Добавление колонки saved_participants в таблицу users")
+                    await db.execute("ALTER TABLE users ADD COLUMN saved_participants TEXT")
+                    await db.commit()
+                
+                # Обновляем список участников
+                await db.execute("""
+                    UPDATE users 
+                    SET saved_participants = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE telegram_id = ?
+                """, (participants_json, telegram_id))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении списка участников: {e}")
+            return False
+    
+    async def get_user_saved_participants(self, telegram_id: int) -> Optional[str]:
+        """Получить сохраненный список участников пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Проверяем наличие колонки
+                cursor = await db.execute("PRAGMA table_info(users)")
+                columns = await cursor.fetchall()
+                column_names = [col[1] for col in columns]
+                
+                if 'saved_participants' not in column_names:
+                    return None
+                
+                cursor = await db.execute("""
+                    SELECT saved_participants FROM users WHERE telegram_id = ?
+                """, (telegram_id,))
+                row = await cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Ошибка при получении списка участников: {e}")
+            return None
 
 
 # Глобальный экземпляр базы данных
