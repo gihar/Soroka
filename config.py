@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     enable_protocol_validation: bool = Field(True, description="Включить валидацию и оценку качества протоколов")
     meeting_type_detection: bool = Field(True, description="Включить автоопределение типа встречи")
     chain_of_thought_threshold_minutes: int = Field(30, description="Порог длительности встречи для Chain-of-Thought подхода (в минутах)")
+    max_parallel_segments: Optional[int] = Field(None, description="Максимальное количество сегментов для параллельной обработки в Chain-of-Thought (None = без ограничений)")
     
     # Структурированные представления
     enable_meeting_structure: bool = Field(False, description="Включить построение структурированного представления встречи")

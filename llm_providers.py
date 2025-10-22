@@ -20,6 +20,9 @@ from src.prompts.specialized_prompts import (
     get_specialized_extraction_instructions
 )
 
+# Импорт для retry логики
+from src.reliability.retry import RetryManager, LLM_RETRY_CONFIG
+
 if TYPE_CHECKING:
     from src.services.segmentation_service import TranscriptionSegment
 
@@ -1025,6 +1028,73 @@ JSON-объект с теми же ключами, но с объединенн�
     return prompt
 
 
+async def _process_single_segment(
+    segment: 'TranscriptionSegment',
+    segment_idx: int,
+    total_segments: int,
+    client: openai.OpenAI,
+    selected_model: str,
+    system_prompt: str,
+    template_variables: Dict[str, str],
+    extra_headers: Dict[str, str],
+    retry_manager: RetryManager
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Обработать один сегмент транскрипции
+    
+    Args:
+        segment: Сегмент транскрипции
+        segment_idx: Индекс сегмента
+        total_segments: Общее количество сегментов
+        client: OpenAI клиент
+        selected_model: Модель для использования
+        system_prompt: Системный промпт
+        template_variables: Переменные шаблона
+        extra_headers: Дополнительные HTTP заголовки
+        retry_manager: Менеджер для повторных попыток
+        
+    Returns:
+        Кортеж (индекс_сегмента, результат_обработки)
+    """
+    logger.info(f"Обработка сегмента {segment_idx + 1}/{total_segments}")
+    
+    # Используем форматированный текст если есть, иначе обычный
+    segment_text = segment.formatted_text if segment.formatted_text else segment.text
+    
+    # Формируем промпт для сегмента
+    segment_prompt = _build_segment_analysis_prompt(
+        segment_text=segment_text,
+        segment_id=segment_idx,
+        total_segments=total_segments,
+        template_variables=template_variables
+    )
+    
+    # Функция для вызова OpenAI API
+    async def _call_openai_api():
+        return await asyncio.to_thread(
+            client.chat.completions.create,
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": segment_prompt}
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            extra_headers=extra_headers
+        )
+    
+    # Выполняем запрос с retry логикой
+    response = await retry_manager.execute_with_retry(_call_openai_api)
+    content = response.choices[0].message.content
+    
+    # Парсим JSON ответ
+    segment_result = json.loads(content)
+    
+    logger.info(f"Сегмент {segment_idx + 1} обработан успешно")
+    
+    return (segment_idx, segment_result)
+
+
 async def generate_protocol_chain_of_thought(
     manager: 'LLMManager',
     provider_name: str,
@@ -1099,49 +1169,79 @@ async def generate_protocol_chain_of_thought(
         if settings.x_title:
             extra_headers["X-Title"] = settings.x_title
         
-        # Обрабатываем каждый сегмент
-        for segment in segments:
-            logger.info(f"Обработка сегмента {segment.segment_id + 1}/{len(segments)}")
-            
-            # Используем форматированный текст если есть, иначе обычный
-            segment_text = segment.formatted_text if segment.formatted_text else segment.text
-            
-            segment_prompt = _build_segment_analysis_prompt(
-                segment_text=segment_text,
-                segment_id=segment.segment_id,
-                total_segments=len(segments),
-                template_variables=template_variables
+        # Создаем retry manager для обработки сегментов
+        retry_manager = RetryManager(LLM_RETRY_CONFIG)
+        
+        # Проверяем настройку ограничения параллелизма
+        max_parallel = settings.max_parallel_segments
+        
+        # Обрабатываем каждый сегмент параллельно
+        if max_parallel:
+            logger.info(
+                f"Запуск параллельной обработки {len(segments)} сегментов "
+                f"(ограничение: {max_parallel} одновременно)"
             )
+            semaphore = asyncio.Semaphore(max_parallel)
             
-            async def _call_openai_segment():
-                return await asyncio.to_thread(
-                    client.chat.completions.create,
-                    model=selected_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": segment_prompt}
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                    extra_headers=extra_headers
+            async def _process_with_semaphore(segment):
+                async with semaphore:
+                    return await _process_single_segment(
+                        segment=segment,
+                        segment_idx=segment.segment_id,
+                        total_segments=len(segments),
+                        client=client,
+                        selected_model=selected_model,
+                        system_prompt=system_prompt,
+                        template_variables=template_variables,
+                        extra_headers=extra_headers,
+                        retry_manager=retry_manager
+                    )
+            
+            tasks = [_process_with_semaphore(segment) for segment in segments]
+        else:
+            logger.info(f"Запуск параллельной обработки {len(segments)} сегментов (без ограничений)")
+            
+            tasks = [
+                _process_single_segment(
+                    segment=segment,
+                    segment_idx=segment.segment_id,
+                    total_segments=len(segments),
+                    client=client,
+                    selected_model=selected_model,
+                    system_prompt=system_prompt,
+                    template_variables=template_variables,
+                    extra_headers=extra_headers,
+                    retry_manager=retry_manager
                 )
-            
-            try:
-                response = await _call_openai_segment()
-                content = response.choices[0].message.content
-                
-                segment_result = json.loads(content)
-                segment_results.append(segment_result)
-                
-                logger.info(f"Сегмент {segment.segment_id + 1} обработан успешно")
-                
-            except Exception as e:
-                logger.error(f"Ошибка при обработке сегмента {segment.segment_id + 1}: {e}")
-                # Добавляем пустой результат для сохранения порядка
+                for segment in segments
+            ]
+        
+        # Параллельная обработка всех сегментов
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Обработка результатов
+        successful_count = 0
+        failed_count = 0
+        
+        # Сортируем результаты по индексу сегмента для сохранения порядка
+        for result in results:
+            if isinstance(result, Exception):
+                failed_count += 1
+                logger.error(f"Ошибка при обработке сегмента: {result}")
+                # Добавляем пустой результат
                 segment_results.append({
                     key: "Ошибка обработки сегмента" 
                     for key in template_variables.keys()
                 })
+            else:
+                successful_count += 1
+                segment_id, data = result
+                segment_results.append(data)
+        
+        logger.info(
+            f"Обработка сегментов завершена: успешно {successful_count}/{len(segments)}, "
+            f"ошибок {failed_count}/{len(segments)}"
+        )
         
         # ЭТАП 2: Синтез финального протокола
         logger.info("Этап 2: Синтез финального протокола из сегментов")
