@@ -205,9 +205,9 @@ global_rate_limiter = GlobalRateLimiter()
 
 # Предустановленные конфигурации
 TELEGRAM_API_LIMIT = RateLimitConfig(
-    requests_per_window=30,  # 30 запросов
-    window_size=60.0,        # за минуту
-    burst_limit=10           # максимум 10 запросов подряд
+    requests_per_window=20,  # 20 сообщений (консервативно, реальный лимит ~30/сек)
+    window_size=1.0,         # за секунду
+    burst_limit=3            # максимум 3 подряд для защиты от всплесков
 )
 
 OPENAI_API_LIMIT = RateLimitConfig(

@@ -203,10 +203,15 @@ class EnhancedTelegramBot:
     
     def _setup_error_handling(self):
         """Настройка дополнительной обработки ошибок"""
+        from aiogram.types import ErrorEvent
+        
         @self.dp.error()
-        async def error_handler(update, exception):
+        async def error_handler(event: ErrorEvent):
             """Глобальный обработчик ошибок"""
-            logger.error(f"Необработанная ошибка в update {update.update_id}: {exception}")
+            update = event.update
+            exception = event.exception
+            
+            logger.error(f"Необработанная ошибка в update {update.update_id if update else 'N/A'}: {exception}")
             
             # Дополнительная логика для критических ошибок
             if "database" in str(exception).lower():
@@ -319,6 +324,26 @@ class EnhancedTelegramBot:
         
         if not available_providers:
             logger.error("Нет доступных LLM провайдеров!")
+        
+        # Проверяем статус flood control
+        try:
+            from src.reliability.telegram_rate_limiter import telegram_rate_limiter
+            flood_stats = telegram_rate_limiter.get_stats()
+            
+            if flood_stats['flood_control']['is_active']:
+                logger.warning(
+                    f"⚠️ АКТИВНЫЙ FLOOD CONTROL обнаружен при запуске! "
+                    f"Осталось: {flood_stats['flood_control']['time_remaining']:.0f}с"
+                )
+            else:
+                logger.info("✅ Flood control: не активен")
+            
+            if flood_stats['flood_control']['total_blocks'] > 0:
+                logger.info(
+                    f"📊 История flood control: {flood_stats['flood_control']['total_blocks']} блокировок"
+                )
+        except Exception as e:
+            logger.warning(f"Не удалось проверить статус flood control: {e}")
         
         logger.info("Проверки при запуске завершены")
     

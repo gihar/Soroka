@@ -15,6 +15,7 @@ from services import FileService, TemplateService, OptimizedProcessingService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.utils.pdf_converter import convert_markdown_to_pdf
+from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
@@ -30,7 +31,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             file_obj, file_name, content_type = _extract_file_info(message)
             
             if not file_obj:
-                await message.answer("❌ Не удалось обработать файл. Попробуйте отправить файл еще раз.")
+                await safe_answer(message, "❌ Не удалось обработать файл. Попробуйте отправить файл еще раз.")
                 return
             
             # Валидируем файл
@@ -44,7 +45,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "max_size": 20
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await message.answer(error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="Markdown")
                 return
             except FileTypeError as e:
                 from ux.message_builder import MessageBuilder
@@ -55,17 +56,18 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "supported_formats": formats
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await message.answer(error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="Markdown")
                 return
             except FileError as e:
                 from ux.message_builder import MessageBuilder
                 error_message = MessageBuilder.error_message("validation", str(e))
-                await message.answer(error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="Markdown")
                 return
             
             # Проверяем наличие file_id
             if not file_obj.file_id:
-                await message.answer(
+                await safe_answer(
+                    message,
                     "❌ Ошибка: не удалось получить идентификатор файла. "
                     "Попробуйте отправить файл еще раз."
                 )
@@ -84,7 +86,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
-            await message.answer("❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+            await safe_answer(message, "❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
     
     # Обрабатываем текст только когда пользователь НЕ в FSM-состоянии
     @router.message(StateFilter(None), F.content_type == 'text')
@@ -110,7 +112,8 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
             # Проверяем, содержит ли сообщение URL
             if not _contains_url(text):
-                await message.answer(
+                await safe_answer(
+                    message,
                     "📎 Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск для обработки.\n\n"
                     "Поддерживаемые форматы:\n"
                     "🎵 Аудио: MP3, WAV, M4A, OGG\n"
@@ -121,7 +124,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             # Извлекаем URL из сообщения
             url = _extract_url(text)
             if not url:
-                await message.answer("❌ Не удалось найти корректную ссылку в сообщении.")
+                await safe_answer(message, "❌ Не удалось найти корректную ссылку в сообщении.")
                 return
             
             # Обрабатываем URL
@@ -129,7 +132,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в text_handler: {e}")
-            await message.answer("❌ Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
+            await safe_answer(message, "❌ Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
     
     return router
 
@@ -573,14 +576,19 @@ def _extract_url(text: str) -> str:
 
 async def _process_url(message: Message, url: str, state: FSMContext, template_service: TemplateService):
     """Обработать URL файла"""
+    status_message = None
     try:
         # Отправляем сообщение о начале обработки
-        status_message = await message.answer("🔍 Проверяю ссылку...")
+        status_message = await safe_answer(message, "🔍 Проверяю ссылку...")
+        if not status_message:
+            logger.warning("Не удалось отправить статусное сообщение")
+            return
         
         async with URLService() as url_service:
             # Проверяем поддержку URL
             if not url_service.is_supported_url(url):
-                await status_message.edit_text(
+                await safe_edit_text(
+                    status_message,
                     "❌ Данный тип ссылки не поддерживается.\n\n"
                     "Поддерживаются только:\n"
                     "• Google Drive (drive.google.com)\n"
@@ -589,7 +597,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 return
             
             # Получаем информацию о файле
-            await status_message.edit_text("📊 Получаю информацию о файле...")
+            await safe_edit_text(status_message, "📊 Получаю информацию о файле...")
             
             try:
                 filename, file_size, direct_url = await url_service.get_file_info(url)
@@ -599,7 +607,8 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 
                 # Отображаем информацию о файле
                 size_mb = file_size / (1024 * 1024)
-                await status_message.edit_text(
+                await safe_edit_text(
+                    status_message,
                     f"✅ Файл найден!\n\n"
                     f"📄 Имя: {filename}\n"
                     f"📊 Размер: {size_mb:.1f} МБ\n\n"
@@ -617,7 +626,8 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     is_external_file=True  # Флаг для отличия от Telegram файлов
                 )
                 
-                await status_message.edit_text(
+                await safe_edit_text(
+                    status_message,
                     f"✅ Файл успешно скачан: {original_filename}"
                 )
                 
@@ -634,7 +644,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     "max_size": settings.max_external_file_size // (1024 * 1024)  # В МБ
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await status_message.edit_text(error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
                 
             except FileTypeError as e:
                 from ux.message_builder import MessageBuilder
@@ -648,11 +658,13 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     }
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await status_message.edit_text(error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
                 
             except FileError as e:
-                await status_message.edit_text(f"❌ Ошибка при обработке файла: {e}")
+                await safe_edit_text(status_message, f"❌ Ошибка при обработке файла: {e}")
                 
     except Exception as e:
         logger.error(f"Ошибка при обработке URL {url}: {e}")
-        await message.answer("❌ Произошла ошибка при обработке ссылки. Попробуйте еще раз.")
+        # Используем safe_answer только если не удалось создать status_message
+        if not status_message:
+            await safe_answer(message, "❌ Произошла ошибка при обработке ссылки. Попробуйте еще раз.")

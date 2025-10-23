@@ -8,6 +8,7 @@ from typing import Callable, Any, Dict, Optional
 from functools import wraps
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, User, Update, Message
+from aiogram.exceptions import TelegramRetryAfter
 from loguru import logger
 
 from exceptions import BotException
@@ -27,27 +28,61 @@ class ErrorHandlingMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         
+        except TelegramRetryAfter as e:
+            # Импортируем здесь, чтобы избежать циклических зависимостей
+            from src.reliability.telegram_rate_limiter import telegram_rate_limiter
+            
+            # Регистрируем flood control
+            chat_id = event.chat.id if isinstance(event, Message) and event.chat else None
+            await telegram_rate_limiter.flood_control.register_flood_control(
+                e.retry_after, 
+                chat_id
+            )
+            
+            # НЕ отправляем сообщение пользователю, чтобы не усугублять flood control
+            logger.error(
+                f"Telegram Flood Control: заблокировано на {e.retry_after}с "
+                f"(чат: {chat_id}). Сообщения не отправляются."
+            )
+            return
+        
         except RateLimitExceeded as e:
             logger.warning(f"Rate limit exceeded: {e}")
-            if isinstance(event, Message):
-                await event.answer(
-                    f"⏱️ Слишком много запросов. Попробуйте через {e.retry_after:.0f} секунд."
-                )
+            # Пытаемся отправить только если блокировка короткая
+            if e.retry_after < 5 and isinstance(event, Message):
+                try:
+                    await event.answer(
+                        f"⏱️ Слишком много запросов. Попробуйте через {e.retry_after:.0f} секунд."
+                    )
+                except TelegramRetryAfter:
+                    # Игнорируем, если и это вызвало flood control
+                    logger.debug("Не удалось отправить сообщение о rate limit")
             return
         
         except BotException as e:
             logger.error(f"Bot exception: {e.to_dict()}")
             if isinstance(event, Message):
-                await event.answer(f"❌ {e.message}")
+                # Используем безопасную отправку
+                try:
+                    from src.utils.telegram_safe import safe_answer
+                    await safe_answer(event, f"❌ {e.message}")
+                except Exception:
+                    logger.error("Не удалось отправить сообщение об ошибке пользователю")
             return
         
         except Exception as e:
             logger.error(f"Unhandled exception: {e}", exc_info=True)
             if isinstance(event, Message):
-                await event.answer(
-                    "❌ Произошла неожиданная ошибка. "
-                    "Попробуйте еще раз или обратитесь в поддержку."
-                )
+                # Используем безопасную отправку
+                try:
+                    from src.utils.telegram_safe import safe_answer
+                    await safe_answer(
+                        event,
+                        "❌ Произошла неожиданная ошибка. "
+                        "Попробуйте еще раз или обратитесь в поддержку."
+                    )
+                except Exception:
+                    logger.error("Не удалось отправить сообщение об ошибке пользователю")
             return
 
 
