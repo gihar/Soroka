@@ -96,14 +96,8 @@ class SpeakerMappingService:
                 if seg.get('speaker') == speaker
             ]
             
-            # Берем первые 3 фрагмента (для анализа контекста)
-            first_segments = speaker_segments[:3] if speaker_segments else []
-            
-            speaker_text_samples = [
-                seg.get('text', '').strip() 
-                for seg in first_segments
-                if seg.get('text')
-            ]
+            # Распределяем фрагменты: начало, середина, конец (всего до 5 фрагментов)
+            text_samples = self._get_distributed_samples(speaker_segments, max_samples=5)
             
             # Подсчет времени говорения
             total_time = sum(
@@ -115,13 +109,147 @@ class SpeakerMappingService:
                 'speaker_id': speaker,
                 'segments_count': len(speaker_segments),
                 'speaking_time': total_time,
-                'text_samples': speaker_text_samples
+                'text_samples': text_samples
             })
         
         # Сортируем по времени говорения (больше говорил = вероятно важнее)
         speakers_info.sort(key=lambda x: x['speaking_time'], reverse=True)
         
         return speakers_info
+    
+    def _get_distributed_samples(self, segments: List[Dict[str, Any]], max_samples: int = 5) -> List[str]:
+        """
+        Извлекает фрагменты речи, распределенные по всей транскрипции
+        
+        Args:
+            segments: Список сегментов спикера
+            max_samples: Максимальное количество фрагментов
+            
+        Returns:
+            Список текстовых фрагментов
+        """
+        if not segments:
+            return []
+        
+        total = len(segments)
+        if total <= max_samples:
+            # Если сегментов мало, берем все
+            return [seg.get('text', '').strip() for seg in segments if seg.get('text')]
+        
+        # Распределяем индексы по всей длине
+        indices = []
+        if max_samples >= 3:
+            # Начало, середина, конец + равномерно между ними
+            indices.append(0)  # Начало
+            indices.append(total // 2)  # Середина
+            indices.append(total - 1)  # Конец
+            
+            # Добавляем промежуточные точки
+            remaining = max_samples - 3
+            if remaining > 0:
+                step = total // (remaining + 1)
+                for i in range(1, remaining + 1):
+                    idx = step * i
+                    if idx not in indices and idx < total:
+                        indices.append(idx)
+        else:
+            # Просто равномерно распределяем
+            step = total // max_samples
+            indices = [i * step for i in range(max_samples)]
+        
+        # Сортируем индексы
+        indices.sort()
+        
+        # Извлекаем тексты
+        samples = []
+        for idx in indices:
+            if idx < total:
+                text = segments[idx].get('text', '').strip()
+                if text:
+                    samples.append(text)
+        
+        return samples
+    
+    def _get_transcript_preview(self, transcript: str) -> str:
+        """
+        Получает расширенный контекст транскрипции (начало, середина, конец)
+        
+        Args:
+            transcript: Полная транскрипция
+            
+        Returns:
+            Форматированный превью транскрипции
+        """
+        length = len(transcript)
+        
+        if length <= 5000:
+            # Если транскрипция короткая, возвращаем всю
+            return transcript
+        
+        # Берем начало (2000 символов), середину (1500), конец (1500)
+        start = transcript[:2000]
+        
+        middle_start = (length // 2) - 750
+        middle_end = (length // 2) + 750
+        middle = transcript[middle_start:middle_end]
+        
+        end = transcript[-1500:]
+        
+        preview = (
+            "=== НАЧАЛО ВСТРЕЧИ ===\n"
+            f"{start}\n"
+            "...\n\n"
+            "=== СЕРЕДИНА ВСТРЕЧИ ===\n"
+            f"{middle}\n"
+            "...\n\n"
+            "=== КОНЕЦ ВСТРЕЧИ ===\n"
+            f"{end}"
+        )
+        
+        return preview
+    
+    def _get_role_behavior_hint(self, role: str) -> str:
+        """
+        Получает описание типичного поведения для роли
+        
+        Args:
+            role: Роль участника
+            
+        Returns:
+            Описание типичного поведения
+        """
+        role_lower = role.lower()
+        
+        # Руководящие роли
+        if any(keyword in role_lower for keyword in ['руководител', 'менеджер', 'директор', 'лид', 'lead', 'manager']):
+            return "координирует встречу, задает вопросы, принимает решения, распределяет задачи"
+        
+        # Технические роли
+        if any(keyword in role_lower for keyword in ['разработчик', 'программист', 'developer', 'engineer', 'архитектор']):
+            return "объясняет технические детали, предлагает решения, отчитывается о разработке"
+        
+        # Аналитики и исследователи
+        if any(keyword in role_lower for keyword in ['аналитик', 'analyst', 'исследовател', 'researcher']):
+            return "анализирует данные, предоставляет выводы, рекомендует на основе исследований"
+        
+        # Тестировщики и QA
+        if any(keyword in role_lower for keyword in ['тестировщик', 'qa', 'качеств', 'quality']):
+            return "сообщает о багах, тестирует функционал, проверяет качество"
+        
+        # Дизайнеры
+        if any(keyword in role_lower for keyword in ['дизайнер', 'designer', 'ux', 'ui']):
+            return "предлагает дизайн-решения, обсуждает пользовательский опыт"
+        
+        # Продуктовые роли
+        if any(keyword in role_lower for keyword in ['продукт', 'product', 'владелец', 'owner']):
+            return "определяет требования, приоритизирует задачи, представляет бизнес-цели"
+        
+        # Консультанты и эксперты
+        if any(keyword in role_lower for keyword in ['консультант', 'эксперт', 'специалист', 'consultant', 'expert']):
+            return "дает рекомендации, делится экспертизой, консультирует по специальным вопросам"
+        
+        # Общий случай
+        return "участвует в обсуждении, высказывает мнение"
     
     def _build_mapping_prompt(
         self,
@@ -132,69 +260,89 @@ class SpeakerMappingService:
     ) -> str:
         """Формирование промпта для LLM"""
         
-        # Форматируем информацию об участниках
+        # Форматируем информацию об участниках с расширенным контекстом ролей
         participants_list = []
-        for p in participants:
+        for i, p in enumerate(participants, 1):
             name = p['name']
             role = p.get('role', '')
             if role:
-                participants_list.append(f"- {name} ({role})")
+                # Добавляем описание типичного поведения для роли
+                behavior = self._get_role_behavior_hint(role)
+                participants_list.append(f"{i}. {name} ({role})")
+                if behavior:
+                    participants_list.append(f"   Типичное поведение: {behavior}")
             else:
-                participants_list.append(f"- {name}")
+                participants_list.append(f"{i}. {name}")
         participants_str = "\n".join(participants_list)
         
-        # Форматируем информацию о спикерах
+        # Форматируем информацию о спикерах с расширенным набором фрагментов
         speakers_list = []
         for speaker in speakers_info:
             speaker_id = speaker['speaker_id']
-            samples = speaker['text_samples'][:2]  # Первые 2 фрагмента
+            samples = speaker['text_samples'][:5]  # Увеличено до 5 фрагментов
             
             speakers_list.append(f"\n{speaker_id}:")
             if samples:
                 for i, sample in enumerate(samples, 1):
-                    # Обрезаем длинные фрагменты
-                    sample_text = sample[:200] + "..." if len(sample) > 200 else sample
+                    # Увеличена длина фрагмента до 300 символов
+                    sample_text = sample[:300] + "..." if len(sample) > 300 else sample
                     speakers_list.append(f"  Фрагмент {i}: \"{sample_text}\"")
             else:
                 speakers_list.append("  (нет текстовых фрагментов)")
         
         speakers_str = "\n".join(speakers_list)
         
-        # Получаем начало транскрипции для контекста
+        # Получаем расширенный контекст транскрипции (начало, середина, конец)
         formatted_transcript = diarization_data.get('formatted_transcript', '')
         if formatted_transcript:
-            # Берем первые 2000 символов
-            transcript_preview = formatted_transcript[:2000]
-            if len(formatted_transcript) > 2000:
-                transcript_preview += "\n...(транскрипция обрезана)"
+            transcript_preview = self._get_transcript_preview(formatted_transcript)
         else:
-            transcript_preview = transcription_text[:2000]
-            if len(transcription_text) > 2000:
-                transcript_preview += "\n...(транскрипция обрезана)"
+            transcript_preview = self._get_transcript_preview(transcription_text)
         
         prompt = f"""Ты — эксперт по анализу встреч и диалогов. Твоя задача — сопоставить говорящих (Спикер 1, Спикер 2, и т.д.) с реальными участниками встречи.
 
-СПИСОК УЧАСТНИКОВ ВСТРЕЧИ:
+УЧАСТНИКИ С РОЛЕВЫМ КОНТЕКСТОМ:
 {participants_str}
 
 ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:
 {speakers_str}
 
-НАЧАЛО ТРАНСКРИПЦИИ С МЕТКАМИ СПИКЕРОВ:
+ФРАГМЕНТЫ ТРАНСКРИПЦИИ ДЛЯ АНАЛИЗА:
 {transcript_preview}
 
 ЗАДАЧА:
-Проанализируй транскрипцию и сопоставь каждого спикера с участником из списка.
+Проанализируй транскрипцию и сопоставь каждого спикера с участником из списка, используя роли и типичное поведение.
 
 КРИТЕРИИ ДЛЯ СОПОСТАВЛЕНИЯ:
 1. ПРЕДСТАВЛЕНИЯ: Кто представляется в начале? ("Меня зовут...", "Я — ...")
 2. ОБРАЩЕНИЯ: Как участники обращаются друг к другу? ("Иван, как думаешь?")
-3. РОЛИ: Кто ведет встречу? Кто принимает решения? Кто задает вопросы? Кто отчитывается?
-4. СТИЛЬ РЕЧИ: Авторитетный/директивный стиль vs исполнительский/вопросительный
-5. КОНТЕКСТ: Упоминания должностей, отделов, ответственности
+3. РОЛИ И ПОВЕДЕНИЕ: Сопоставь стиль речи с ролью участника (см. "типичное поведение")
+4. СТИЛЬ РЕЧИ: Авторитетный/директивный vs исполнительский/вопросительный
+5. КОНТЕКСТ: Упоминания должностей, отделов, ответственности, экспертизы
+
+ТИПИЧНЫЕ ПАТТЕРНЫ ИДЕНТИФИКАЦИИ:
+
+ОРГАНИЗАТОР/РУКОВОДИТЕЛЬ/МЕНЕДЖЕР:
+- "Давайте начнем", "Переходим к следующему пункту", "Итак, подводя итоги"
+- Задает вопросы всем участникам: "Иван, как у тебя дела с задачей?"
+- Принимает решения: "Хорошо, решено", "Делаем так"
+- Распределяет задачи: "Мария, займись этим"
+
+ДОКЛАДЧИК/ИСПОЛНИТЕЛЬ/СПЕЦИАЛИСТ:
+- "Я сделал...", "У меня готово...", "Я хотел бы показать..."
+- Отвечает на вопросы о статусе своей работы
+- Использует "у меня", "я работал", "я планирую"
+- Объясняет детали своей области ответственности
+
+ЭКСПЕРТ/КОНСУЛЬТАНТ/ТЕХНИЧЕСКИЙ СПЕЦИАЛИСТ:
+- "На мой взгляд", "Я рекомендую", "Лучше сделать так..."
+- Дает советы и рекомендации по специальным вопросам
+- Объясняет технические детали и нюансы
+- Использует профессиональную терминологию
 
 ВАЖНО:
-- Если уверенности в сопоставлении нет — оставь спикера без имени (не включай в результат)
+- ИСПОЛЬЗУЙ РОЛИ из списка участников для повышения точности сопоставления
+- Если уверенности в сопоставлении нет (< 0.7) — не включай спикера в результат
 - Один участник может соответствовать только одному спикеру
 - Если участников больше чем спикеров — сопоставь только тех, кто говорил
 - Если спикеров больше чем участников — сопоставь только тех, в ком уверен
@@ -209,8 +357,8 @@ class SpeakerMappingService:
     "SPEAKER_2": 0.80
   }},
   "reasoning": {{
-    "SPEAKER_1": "Краткое объяснение (представился, роль руководителя)",
-    "SPEAKER_2": "Краткое объяснение"
+    "SPEAKER_1": "Краткое объяснение (представился, роль руководителя, ведет встречу)",
+    "SPEAKER_2": "Краткое объяснение (обращаются 'Мария', отчитывается, роль разработчика)"
   }}
 }}
 
@@ -223,8 +371,8 @@ class SpeakerMappingService:
     "SPEAKER_2": 0.85
   }},
   "reasoning": {{
-    "SPEAKER_1": "Представился в начале, ведет встречу, принимает решения",
-    "SPEAKER_2": "К ней обращаются 'Мария', отчитывается о проделанной работе"
+    "SPEAKER_1": "Представился в начале, ведет встречу, принимает решения — соответствует роли Менеджера",
+    "SPEAKER_2": "К ней обращаются 'Мария', отчитывается о технических задачах — соответствует роли Разработчика"
   }}
 }}
 
