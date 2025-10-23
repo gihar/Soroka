@@ -18,8 +18,10 @@ class QuickActionsUI:
     """Интерфейс быстрых действий"""
     
     @staticmethod
-    def create_main_menu() -> ReplyKeyboardMarkup:
+    def create_main_menu(user_id: Optional[int] = None) -> ReplyKeyboardMarkup:
         """Создать главное меню с быстрыми действиями"""
+        from src.utils.admin_utils import is_admin
+        
         keyboard = [
             [
                 KeyboardButton(text="📤 Загрузить файл"),
@@ -34,6 +36,12 @@ class QuickActionsUI:
                 KeyboardButton(text="💬 Обратная связь")
             ]
         ]
+        
+        # Добавляем кнопку администратора только для админов
+        if user_id and is_admin(user_id):
+            keyboard.append([
+                KeyboardButton(text="🔧 Меню администратора")
+            ])
         
         return ReplyKeyboardMarkup(
             keyboard=keyboard,
@@ -153,6 +161,62 @@ class QuickActionsUI:
         ]
         
         return InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    @staticmethod
+    def create_admin_menu() -> InlineKeyboardMarkup:
+        """Меню администратора"""
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    text="📊 Статистика системы",
+                    callback_data="admin_status"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏥 Проверка здоровья",
+                    callback_data="admin_health"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📈 Производительность",
+                    callback_data="admin_performance"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧹 Управление файлами",
+                    callback_data="admin_cleanup"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎙️ Режим транскрипции",
+                    callback_data="admin_transcription"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 Сброс компонентов",
+                    callback_data="admin_reset"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📥 Экспорт статистики",
+                    callback_data="admin_export"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❓ Справка",
+                    callback_data="admin_help"
+                )
+            ]
+        ]
+        
+        return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 class CommandShortcuts:
@@ -214,21 +278,21 @@ def setup_quick_actions_handlers() -> Router:
                     "🏢 **Профиль: Деловая встреча**\n\n"
                     "Отправьте аудио или видео файл встречи, либо ссылку на файл.\n"
                     "Будет использован шаблон для деловых встреч с автоматическим определением участников.",
-                    reply_markup=QuickActionsUI.create_main_menu()
+                    reply_markup=QuickActionsUI.create_main_menu(message.from_user.id)
                 )
             elif action == "lecture":
                 await message.answer(
                     "🎓 **Профиль: Лекция/Семинар**\n\n"
                     "Отправьте запись учебного занятия.\n"
                     "Будет создан конспект с выделением ключевых моментов.",
-                    reply_markup=QuickActionsUI.create_main_menu()
+                    reply_markup=QuickActionsUI.create_main_menu(message.from_user.id)
                 )
             elif action == "interview":
                 await message.answer(
                     "🎤 **Профиль: Интервью**\n\n"
                     "Отправьте запись интервью.\n"
                     "Будет создана транскрипция с указанием ролей участников.",
-                    reply_markup=QuickActionsUI.create_main_menu()
+                    reply_markup=QuickActionsUI.create_main_menu(message.from_user.id)
                 )
             else:
                 await message.answer(
@@ -402,6 +466,25 @@ def setup_quick_actions_handlers() -> Router:
         await message.answer(
             "💬 **Обратная связь**\n\n"
             "Помогите нам стать лучше! Выберите тип обратной связи:",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+    
+    @router.message(F.text == "🔧 Меню администратора")
+    async def admin_menu_button_handler(message: Message):
+        """Обработчик кнопки меню администратора"""
+        from src.utils.admin_utils import is_admin
+        
+        # Проверяем права администратора
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+        
+        # Показываем меню администратора
+        keyboard = QuickActionsUI.create_admin_menu()
+        await message.answer(
+            "🔧 **Меню администратора**\n\n"
+            "Выберите действие:",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )

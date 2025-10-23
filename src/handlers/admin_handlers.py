@@ -12,6 +12,7 @@ from reliability.health_check import health_checker
 from services.enhanced_llm_service import EnhancedLLMService
 from services.optimized_processing_service import OptimizedProcessingService
 from config import settings
+from src.utils.admin_utils import is_admin
 
 # Импорт сервиса очистки
 try:
@@ -25,13 +26,6 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                         processing_service: OptimizedProcessingService) -> Router:
     """Настройка административных обработчиков"""
     router = Router()
-    
-    # Список ID администраторов (можно вынести в конфиг)
-    ADMIN_IDS = getattr(settings, 'admin_ids', [])
-    
-    def is_admin(user_id: int) -> bool:
-        """Проверить, является ли пользователь администратором"""
-        return user_id in ADMIN_IDS if ADMIN_IDS else True  # Если админы не настроены, разрешаем всем
     
     def escape_markdown(text: str) -> str:
         """Экранировать специальные символы Markdown"""

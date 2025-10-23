@@ -138,6 +138,25 @@ class Settings(BaseSettings):
     queue_update_interval: float = Field(2.0, description="Интервал проверки изменений позиции в очереди (в секундах)")
     queue_cleanup_interval_hours: int = Field(24, description="Интервал очистки завершенных задач из очереди (в часах)")
     
+    # Администраторы
+    admins: List[int] = Field(default_factory=list, description="Список Telegram ID администраторов (через запятую)")
+    
+    @validator('admins', pre=True)
+    def parse_admins(cls, v):
+        """Парсинг списка администраторов из строки или списка"""
+        if not v:
+            return []
+        if isinstance(v, list):
+            return [int(x) for x in v]
+        if isinstance(v, str):
+            # Парсим строку с ID через запятую
+            try:
+                return [int(x.strip()) for x in v.split(',') if x.strip()]
+            except ValueError:
+                logger.warning(f"Некорректный формат ADMINS: {v}. Используется пустой список.")
+                return []
+        return []
+    
     @validator('openai_models', pre=True, always=True)
     def ensure_openai_models(cls, v, values):
         """Гарантируем наличие хотя бы одного пресета OpenAI.

@@ -35,7 +35,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             from ux.quick_actions import QuickActionsUI
             
             welcome_text = MessageBuilder.welcome_message()
-            main_menu = QuickActionsUI.create_main_menu()
+            main_menu = QuickActionsUI.create_main_menu(message.from_user.id)
             
             await message.answer(
                 welcome_text,
