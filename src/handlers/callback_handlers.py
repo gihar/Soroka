@@ -772,7 +772,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             await _safe_callback_answer(callback)
             
             # Не устанавливаем template_id - позволяем ML-селектору выбрать после транскрипции
-            await state.update_data(template_id=None, use_smart_selection=True)
+            await state.update_data(template_id=0, use_smart_selection=True)
             
             await callback.message.edit_text(
                 "🤖 **Умный выбор шаблона активирован!**\n\n"
@@ -797,7 +797,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             await _safe_callback_answer(callback)
             
             # Устанавливаем умный выбор
-            await state.update_data(template_id=None, use_smart_selection=True)
+            await state.update_data(template_id=0, use_smart_selection=True)
             
             await callback.message.edit_text(
                 "🤖 **Умный выбор шаблона**\n\n"
@@ -833,7 +833,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             # Если сохранён умный выбор (template_id = 0)
             if user.default_template_id == 0:
-                await state.update_data(template_id=None, use_smart_selection=True)
+                await state.update_data(template_id=0, use_smart_selection=True)
                 await callback.message.edit_text(
                     "🤖 **Используется Умный выбор шаблона**\n\n"
                     "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
@@ -1001,7 +1001,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             if template_ref == "smart":
                 # Сохраняем умный выбор как шаблон по умолчанию (id = 0)
                 await template_service.set_user_default_template(callback.from_user.id, 0)
-                await state.update_data(template_id=None, use_smart_selection=True)
+                await state.update_data(template_id=0, use_smart_selection=True)
                 
                 await callback.message.edit_text(
                     "✅ **Умный выбор установлен по умолчанию**\n\n"
