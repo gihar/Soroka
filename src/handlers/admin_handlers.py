@@ -3,7 +3,7 @@
 """
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile
 from aiogram.filters import Command
 from loguru import logger
 
@@ -477,5 +477,327 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         except Exception as e:
             logger.error(f"Ошибка в cleanup_force_handler: {e}")
             await message.answer(f"❌ Ошибка при принудительной очистке: {e}")
+    
+    # ============================================================================
+    # Обработчики callback-кнопок административного меню
+    # ============================================================================
+    
+    @router.callback_query(F.data == "admin_status")
+    async def admin_status_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Статистика системы'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            await callback.message.edit_text("🔄 Получаю статистику системы...")
+            
+            report = monitoring_api.format_status_report()
+            await callback.message.edit_text(report, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_status_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при получении статуса: {e}")
+    
+    @router.callback_query(F.data == "admin_health")
+    async def admin_health_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Проверка здоровья'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            await callback.message.edit_text("🔍 Выполняю проверку здоровья системы...")
+            
+            health_results = await health_checker.check_all()
+            
+            report_lines = ["🏥 **Детальная проверка здоровья**\n"]
+            
+            for component, result in health_results.items():
+                status_emoji = {
+                    "healthy": "✅",
+                    "degraded": "⚠️",
+                    "unhealthy": "❌",
+                    "unknown": "❓"
+                }.get(result.status.value, "❓")
+                
+                report_lines.append(f"**{component}:** {status_emoji} {result.status.value}")
+                report_lines.append(f"  └ {result.message}")
+                
+                if result.response_time:
+                    report_lines.append(f"  └ Время ответа: {result.response_time:.3f}с")
+                
+                report_lines.append("")
+            
+            report = "\n".join(report_lines)
+            await callback.message.edit_text(report, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_health_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при проверке здоровья: {e}")
+    
+    @router.callback_query(F.data == "admin_performance")
+    async def admin_performance_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Производительность'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            from performance import (
+                performance_cache, metrics_collector, memory_optimizer, task_pool
+            )
+            
+            await callback.answer()
+            await callback.message.edit_text("📊 Собираю данные о производительности...")
+            
+            # Собираем статистику
+            cache_stats = performance_cache.get_stats()
+            memory_stats = memory_optimizer.get_optimization_stats()
+            task_stats = task_pool.get_stats()
+            metrics_stats = metrics_collector.get_current_stats()
+            
+            # Форматируем отчет
+            report = (
+                "📊 **Статистика производительности**\n\n"
+                
+                "💾 **Кэш:**\n"
+                f"• Hit Rate: {cache_stats['hit_rate_percent']}%\n"
+                f"• Память: {cache_stats['memory_usage_mb']}MB "
+                f"({cache_stats['memory_usage_percent']}%)\n"
+                f"• Записей: {cache_stats['memory_entries']} + {cache_stats['disk_entries']} (диск)\n\n"
+                
+                "🧠 **Память:**\n"
+                f"• Система: {memory_stats['current_memory']['percent']}%\n"
+                f"• Процесс: {memory_stats['current_memory']['process_mb']:.1f}MB\n"
+                f"• Автооптимизация: {'Вкл' if memory_stats['is_optimizing'] else 'Выкл'}\n\n"
+                
+                "⚡ **Задачи:**\n"
+                f"• Активные: {task_stats['active_tasks']}\n"
+                f"• Макс параллельно: {task_stats['max_concurrent']}\n"
+                f"• Успешность: {task_stats['success_rate']:.1f}%\n\n"
+                
+                "📈 **Обработка:**\n"
+                f"• Запросов за час: {metrics_stats['processing']['requests_1h']}\n"
+                f"• Успешность: {metrics_stats['processing']['success_rate_percent']}%\n"
+                f"• Среднее время: {metrics_stats['processing']['avg_duration_seconds']}с\n"
+                f"• Эффективность: {metrics_stats['processing']['avg_efficiency_ratio']}\n"
+            )
+            
+            await callback.message.edit_text(report, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_performance_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при получении статистики: {e}")
+    
+    @router.callback_query(F.data == "admin_cleanup")
+    async def admin_cleanup_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Управление файлами'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            
+            if not CLEANUP_SERVICE_AVAILABLE:
+                await callback.message.edit_text("❌ Сервис очистки недоступен.")
+                return
+            
+            # Получаем статистику
+            stats = cleanup_service.get_cleanup_stats()
+            
+            # Формируем отчет
+            report = (
+                "📁 **Статистика файлов**\n\n"
+                f"📂 Временные файлы: {stats['temp_files']} ({stats['temp_size_mb']:.1f}MB)\n"
+                f"🗂️ Кэш файлы: {stats['cache_files']} ({stats['cache_size_mb']:.1f}MB)\n\n"
+                f"⏰ Старые временные файлы: {stats['old_temp_files']}\n"
+                f"⏰ Старые кэш файлы: {stats['old_cache_files']}\n\n"
+                f"⚙️ **Настройки:**\n"
+                f"• Интервал очистки: {settings.cleanup_interval_minutes} мин\n"
+                f"• Макс. возраст временных файлов: {settings.temp_file_max_age_hours} ч\n"
+                f"• Макс. возраст кэш файлов: {settings.cache_max_age_hours} ч\n"
+                f"• Автоочистка: {'✅' if settings.enable_cleanup else '❌'}\n\n"
+                "Используйте команду /cleanup_force для принудительной очистки"
+            )
+            
+            await callback.message.edit_text(report, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_cleanup_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при получении статистики: {e}")
+    
+    @router.callback_query(F.data == "admin_transcription")
+    async def admin_transcription_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Режим транскрипции'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            
+            # Создаем клавиатуру для выбора режима
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'local' else ''}🏠 Локальная (Whisper)",
+                    callback_data="set_transcription_mode_local"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'cloud' else ''}☁️ Облачная (Groq)",
+                    callback_data="set_transcription_mode_cloud"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'hybrid' else ''}🔄 Гибридная (Groq + диаризация)",
+                    callback_data="set_transcription_mode_hybrid"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'speechmatics' else ''}🎯 Speechmatics",
+                    callback_data="set_transcription_mode_speechmatics"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'deepgram' else ''}🎤 Deepgram",
+                    callback_data="set_transcription_mode_deepgram"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{'✅ ' if settings.transcription_mode == 'leopard' else ''}🐆 Leopard (Picovoice)",
+                    callback_data="set_transcription_mode_leopard"
+                )]
+            ])
+            
+            current_mode = settings.transcription_mode
+            mode_descriptions = {
+                "local": "Локальная транскрипция через Whisper",
+                "cloud": "Облачная транскрипция через Groq API",
+                "hybrid": "Гибридная: облачная транскрипция + локальная диаризация",
+                "speechmatics": "Транскрипция и диаризация через Speechmatics API",
+                "deepgram": "Транскрипция и диаризация через Deepgram API",
+                "leopard": "Локальная транскрипция через Picovoice Leopard"
+            }
+            
+            current_description = mode_descriptions.get(current_mode, "Неизвестный режим")
+            
+            await callback.message.edit_text(
+                f"🎙️ **Текущий режим транскрипции:** {current_mode}\n"
+                f"📝 **Описание:** {current_description}\n\n"
+                f"Выберите новый режим:",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в admin_transcription_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при получении режимов транскрипции: {e}")
+    
+    @router.callback_query(F.data == "admin_reset")
+    async def admin_reset_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Сброс компонентов'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            await callback.message.edit_text("🔄 Сбрасываю компоненты надежности...")
+            
+            # Сбрасываем компоненты
+            await llm_service.reset_reliability_components()
+            await processing_service.reset_reliability_components()
+            
+            # Сбрасываем health checker
+            for name, cb in health_checker.component_health.items():
+                cb.consecutive_failures = 0
+                cb.status = health_checker.HealthStatus.UNKNOWN
+            
+            await callback.message.edit_text("✅ Компоненты надежности сброшены успешно.")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_reset_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при сбросе: {e}")
+    
+    @router.callback_query(F.data == "admin_export")
+    async def admin_export_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Экспорт статистики'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        try:
+            await callback.answer()
+            await callback.message.edit_text("📥 Экспортирую статистику...")
+            
+            # Экспортируем статистику
+            json_stats = monitoring_api.export_stats_json()
+            
+            # Отправляем как файл
+            file_input = BufferedInputFile(
+                json_stats.encode('utf-8'),
+                filename="bot_stats.json"
+            )
+            
+            await callback.message.answer_document(
+                file_input,
+                caption="📊 Экспорт статистики системы"
+            )
+            
+            await callback.message.delete()
+        except Exception as e:
+            logger.error(f"Ошибка в admin_export_callback: {e}")
+            await callback.message.edit_text(f"❌ Ошибка при экспорте: {e}")
+    
+    @router.callback_query(F.data == "admin_help")
+    async def admin_help_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Справка'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        await callback.answer()
+        
+        help_text = """
+🔧 **Административные команды**
+
+**Мониторинг:**
+• `/status` - общий статус системы
+• `/health` - детальная проверка здоровья
+• `/stats` - детальная статистика
+• `/export_stats` - экспорт статистики в JSON
+
+**Производительность:**
+• `/performance` - статистика производительности
+• `/optimize` - принудительная оптимизация памяти
+
+**Управление:**
+• `/reset_reliability` - сброс компонентов надежности
+• `/transcription_mode` - переключение режима транскрипции
+
+**Очистка файлов:**
+• `/cleanup` - статистика файлов и настройки очистки
+• `/cleanup_force` - принудительная очистка всех временных файлов
+
+**Справка:**
+• `/admin_help` - эта справка
+
+**Примечание:** Административные команды доступны только авторизованным пользователям.
+        """
+        
+        await callback.message.edit_text(help_text, parse_mode="Markdown")
+    
+    @router.callback_query(F.data == "admin_back_to_main")
+    async def admin_back_to_main_callback(callback: CallbackQuery):
+        """Обработчик кнопки 'Вернуться в главное меню'"""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+        
+        await callback.answer()
+        
+        from src.ux.quick_actions import QuickActionsUI
+        
+        # Показываем меню администратора заново
+        keyboard = QuickActionsUI.create_admin_menu()
+        await callback.message.edit_text(
+            "🔧 **Меню администратора**\n\n"
+            "Выберите действие:",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
     
     return router

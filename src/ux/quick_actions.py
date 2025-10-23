@@ -213,6 +213,12 @@ class QuickActionsUI:
                     text="❓ Справка",
                     callback_data="admin_help"
                 )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Вернуться в главное меню",
+                    callback_data="admin_back_to_main"
+                )
             ]
         ]
         
