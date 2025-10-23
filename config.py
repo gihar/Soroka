@@ -3,8 +3,8 @@
 """
 
 import os
-from pydantic_settings import BaseSettings
-from pydantic import Field, validator, BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, validator, field_validator, BaseModel
 from typing import Optional, List
 
 # Предотвращаем конфликты при форкинге процессов после использования токенизаторов
@@ -141,11 +141,15 @@ class Settings(BaseSettings):
     # Администраторы
     admins: List[int] = Field(default_factory=list, description="Список Telegram ID администраторов (через запятую)")
     
-    @validator('admins', pre=True)
+    @field_validator('admins', mode='before')
+    @classmethod
     def parse_admins(cls, v):
         """Парсинг списка администраторов из строки или списка"""
         if not v:
             return []
+        # Если уже int - оборачиваем в список
+        if isinstance(v, int):
+            return [v]
         if isinstance(v, list):
             return [int(x) for x in v]
         if isinstance(v, str):
@@ -153,6 +157,7 @@ class Settings(BaseSettings):
             try:
                 return [int(x.strip()) for x in v.split(',') if x.strip()]
             except ValueError:
+                from loguru import logger
                 logger.warning(f"Некорректный формат ADMINS: {v}. Используется пустой список.")
                 return []
         return []
@@ -181,9 +186,10 @@ class Settings(BaseSettings):
         }
         return [default_preset]
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 
 settings = Settings()
