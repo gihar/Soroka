@@ -9,6 +9,8 @@ from functools import wraps
 from loguru import logger
 import random
 
+from src.exceptions.processing import LLMInsufficientCreditsError
+
 
 class RetryConfig:
     """Конфигурация для повторных попыток"""
@@ -52,6 +54,9 @@ class RetryManager:
     
     def is_retryable_exception(self, exception: Exception) -> bool:
         """Проверить, стоит ли повторять при данном исключении"""
+        # Никогда не повторяем при недостатке кредитов
+        if isinstance(exception, LLMInsufficientCreditsError):
+            return False
         return any(isinstance(exception, exc_type) for exc_type in self.config.retryable_exceptions)
     
     async def execute_with_retry(

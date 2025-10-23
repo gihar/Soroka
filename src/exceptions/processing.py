@@ -75,3 +75,17 @@ class LLMError(BotException):
             error_code="LLM_ERROR",
             details={"provider": provider, "model": model}
         )
+
+
+class LLMInsufficientCreditsError(LLMError):
+    """Ошибка недостатка кредитов на LLM API"""
+    
+    def __init__(self, message: str, provider: str = None, model: str = None):
+        # Форматируем сообщение для пользователя
+        user_message = f"Недостаточно кредитов на токены для LLM: {message}"
+        super().__init__(
+            message=user_message,
+            provider=provider,
+            model=model
+        )
+        self.error_code = "LLM_INSUFFICIENT_CREDITS"

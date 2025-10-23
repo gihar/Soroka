@@ -23,6 +23,9 @@ from src.prompts.specialized_prompts import (
 # Импорт для retry логики
 from src.reliability.retry import RetryManager, LLM_RETRY_CONFIG
 
+# Импорт исключений
+from src.exceptions.processing import LLMInsufficientCreditsError
+
 if TYPE_CHECKING:
     from src.services.segmentation_service import TranscriptionSegment
 
@@ -404,7 +407,30 @@ class OpenAIProvider(LLMProvider):
                     response_format={"type": "json_object"},
                     extra_headers=extra_headers
                 )
-            response = await _call_openai()
+            
+            try:
+                response = await _call_openai()
+            except openai.APIStatusError as e:
+                # Проверяем на ошибку 402 - недостаточно кредитов
+                if e.status_code == 402:
+                    error_message = e.message
+                    # Пытаемся извлечь более подробное сообщение из тела ответа
+                    if hasattr(e, 'response') and e.response:
+                        try:
+                            error_body = e.response.json()
+                            if 'error' in error_body and 'message' in error_body['error']:
+                                error_message = error_body['error']['message']
+                        except:
+                            pass
+                    logger.error(f"Недостаточно кредитов для LLM: {error_message}")
+                    raise LLMInsufficientCreditsError(
+                        message=error_message,
+                        provider="openai",
+                        model=selected_model
+                    )
+                # Другие ошибки API пробрасываем дальше
+                raise
+            
             logger.info("Получен ответ от OpenAI API")
             
             content = response.choices[0].message.content
@@ -946,7 +972,29 @@ async def generate_protocol_two_stage(
                 extra_headers=extra_headers
             )
         
-        response1 = await _call_openai_stage1()
+        try:
+            response1 = await _call_openai_stage1()
+        except openai.APIStatusError as e:
+            # Проверяем на ошибку 402 - недостаточно кредитов
+            if e.status_code == 402:
+                error_message = e.message
+                # Пытаемся извлечь более подробное сообщение из тела ответа
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        error_body = e.response.json()
+                        if 'error' in error_body and 'message' in error_body['error']:
+                            error_message = error_body['error']['message']
+                    except:
+                        pass
+                logger.error(f"Недостаточно кредитов для LLM (этап 1): {error_message}")
+                raise LLMInsufficientCreditsError(
+                    message=error_message,
+                    provider="openai",
+                    model=selected_model
+                )
+            # Другие ошибки API пробрасываем дальше
+            raise
+        
         content1 = response1.choices[0].message.content
         
         try:
@@ -980,7 +1028,29 @@ async def generate_protocol_two_stage(
                 extra_headers=extra_headers
             )
         
-        response2 = await _call_openai_stage2()
+        try:
+            response2 = await _call_openai_stage2()
+        except openai.APIStatusError as e:
+            # Проверяем на ошибку 402 - недостаточно кредитов
+            if e.status_code == 402:
+                error_message = e.message
+                # Пытаемся извлечь более подробное сообщение из тела ответа
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        error_body = e.response.json()
+                        if 'error' in error_body and 'message' in error_body['error']:
+                            error_message = error_body['error']['message']
+                    except:
+                        pass
+                logger.error(f"Недостаточно кредитов для LLM (этап 2): {error_message}")
+                raise LLMInsufficientCreditsError(
+                    message=error_message,
+                    provider="openai",
+                    model=selected_model
+                )
+            # Другие ошибки API пробрасываем дальше
+            raise
+        
         content2 = response2.choices[0].message.content
         finish_reason = response2.choices[0].finish_reason
         
@@ -1198,7 +1268,29 @@ async def _process_single_segment(
         )
     
     # Выполняем запрос с retry логикой
-    response = await retry_manager.execute_with_retry(_call_openai_api)
+    try:
+        response = await retry_manager.execute_with_retry(_call_openai_api)
+    except openai.APIStatusError as e:
+        # Проверяем на ошибку 402 - недостаточно кредитов
+        if e.status_code == 402:
+            error_message = e.message
+            # Пытаемся извлечь более подробное сообщение из тела ответа
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_body = e.response.json()
+                    if 'error' in error_body and 'message' in error_body['error']:
+                        error_message = error_body['error']['message']
+                except:
+                    pass
+            logger.error(f"Недостаточно кредитов для LLM: {error_message}")
+            raise LLMInsufficientCreditsError(
+                message=error_message,
+                provider="openai",
+                model=selected_model
+            )
+        # Другие ошибки API пробрасываем дальше
+        raise
+    
     content = response.choices[0].message.content
     
     # Парсим JSON ответ
@@ -1340,6 +1432,11 @@ async def generate_protocol_chain_of_thought(
         # Сортируем результаты по индексу сегмента для сохранения порядка
         for result in results:
             if isinstance(result, Exception):
+                # Если это ошибка недостатка кредитов - немедленно прерываем
+                if isinstance(result, LLMInsufficientCreditsError):
+                    logger.error(f"Обнаружена ошибка недостатка кредитов, прерываем обработку")
+                    raise result
+                
                 failed_count += 1
                 logger.error(f"Ошибка при обработке сегмента: {result}")
                 # Добавляем пустой результат
@@ -1380,7 +1477,29 @@ async def generate_protocol_chain_of_thought(
                 extra_headers=extra_headers
             )
         
-        response_synthesis = await _call_openai_synthesis()
+        try:
+            response_synthesis = await _call_openai_synthesis()
+        except openai.APIStatusError as e:
+            # Проверяем на ошибку 402 - недостаточно кредитов
+            if e.status_code == 402:
+                error_message = e.message
+                # Пытаемся извлечь более подробное сообщение из тела ответа
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        error_body = e.response.json()
+                        if 'error' in error_body and 'message' in error_body['error']:
+                            error_message = error_body['error']['message']
+                    except:
+                        pass
+                logger.error(f"Недостаточно кредитов для LLM (синтез): {error_message}")
+                raise LLMInsufficientCreditsError(
+                    message=error_message,
+                    provider="openai",
+                    model=selected_model
+                )
+            # Другие ошибки API пробрасываем дальше
+            raise
+        
         content_synthesis = response_synthesis.choices[0].message.content
         
         try:
