@@ -16,6 +16,11 @@ class SpeakerMappingService:
     
     def __init__(self):
         self.confidence_threshold = getattr(settings, 'speaker_mapping_confidence_threshold', 0.7)
+        self.secondary_confidence_threshold = getattr(
+            settings,
+            'speaker_mapping_secondary_confidence_threshold',
+            0.5
+        )
     
     async def map_speakers_to_participants(
         self,
@@ -551,14 +556,25 @@ class SpeakerMappingService:
                 )
                 continue
             
-            # Проверяем confidence score
+            # Проверяем confidence score с дополнительным порогом
             confidence = confidence_scores.get(speaker_id, 0.0)
             if confidence < self.confidence_threshold:
+                if confidence < self.secondary_confidence_threshold:
+                    logger.info(
+                        f"Пропускаем {speaker_id} → {display_name}: уверенность "
+                        f"{confidence:.2f} ниже минимального порога "
+                        f"{self.secondary_confidence_threshold:.2f}"
+                    )
+                    continue
                 logger.info(
-                    f"Низкая уверенность для {speaker_id} → {display_name}: "
-                    f"{confidence:.2f} < {self.confidence_threshold}"
+                    f"Принимаем {speaker_id} → {display_name} с пониженной уверенностью "
+                    f"{confidence:.2f} (основной порог {self.confidence_threshold:.2f})"
                 )
-                continue
+            else:
+                logger.debug(
+                    f"Сопоставление {speaker_id} → {display_name}: уверенность "
+                    f"{confidence:.2f}"
+                )
             
             # Добавляем в валидированный mapping
             validated_mapping[speaker_id] = display_name
