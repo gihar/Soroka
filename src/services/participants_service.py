@@ -293,9 +293,41 @@ class ParticipantsService:
         
         return "\n".join(lines)
     
+    def convert_full_name_to_short(self, full_name: str) -> str:
+        """
+        Преобразует полное ФИО в формат "Имя Фамилия" без отчества
+        
+        Args:
+            full_name: Полное имя (например "Тимченко Алексей Александрович" или "Алексей Тимченко")
+            
+        Returns:
+            Имя в формате "Имя Фамилия" (например "Алексей Тимченко")
+        """
+        parts = full_name.strip().split()
+        
+        if len(parts) == 3:
+            # Формат: Фамилия Имя Отчество → Имя Фамилия
+            return f"{parts[1]} {parts[0]}"
+        elif len(parts) == 2:
+            # Формат: либо "Имя Фамилия", либо "Фамилия Имя"
+            # Определяем по заглавной букве и типичным паттернам
+            # Если первое слово заканчивается на -ов/-ова/-ин/-ина/-ский/-ская - это фамилия
+            first_word = parts[0]
+            surname_endings = ('ов', 'ова', 'ев', 'ева', 'ин', 'ина', 'ский', 'ская', 'ко', 'енко', 'ук')
+            
+            if any(first_word.lower().endswith(ending) for ending in surname_endings):
+                # Фамилия Имя → Имя Фамилия
+                return f"{parts[1]} {parts[0]}"
+            else:
+                # Уже в формате Имя Фамилия
+                return full_name
+        else:
+            # Одно слово или больше 3 - возвращаем как есть
+            return full_name
+    
     def format_participants_for_llm(self, participants: List[Dict[str, str]]) -> str:
         """
-        Форматирование списка участников для передачи в LLM
+        Форматирование списка участников для передачи в LLM в формате "Имя Фамилия"
         
         Args:
             participants: Список участников
@@ -306,13 +338,15 @@ class ParticipantsService:
         lines = []
         
         for participant in participants:
-            name = participant["name"]
+            full_name = participant["name"]
+            # Преобразуем в формат "Имя Фамилия"
+            short_name = self.convert_full_name_to_short(full_name)
             role = participant.get("role", "")
             
             if role:
-                lines.append(f"- {name} ({role})")
+                lines.append(f"- {short_name} ({role})")
             else:
-                lines.append(f"- {name}")
+                lines.append(f"- {short_name}")
         
         return "\n".join(lines)
     
