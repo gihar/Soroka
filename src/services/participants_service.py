@@ -4,7 +4,7 @@
 
 import re
 import csv
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from pathlib import Path
 from loguru import logger
 
@@ -325,6 +325,116 @@ class ParticipantsService:
             # Одно слово или больше 3 - возвращаем как есть
             return full_name
     
+    def normalize_name_for_matching(self, name: str) -> str:
+        """
+        Приводит имя к каноническому виду для сопоставления
+        
+        Args:
+            name: Строка с именем
+        
+        Returns:
+            Нормализованная строка в нижнем регистре
+        """
+        if not name:
+            return ""
+        
+        # Приводим ё к е для устойчивых сопоставлений
+        normalized = (
+            name.replace("ё", "е")
+            .replace("Ё", "Е")
+        )
+        # Удаляем пунктуацию, оставляем буквы, цифры, пробелы и дефисы
+        normalized = re.sub(r"[^\w\s\-]", " ", normalized, flags=re.UNICODE)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip().lower()
+    
+    def generate_name_variants(self, full_name: str) -> Set[str]:
+        """
+        Формирует набор допустимых вариантов имени для сопоставления
+        
+        Args:
+            full_name: Полное имя участника
+        
+        Returns:
+            Множество нормализованных вариантов имени
+        """
+        variants: Set[str] = set()
+        
+        normalized_full = self.normalize_name_for_matching(full_name)
+        if not normalized_full:
+            return variants
+        
+        variants.add(normalized_full)
+        
+        short_name = self.convert_full_name_to_short(full_name)
+        normalized_short = self.normalize_name_for_matching(short_name)
+        if normalized_short:
+            variants.add(normalized_short)
+        
+        # Собираем токены из короткого и полного вариантов
+        token_sources = []
+        if normalized_short:
+            token_sources.append(normalized_short.split())
+        if normalized_full and normalized_full != normalized_short:
+            token_sources.append(normalized_full.split())
+        
+        for tokens in token_sources:
+            if not tokens:
+                continue
+            
+            # Основной вариант: первые два слова
+            if len(tokens) >= 2:
+                first, second = tokens[0], tokens[1]
+                variants.add(f"{first} {second}".strip())
+                variants.add(f"{second} {first}".strip())
+                variants.add(first)
+                variants.add(second)
+            else:
+                variants.add(tokens[0])
+        
+        # Удаляем пустые варианты
+        variants = {variant for variant in variants if variant}
+        return variants
+    
+    def build_name_lookup(self, participants: List[Dict[str, str]]) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
+        """
+        Создает карту для сопоставления нормализованных имен с участниками
+        
+        Args:
+            participants: Список участников
+        
+        Returns:
+            Кортеж из словаря вариантов и множества неоднозначных вариантов
+        """
+        lookup: Dict[str, Dict[str, Any]] = {}
+        ambiguous_variants: Set[str] = set()
+        
+        for index, participant in enumerate(participants):
+            full_name = participant.get("name", "") or ""
+            if not full_name.strip():
+                continue
+            
+            display_name = self.convert_full_name_to_short(full_name).strip() or full_name.strip()
+            display_name = re.sub(r"\s+", " ", display_name)
+            
+            variants = self.generate_name_variants(full_name)
+            for variant in variants:
+                if not variant:
+                    continue
+                
+                if variant in lookup and lookup[variant]["index"] != index:
+                    ambiguous_variants.add(variant)
+                    lookup.pop(variant, None)
+                    continue
+                
+                lookup[variant] = {
+                    "index": index,
+                    "display_name": display_name,
+                    "original_name": full_name.strip(),
+                }
+        
+        return lookup, ambiguous_variants
+    
     def format_participants_for_llm(self, participants: List[Dict[str, str]]) -> str:
         """
         Форматирование списка участников для передачи в LLM в формате "Имя Фамилия"
@@ -367,5 +477,3 @@ class ParticipantsService:
 
 # Глобальный экземпляр сервиса
 participants_service = ParticipantsService()
-
-

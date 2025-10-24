@@ -4,7 +4,7 @@
 
 import json
 import asyncio
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, Set
 from loguru import logger
 
 from llm_providers import llm_manager
@@ -490,17 +490,20 @@ class SpeakerMappingService:
     ) -> Dict[str, str]:
         """Валидация результата сопоставления"""
         
-        validated_mapping = {}
+        validated_mapping: Dict[str, str] = {}
         
         if not mapping_result:
             return validated_mapping
         
+        from src.services.participants_service import participants_service
+
         # Извлекаем confidence scores
         confidence_scores = mapping_result.get('confidence', {})
         reasoning = mapping_result.get('reasoning', {})
         
-        # Получаем список имен участников
-        participant_names = [p['name'] for p in participants]
+        # Строим карту имен для сопоставления
+        name_lookup, ambiguous_variants = participants_service.build_name_lookup(participants)
+        used_display_names: Set[str] = set()
         
         # Валидируем каждое сопоставление
         for speaker_id, participant_name in mapping_result.items():
@@ -508,10 +511,43 @@ class SpeakerMappingService:
             if speaker_id in ['confidence', 'reasoning']:
                 continue
             
-            # Проверяем что участник существует в списке
-            if participant_name not in participant_names:
+            candidate_variants = participants_service.generate_name_variants(participant_name)
+            normalized_raw = participants_service.normalize_name_for_matching(participant_name)
+            if normalized_raw:
+                candidate_variants.add(normalized_raw)
+            
+            ordered_candidates = sorted(
+                candidate_variants,
+                key=lambda value: (-len(value.split()), -len(value))
+            )
+            
+            matched_entry = None
+            for candidate in ordered_candidates:
+                if not candidate:
+                    continue
+                
+                if candidate in ambiguous_variants:
+                    logger.info(
+                        f"Пропускаем вариант '{candidate}' для {speaker_id} — неоднозначное совпадение"
+                    )
+                    continue
+                
+                entry = name_lookup.get(candidate)
+                if entry:
+                    matched_entry = entry
+                    break
+            
+            if not matched_entry:
                 logger.warning(
-                    f"Участник '{participant_name}' для {speaker_id} не найден в списке"
+                    f"Участник '{participant_name}' для {speaker_id} не найден среди переданных участников"
+                )
+                continue
+            
+            display_name = matched_entry["display_name"]
+            
+            if display_name in used_display_names:
+                logger.info(
+                    f"Участник '{display_name}' уже сопоставлен с другим спикером, пропускаем {speaker_id}"
                 )
                 continue
             
@@ -519,18 +555,19 @@ class SpeakerMappingService:
             confidence = confidence_scores.get(speaker_id, 0.0)
             if confidence < self.confidence_threshold:
                 logger.info(
-                    f"Низкая уверенность для {speaker_id} → {participant_name}: "
+                    f"Низкая уверенность для {speaker_id} → {display_name}: "
                     f"{confidence:.2f} < {self.confidence_threshold}"
                 )
                 continue
             
             # Добавляем в валидированный mapping
-            validated_mapping[speaker_id] = participant_name
+            validated_mapping[speaker_id] = display_name
+            used_display_names.add(display_name)
             
             # Логируем reasoning если есть
             if speaker_id in reasoning:
                 logger.info(
-                    f"Сопоставление {speaker_id} → {participant_name}: "
+                    f"Сопоставление {speaker_id} → {display_name}: "
                     f"{reasoning[speaker_id]}"
                 )
         
@@ -539,5 +576,3 @@ class SpeakerMappingService:
 
 # Глобальный экземпляр сервиса
 speaker_mapping_service = SpeakerMappingService()
-
-
