@@ -112,7 +112,7 @@ class ProgressTracker:
         
         await self.update_display(force=True)
     
-    async def complete_stage(self, stage_id: str, compression_info: dict = None):
+    async def complete_stage(self, stage_id: str):
         """Завершить этап"""
         if stage_id not in self.stages:
             return
@@ -127,41 +127,10 @@ class ProgressTracker:
             
         logger.info(f"Завершен этап: {stage.name}")
         
-        # Показываем информацию о сжатии только если есть значительная экономия
-        if compression_info and compression_info.get("compressed", False):
-            ratio = compression_info.get("compression_ratio", 0)
-            if ratio > 20:  # Показываем только если сжатие > 20%
-                await self._show_compression_info(compression_info)
-                return
-        
         await self.update_display()
     
-    async def _show_compression_info(self, compression_info: dict):
-        """Показать упрощенную информацию о сжатии"""
-        try:
-            original_mb = compression_info.get("original_size_mb", 0)
-            compressed_mb = compression_info.get("compressed_size_mb", 0)
-            ratio = compression_info.get("compression_ratio", 0)
-            
-            compression_message = (
-                f"🗜️ **Файл оптимизирован!**\n\n"
-                f"📊 Размер уменьшен на {ratio:.0f}%\n"
-                f"({original_mb:.1f}MB → {compressed_mb:.1f}MB)\n\n"
-                f"🔄 Продолжаю обработку..."
-            )
-            
-            await safe_edit_text(self.message, compression_message, parse_mode="Markdown")
-            
-            # Через 2 секунды возвращаемся к обычному отображению
-            await asyncio.sleep(2)
-            await self.update_display()
-            
-        except Exception as e:
-            logger.error(f"Ошибка отображения информации о сжатии: {e}")
-            await self.update_display()
     
-    async def update_stage_progress(self, stage_id: str, progress_percent: float = None,
-                                   compression_info: dict = None):
+    async def update_stage_progress(self, stage_id: str, progress_percent: float = None):
         """Обновить прогресс конкретного этапа"""
         if stage_id not in self.stages or stage_id != self.current_stage:
             return
@@ -178,12 +147,6 @@ class ProgressTracker:
                 elif p > 100:
                     p = 100.0
                 self.stages[stage_id].progress = p
-
-        # Если передана информация о сжатии — показываем её при существенной экономии
-        if compression_info and compression_info.get("compressed", False):
-            logger.info(f"Получена информация о сжатии: {compression_info}")
-            await self._show_compression_info(compression_info)
-            return
 
         await self.update_display()
     
@@ -208,6 +171,11 @@ class ProgressTracker:
     async def update_display(self, final: bool = False, force: bool = False):
         """Обновить отображение прогресса"""
         try:
+            # Проверяем, что сообщение существует
+            if self.message is None:
+                logger.warning("Попытка обновить прогресс без сообщения")
+                return
+                
             # Исключаем гонки между параллельными вызовами
             async with self._edit_lock:
                 # Планируем следующий кадр спиннера, но применяем его только при реальном редактировании
@@ -330,6 +298,9 @@ class ProgressTracker:
         )
         
         try:
+            if self.message is None:
+                logger.warning("Попытка отобразить ошибку без сообщения")
+                return
             await safe_edit_text(self.message, text, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
@@ -356,6 +327,10 @@ class ProgressFactory:
             "🔄 **Начинаю обработку файла...**\n\n⏳ Инициализация...",
             parse_mode="Markdown"
         )
+        
+        # Если сообщение не удалось создать, логируем ошибку, но продолжаем
+        if initial_message is None:
+            logger.error("Не удалось создать начальное сообщение для трекера прогресса")
         
         tracker = ProgressTracker(bot, chat_id, initial_message)
         tracker.setup_default_stages()

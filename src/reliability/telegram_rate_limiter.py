@@ -227,7 +227,16 @@ class TelegramRateLimiter:
                     await asyncio.sleep(wait_time)
                 
                 # Отправляем сообщение
-                result = await send_func(*args, **kwargs)
+                # Специальная обработка для bot.send_message - chat_id должен быть позиционным аргументом
+                if hasattr(send_func, '__self__') and hasattr(send_func.__self__, 'send_message'):
+                    # Это bot.send_message - chat_id должен быть первым позиционным аргументом
+                    if chat_id is not None:
+                        result = await send_func(chat_id, *args, **kwargs)
+                    else:
+                        result = await send_func(*args, **kwargs)
+                else:
+                    # Для других функций (message.answer, message.edit_text) используем стандартный подход
+                    result = await send_func(*args, **kwargs)
                 
                 # Регистрируем успешную отправку
                 await self.register_sent_message()
