@@ -168,6 +168,7 @@ class DeepgramService:
         speakers_text = {}
         formatted_transcript = ""
         speakers_summary = ""
+        diarization_data: Optional[Dict[str, Any]] = None
         
         try:
             # Получаем результаты
@@ -184,32 +185,55 @@ class DeepgramService:
             # Если включена диаризация, обрабатываем utterances (высказывания)
             utterances = results.get("utterances", [])
             if enable_diarization and utterances:
+                speaker_labels: Dict[Any, str] = {}
+                segments = []
+                
                 for utterance in utterances:
-                    speaker = utterance.get("speaker", 0)
-                    speaker_id = f"Speaker {speaker}"
-                    utterance_text = utterance.get("transcript", "")
+                    raw_speaker = utterance.get("speaker")
+                    # Присваиваем стабильный label вида SPEAKER_N, порядок соответствует появлению
+                    if raw_speaker not in speaker_labels:
+                        speaker_labels[raw_speaker] = f"SPEAKER_{len(speaker_labels) + 1}"
+                    speaker_id = speaker_labels[raw_speaker]
+                    
+                    utterance_text = (utterance.get("transcript") or "").strip()
+                    start_time = utterance.get("start")
+                    end_time = utterance.get("end")
                     
                     if speaker_id not in speakers_text:
-                        speakers_text[speaker_id] = ""
-                    
-                    # Добавляем текст говорящего
-                    if speakers_text[speaker_id]:
-                        speakers_text[speaker_id] += " " + utterance_text
-                    else:
                         speakers_text[speaker_id] = utterance_text
+                    elif utterance_text:
+                        speakers_text[speaker_id] = f"{speakers_text[speaker_id]} {utterance_text}".strip()
+                    
+                    segments.append({
+                        "speaker": speaker_id,
+                        "start": start_time,
+                        "end": end_time,
+                        "text": utterance_text,
+                    })
+                
+                speakers_list = list(speaker_labels.values())
                 
                 # Создаем форматированную транскрипцию
                 formatted_lines = []
-                for speaker, text in speakers_text.items():
-                    formatted_lines.append(f"{speaker}: {text}")
+                for speaker in speakers_list:
+                    speaker_text = speakers_text.get(speaker, "").strip()
+                    if speaker_text:
+                        formatted_lines.append(f"{speaker}: {speaker_text}")
                 formatted_transcript = "\n\n".join(formatted_lines)
                 
                 # Создаем сводку о говорящих
-                speakers_list = list(speakers_text.keys())
                 speakers_summary = f"Общее количество говорящих: {len(speakers_list)}\n\n"
                 for speaker in speakers_list:
-                    word_count = len(speakers_text[speaker].split())
+                    word_count = len(speakers_text.get(speaker, "").split())
                     speakers_summary += f"{speaker}: {word_count} слов\n"
+                
+                diarization_data = {
+                    "segments": segments,
+                    "speakers": speakers_list,
+                    "total_speakers": len(speakers_list),
+                    "formatted_transcript": formatted_transcript,
+                    "speakers_text": speakers_text,
+                }
             else:
                 formatted_transcript = transcription_text
         
@@ -223,7 +247,7 @@ class DeepgramService:
         # Создаем объект результата
         result = TranscriptionResult(
             transcription=transcription_text,
-            diarization=None,  # Deepgram не возвращает отдельные данные диаризации в том же формате
+            diarization=diarization_data,
             speakers_text=speakers_text,
             formatted_transcript=formatted_transcript,
             speakers_summary=speakers_summary,
@@ -252,4 +276,3 @@ class DeepgramService:
 
 # Глобальный экземпляр сервиса
 deepgram_service = DeepgramService()
-

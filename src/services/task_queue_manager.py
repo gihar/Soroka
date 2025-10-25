@@ -288,6 +288,8 @@ class TaskQueueManager:
         from src.ux.queue_tracker import QueuePositionTracker
         from config import settings as cfg
         
+        progress_tracker = None
+        
         try:
             # Небольшая задержка для гарантии, что message_id успел сохраниться
             await asyncio.sleep(0.1)
@@ -314,7 +316,7 @@ class TaskQueueManager:
             result = await processing_service.process_file(task.request, progress_tracker)
             
             # Отправляем результат пользователю
-            await self._send_result_to_user(self.bot, task, result)
+            await self._send_result_to_user(self.bot, task, result, progress_tracker)
             
             # Обновляем статус
             task.status = TaskStatus.COMPLETED
@@ -325,9 +327,33 @@ class TaskQueueManager:
             
         except Exception as e:
             logger.error(f"Ошибка обработки задачи {task.task_id}: {e}")
-            raise
+            
+            # Останавливаем прогресс-трекер с сообщением об ошибке
+            if progress_tracker:
+                try:
+                    # Определяем текущий этап для отображения ошибки
+                    current_stage = progress_tracker.current_stage or "preparation"
+                    
+                    # Форматируем понятное сообщение об ошибке
+                    error_message = self._format_error_message(str(e))
+                    
+                    await progress_tracker.error(current_stage, error_message)
+                except Exception as tracker_error:
+                    logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
+            
+            # Отправляем пользователю дополнительное сообщение с рекомендациями
+            try:
+                recommendation = self._get_error_recommendation(str(e))
+                await self.bot.send_message(
+                    chat_id=task.chat_id,
+                    text=recommendation
+                )
+            except Exception as send_error:
+                logger.error(f"Не удалось отправить рекомендации пользователю: {send_error}")
+            
+            # НЕ пробрасываем исключение - обрабатываем локально
     
-    async def _send_result_to_user(self, bot, task: QueuedTask, result):
+    async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None):
         """Отправить результат обработки пользователю"""
         from src.ux.message_builder import MessageBuilder
         from aiogram.types import FSInputFile
@@ -357,11 +383,28 @@ class TaskQueueManager:
             # Формируем сообщение с результатом
             result_message = MessageBuilder.processing_complete_message(result_dict)
             
-            await bot.send_message(
-                chat_id=task.chat_id,
-                text=result_message,
-                parse_mode="Markdown"
-            )
+            # Пытаемся отправить с Markdown, при ошибке - без форматирования
+            try:
+                await bot.send_message(
+                    chat_id=task.chat_id,
+                    text=result_message,
+                    parse_mode="Markdown"
+                )
+            except Exception as markdown_error:
+                logger.warning(f"Ошибка отправки с Markdown: {markdown_error}")
+                # Пробуем отправить без Markdown
+                try:
+                    await bot.send_message(
+                        chat_id=task.chat_id,
+                        text=result_message
+                    )
+                except Exception as plain_error:
+                    logger.error(f"Ошибка отправки без Markdown: {plain_error}")
+                    # Отправляем простое уведомление
+                    await bot.send_message(
+                        chat_id=task.chat_id,
+                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
+                    )
             
             # Отправляем протокол
             if not result.protocol_text:
@@ -444,9 +487,88 @@ class TaskQueueManager:
             
         except Exception as e:
             logger.error(f"Ошибка отправки результата: {e}")
-            await bot.send_message(
-                chat_id=task.chat_id,
-                text=f"❌ Ошибка при отправке результата: {str(e)}"
+            
+            # Останавливаем прогресс-трекер с сообщением об ошибке
+            if progress_tracker:
+                try:
+                    await progress_tracker.error("analysis", f"Ошибка отправки результата: {str(e)}")
+                except Exception as tracker_error:
+                    logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
+            
+            # Пытаемся отправить сообщение об ошибке пользователю
+            try:
+                await bot.send_message(
+                    chat_id=task.chat_id,
+                    text=f"❌ Ошибка при отправке результата: {str(e)}"
+                )
+            except Exception as send_error:
+                logger.error(f"Не удалось отправить сообщение об ошибке: {send_error}")
+    
+    def _format_error_message(self, error_text: str) -> str:
+        """Форматировать сообщение об ошибке для пользователя"""
+        error_lower = error_text.lower()
+        
+        if "память" in error_lower or "memory" in error_lower:
+            return "Недостаточно памяти для обработки"
+        elif "размер" in error_lower or "size" in error_lower:
+            return "Файл слишком большой"
+        elif "формат" in error_lower or "format" in error_lower:
+            return "Неподдерживаемый формат файла"
+        elif "сеть" in error_lower or "network" in error_lower or "timeout" in error_lower:
+            return "Ошибка сети или сервиса"
+        elif "транскрипц" in error_lower or "transcription" in error_lower:
+            return "Ошибка при транскрипции"
+        else:
+            # Ограничиваем длину сообщения
+            return error_text[:100] if len(error_text) <= 100 else error_text[:97] + "..."
+    
+    def _get_error_recommendation(self, error_text: str) -> str:
+        """Получить рекомендации по устранению ошибки"""
+        error_lower = error_text.lower()
+        
+        if "память" in error_lower or "memory" in error_lower:
+            return (
+                "💡 **Рекомендации:**\n\n"
+                "Система перегружена. Попробуйте:\n"
+                "• Повторить через несколько минут\n"
+                "• Использовать файл меньшего размера\n"
+                "• Сжать файл перед отправкой\n\n"
+                "🔄 Отправьте файл снова, когда система будет готова."
+            )
+        elif "размер" in error_lower or "size" in error_lower:
+            return (
+                "💡 **Рекомендации:**\n\n"
+                "Файл превышает допустимый размер. Попробуйте:\n"
+                "• Сжать файл (максимум 20MB)\n"
+                "• Использовать формат с лучшим сжатием (MP3 вместо WAV)\n"
+                "• Разделить запись на части\n\n"
+                "🔄 Отправьте оптимизированный файл."
+            )
+        elif "формат" in error_lower or "format" in error_lower:
+            return (
+                "💡 **Рекомендации:**\n\n"
+                "Формат файла не поддерживается. Попробуйте:\n"
+                "• Конвертировать в MP3, MP4 или WAV\n"
+                "• Отправить файл как документ\n"
+                "• Проверить, что файл не поврежден\n\n"
+                "🔄 Отправьте файл в поддерживаемом формате."
+            )
+        elif "сеть" in error_lower or "network" in error_lower or "timeout" in error_lower:
+            return (
+                "💡 **Рекомендации:**\n\n"
+                "Проблемы с сетевым подключением. Попробуйте:\n"
+                "• Повторить через несколько минут\n"
+                "• Проверить интернет-соединение\n"
+                "• Использовать другую сеть\n\n"
+                "🔄 Отправьте файл снова."
+            )
+        else:
+            return (
+                "💡 **Что делать:**\n\n"
+                "• Попробуйте отправить файл еще раз\n"
+                "• Проверьте качество и размер файла\n"
+                "• Используйте /help для справки\n\n"
+                "🔄 Если проблема повторяется, попробуйте другой файл."
             )
     
     async def _check_resources_available(self) -> bool:

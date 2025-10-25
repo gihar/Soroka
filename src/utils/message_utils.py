@@ -9,6 +9,29 @@ from loguru import logger
 from exceptions import BotException
 
 
+def escape_markdown_v2(text: str) -> str:
+    """
+    Экранировать специальные символы Markdown для безопасной отправки в Telegram
+    
+    Args:
+        text: Текст для экранирования
+        
+    Returns:
+        Экранированный текст
+    """
+    if not text:
+        return text
+    
+    # Символы, которые нужно экранировать в Markdown
+    escape_chars = ['*', '_', '`', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    result = str(text)
+    for char in escape_chars:
+        result = result.replace(char, f'\\{char}')
+    
+    return result
+
+
 async def send_long_message(bot: Bot, chat_id: int, text: str, 
                           parse_mode: Optional[str] = "Markdown", 
                           max_length: int = 4096) -> None:
