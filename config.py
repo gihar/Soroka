@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     speaker_mapping_confidence_threshold: float = Field(0.7, description="Порог уверенности для сопоставления спикеров (0.0-1.0)")
     max_participants: int = Field(20, description="Максимальное количество участников в списке")
     mapping_log: bool = Field(False, description="Выводить в лог запросы и ответы LLM при сопоставлении спикеров")
+    full_text_matching: bool = Field(False, description="Использовать полный текст транскрипции для сопоставления участников (увеличивает расход токенов)")
     
     # Настройки очереди задач
     max_concurrent_tasks: Optional[int] = Field(None, description="Максимальное количество одновременно обрабатываемых задач (по умолчанию рассчитывается по CPU/RAM)")

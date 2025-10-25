@@ -21,6 +21,7 @@ class SpeakerMappingService:
             'speaker_mapping_secondary_confidence_threshold',
             0.5
         )
+        self.full_text_matching = getattr(settings, 'full_text_matching', False)
     
     async def map_speakers_to_participants(
         self,
@@ -300,12 +301,18 @@ class SpeakerMappingService:
         
         speakers_str = "\n".join(speakers_list)
         
-        # Получаем расширенный контекст транскрипции (начало, середина, конец)
+        # Получаем контекст транскрипции (полный или превью)
         formatted_transcript = diarization_data.get('formatted_transcript', '')
         if formatted_transcript:
-            transcript_preview = self._get_transcript_preview(formatted_transcript)
+            if self.full_text_matching:
+                transcript_preview = formatted_transcript
+            else:
+                transcript_preview = self._get_transcript_preview(formatted_transcript)
         else:
-            transcript_preview = self._get_transcript_preview(transcription_text)
+            if self.full_text_matching:
+                transcript_preview = transcription_text
+            else:
+                transcript_preview = self._get_transcript_preview(transcription_text)
         
         prompt = f"""Ты — эксперт по анализу встреч и диалогов. Твоя задача — сопоставить говорящих (Спикер 1, Спикер 2, и т.д.) с реальными участниками встречи.
 
