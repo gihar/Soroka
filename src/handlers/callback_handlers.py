@@ -1410,8 +1410,23 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             llm_provider=data['llm_provider'],
             user_id=callback.from_user.id,
             language="ru",
-            is_external_file=is_external_file
+            is_external_file=is_external_file,
+            # ДОБАВЛЕНО: Передача участников и информации о встрече
+            participants_list=data.get('participants_list'),
+            meeting_topic=data.get('meeting_topic'),
+            meeting_date=data.get('meeting_date'),
+            meeting_time=data.get('meeting_time')
         )
+        
+        # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
+        logger.info(f"🔍 ProcessingRequest создан, проверка полей:")
+        if request.participants_list:
+            logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
+        else:
+            logger.warning(f"  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
+        logger.info(f"  request.meeting_topic: {request.meeting_topic}")
+        logger.info(f"  request.meeting_date: {request.meeting_date}")
+        logger.info(f"  request.meeting_time: {request.meeting_time}")
         
         # Добавляем задачу в очередь
         queued_task = await task_queue_manager.add_task(

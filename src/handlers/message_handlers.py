@@ -309,6 +309,16 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             meeting_time=data.get('meeting_time')  # время встречи
         )
         
+        # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
+        logger.info(f"🔍 ProcessingRequest создан, проверка полей (message):")
+        if request.participants_list:
+            logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
+        else:
+            logger.warning(f"  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
+        logger.info(f"  request.meeting_topic: {request.meeting_topic}")
+        logger.info(f"  request.meeting_date: {request.meeting_date}")
+        logger.info(f"  request.meeting_time: {request.meeting_time}")
+        
         # Добавляем задачу в очередь
         queued_task = await task_queue_manager.add_task(
             request=request,
