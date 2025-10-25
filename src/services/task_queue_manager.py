@@ -386,19 +386,19 @@ class TaskQueueManager:
             
             # Пытаемся отправить с Markdown, при ошибке - без форматирования
             try:
-                result = await safe_send_message(
+                sent_message = await safe_send_message(
                     bot, task.chat_id,
                     text=result_message,
                     parse_mode="Markdown"
                 )
-                if not result:
+                if not sent_message:
                     logger.warning("Ошибка отправки с Markdown (возможен flood control)")
                     # Пробуем отправить без Markdown
-                    result = await safe_send_message(
+                    sent_message = await safe_send_message(
                         bot, task.chat_id,
                         text=result_message
                     )
-                    if not result:
+                    if not sent_message:
                         logger.error("Ошибка отправки без Markdown (возможен flood control)")
                         # Отправляем простое уведомление
                         await safe_send_message(
