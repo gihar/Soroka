@@ -215,8 +215,8 @@ class OptimizedProcessingService(BaseProcessingService):
             logger.info(f"Проверка условий для speaker mapping: participants_list={request.participants_list is not None} ({len(request.participants_list) if request.participants_list else 0} чел.), diarization={transcription_result.diarization is not None}")
             
             if request.participants_list and transcription_result.diarization:
-                if progress_tracker:
-                    await progress_tracker.update_status("🎭 Сопоставление участников со спикерами...")
+                # Пропускаем обновление статуса, так как это быстрая операция
+                # и не требует отдельного отображения в трекере прогресса
                 
                 try:
                     from src.services.speaker_mapping_service import speaker_mapping_service

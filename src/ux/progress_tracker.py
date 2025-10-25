@@ -300,10 +300,13 @@ class ProgressTracker:
         stage = self.stages.get(stage_id)
         stage_name = stage.name if stage else stage_id
         
+        # Экранируем специальные символы Markdown для безопасного отображения
+        safe_error_message = self._escape_markdown(error_message)
+        
         text = (
             f"❌ **Ошибка при обработке**\n\n"
             f"Этап: {stage_name}\n"
-            f"Ошибка: {error_message}\n\n"
+            f"Ошибка: {safe_error_message}\n\n"
             f"Попробуйте загрузить файл еще раз."
         )
         
@@ -311,6 +314,14 @@ class ProgressTracker:
             await self.message.edit_text(text, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
+    
+    def _escape_markdown(self, text: str) -> str:
+        """Экранировать специальные символы Markdown"""
+        # Экранируем символы, которые могут вызвать проблемы с парсингом
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
 
 
 class ProgressFactory:
