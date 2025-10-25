@@ -21,6 +21,7 @@ from src.performance.async_optimization import (
 from src.performance.memory_management import memory_optimizer
 from reliability.middleware import monitoring_middleware
 from database import db
+from src.utils.telegram_safe import safe_send_message
 
 # Новые сервисы для улучшения качества
 from src.services.transcription_preprocessor import get_preprocessor
@@ -41,6 +42,41 @@ class OptimizedProcessingService(BaseProcessingService):
         
         # Мониторинг будет запущен при первом использовании
         self._monitoring_started = False
+    
+    def _format_speaker_mapping_message(
+        self,
+        speaker_mapping: Dict[str, str],
+        total_participants: int
+    ) -> str:
+        """
+        Форматирует сообщение о результатах сопоставления спикеров
+        
+        Args:
+            speaker_mapping: Словарь сопоставления {speaker_id: participant_name}
+            total_participants: Общее количество участников
+            
+        Returns:
+            Отформатированное сообщение для отправки пользователю
+        """
+        if not speaker_mapping:
+            return (
+                "ℹ️ *Автоматическое сопоставление участников не выполнено*\n\n"
+                "Протокол будет сформирован без привязки спикеров к именам участников."
+            )
+        
+        mapped_count = len(speaker_mapping)
+        message_lines = [
+            "✅ *Сопоставление участников завершено*\n",
+            f"Сопоставлено {mapped_count} из {total_participants} участников:\n"
+        ]
+        
+        # Сортируем по speaker_id для предсказуемого порядка
+        sorted_mapping = sorted(speaker_mapping.items())
+        
+        for speaker_id, participant_name in sorted_mapping:
+            message_lines.append(f"• {speaker_id} → {participant_name}")
+        
+        return "\n".join(message_lines)
     
     @performance_timer("file_processing")
     async def process_file(self, request: ProcessingRequest, progress_tracker=None) -> ProcessingResult:
@@ -245,6 +281,51 @@ class OptimizedProcessingService(BaseProcessingService):
                             logger.info(f"  {speaker_id} → {name}")
                     else:
                         logger.warning("⚠️ Speaker mapping вернул пустой результат - протокол будет генерироваться без сопоставления спикеров")
+                    
+                    # Отправляем уведомление пользователю о результатах сопоставления
+                    if progress_tracker:
+                        try:
+                            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                            import json
+                            
+                            notification_text = self._format_speaker_mapping_message(
+                                speaker_mapping,
+                                len(request.participants_list)
+                            )
+                            
+                            # Создаем клавиатуру с кнопками действий
+                            keyboard_buttons = []
+                            
+                            # Если есть хотя бы одно сопоставление, добавляем кнопку редактирования
+                            if speaker_mapping:
+                                # Сохраняем данные для callback (ограничим размер)
+                                callback_data = {
+                                    "action": "edit_mapping",
+                                    "task_id": str(request.user_id)  # Используем user_id как идентификатор
+                                }
+                                keyboard_buttons.append([InlineKeyboardButton(
+                                    text="✏️ Изменить сопоставление",
+                                    callback_data=f"edit_mapping:{request.user_id}"
+                                )])
+                            
+                            # Кнопка продолжения (всегда доступна)
+                            keyboard_buttons.append([InlineKeyboardButton(
+                                text="✅ Продолжить с текущим",
+                                callback_data=f"continue_mapping:{request.user_id}"
+                            )])
+                            
+                            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None
+                            
+                            await safe_send_message(
+                                progress_tracker.bot,
+                                progress_tracker.chat_id,
+                                notification_text,
+                                parse_mode="Markdown",
+                                reply_markup=keyboard
+                            )
+                            logger.debug("Уведомление о сопоставлении отправлено пользователю")
+                        except Exception as notify_error:
+                            logger.warning(f"Не удалось отправить уведомление о сопоставлении: {notify_error}")
                     
                 except Exception as e:
                     logger.error(f"❌ ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True)

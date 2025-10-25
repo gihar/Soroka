@@ -435,6 +435,17 @@ class SpeakerMappingService:
                 "на основе контекста, ролей и упоминаний имен."
             )
             
+            # Логирование запроса (если включено)
+            if settings.mapping_log:
+                logger.debug("=" * 80)
+                logger.debug("=== LLM MAPPING REQUEST ===")
+                logger.debug("=" * 80)
+                logger.debug(f"Provider: {llm_provider}")
+                logger.debug(f"System prompt:\n{system_prompt}")
+                logger.debug("-" * 80)
+                logger.debug(f"User prompt:\n{prompt}")
+                logger.debug("=" * 80)
+            
             # Создаем минимальный запрос к LLM
             provider = llm_manager.providers.get(llm_provider)
             if not provider or not provider.is_available():
@@ -473,9 +484,28 @@ class SpeakerMappingService:
                 response = await _call_openai()
                 content = response.choices[0].message.content
                 
+                # Логирование ответа (если включено)
+                if settings.mapping_log:
+                    logger.debug("=" * 80)
+                    logger.debug("=== LLM MAPPING RESPONSE ===")
+                    logger.debug("=" * 80)
+                    logger.debug(f"Raw content:\n{content}")
+                    logger.debug("=" * 80)
+                
                 # Парсим JSON
-                result = json.loads(content)
-                return result
+                try:
+                    result = json.loads(content)
+                    
+                    # Краткое резюме результата (если включено логирование)
+                    if settings.mapping_log:
+                        mapped_count = sum(1 for k in result.keys() if k not in ['confidence', 'reasoning'])
+                        logger.info(f"LLM сопоставил {mapped_count} спикеров")
+                    
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.error(f"Ошибка парсинга JSON ответа от LLM: {e}")
+                    logger.error(f"Проблемный content: {content}")
+                    return {}
             
             else:
                 # Для других провайдеров используем стандартный метод

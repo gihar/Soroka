@@ -12,3 +12,10 @@ class ParticipantsInput(StatesGroup):
     confirm_meeting_info = State()  # Подтверждение автоматически извлеченной информации
 
 
+class SpeakerMappingEdit(StatesGroup):
+    """Состояния для редактирования сопоставления спикеров"""
+    selecting_speaker = State()  # Выбор спикера для изменения
+    selecting_participant = State()  # Выбор участника для спикера
+    confirm_changes = State()  # Подтверждение изменений
+
+
