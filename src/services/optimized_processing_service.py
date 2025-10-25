@@ -195,6 +195,9 @@ class OptimizedProcessingService(BaseProcessingService):
             )
             
             # Этап 2.3: Сопоставление спикеров с участниками (если указан список)
+            # КРИТИЧЕСКИ ВАЖНО: логируем состояние для диагностики
+            logger.info(f"Проверка условий для speaker mapping: participants_list={request.participants_list is not None} ({len(request.participants_list) if request.participants_list else 0} чел.), diarization={transcription_result.diarization is not None}")
+            
             if request.participants_list and transcription_result.diarization:
                 if progress_tracker:
                     await progress_tracker.update_status("🎭 Сопоставление участников со спикерами...")
@@ -202,7 +205,12 @@ class OptimizedProcessingService(BaseProcessingService):
                 try:
                     from src.services.speaker_mapping_service import speaker_mapping_service
                     
-                    logger.info(f"Начало сопоставления {len(request.participants_list)} участников")
+                    logger.info(f"🎭 НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ: {len(request.participants_list)} участников")
+                    logger.info(f"Список участников для сопоставления:")
+                    for i, p in enumerate(request.participants_list[:5], 1):  # Показываем первые 5
+                        logger.info(f"  {i}. {p.get('name')} ({p.get('role', 'без роли')})")
+                    if len(request.participants_list) > 5:
+                        logger.info(f"  ... и еще {len(request.participants_list) - 5} участников")
                     
                     speaker_mapping = await speaker_mapping_service.map_speakers_to_participants(
                         diarization_data=transcription_result.diarization,
@@ -214,12 +222,24 @@ class OptimizedProcessingService(BaseProcessingService):
                     # Сохраняем mapping в request для дальнейшего использования
                     request.speaker_mapping = speaker_mapping
                     
-                    logger.info(f"Сопоставление завершено: {len(speaker_mapping)} спикеров")
+                    logger.info(f"✅ СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров сопоставлено")
+                    if speaker_mapping:
+                        logger.info("Результаты сопоставления:")
+                        for speaker_id, name in speaker_mapping.items():
+                            logger.info(f"  {speaker_id} → {name}")
+                    else:
+                        logger.warning("⚠️ Speaker mapping вернул пустой результат - протокол будет генерироваться без сопоставления спикеров")
                     
                 except Exception as e:
-                    logger.error(f"Ошибка при сопоставлении спикеров: {e}")
+                    logger.error(f"❌ ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True)
                     # Продолжаем без mapping
                     request.speaker_mapping = None
+            else:
+                if not request.participants_list:
+                    logger.info("ℹ️ Speaker mapping пропущен: список участников не предоставлен")
+                elif not transcription_result.diarization:
+                    logger.warning("⚠️ Speaker mapping пропущен: диаризация не выполнена")
+                request.speaker_mapping = None
             
             # Этап 2.5: Умный выбор шаблона после транскрипции
             template = await self._suggest_template_if_needed(
