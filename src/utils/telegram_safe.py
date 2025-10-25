@@ -5,7 +5,7 @@
 from typing import Optional, Any, Union
 from loguru import logger
 
-from aiogram.types import Message, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, ForceReply
+from aiogram.types import Message, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, ForceReply, FSInputFile
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
@@ -220,4 +220,49 @@ async def try_send_or_log(
         logger.info(f"{log_prefix}: {text}")
     
     return result
+
+
+async def safe_send_document(
+    bot,
+    chat_id: int,
+    document: Union[str, FSInputFile],
+    caption: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    disable_notification: Optional[bool] = None,
+    **kwargs
+) -> Optional[Message]:
+    """
+    Безопасная отправка документа через bot
+    
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        document: Путь к файлу или FSInputFile
+        caption: Подпись к документу
+        parse_mode: Режим парсинга
+        disable_notification: Отключить уведомление
+        **kwargs: Дополнительные параметры
+    
+    Returns:
+        Отправленное сообщение или None при ошибке
+    """
+    try:
+        result = await telegram_rate_limiter.safe_send_with_retry(
+            bot.send_document,
+            chat_id=chat_id,
+            document=document,
+            caption=caption,
+            parse_mode=parse_mode,
+            disable_notification=disable_notification,
+            **kwargs
+        )
+        
+        if result is None:
+            logger.warning(f"Не удалось отправить документ в чат {chat_id}")
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Критическая ошибка в safe_send_document: {e}")
+        return None
 

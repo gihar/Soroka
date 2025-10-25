@@ -9,6 +9,8 @@ from aiogram.types import Message
 from loguru import logger
 from datetime import datetime
 
+from src.utils.telegram_safe import safe_edit_text, safe_send_message
+
 
 class ProgressStage:
     """Упрощенный этап обработки"""
@@ -36,18 +38,33 @@ class ProgressTracker:
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
         # Интервал автообновления (под спиннер и легкие изменения UI)
-        # Поддерживаем частоту ~1–2 сек, чтобы анимация казалась живой,
+        # Поддерживаем частоту ~1.5–3 сек, чтобы анимация казалась живой,
         # но без излишней нагрузки на Telegram API
-        self.update_interval = 1.2
+        self.update_interval = 1.5
         self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
         self._spinner_index = 0
         # Поля для дедупликации и троттлинга обновлений сообщения
         self._last_text: str = ""
         self._last_edit_at: datetime = datetime.min
         # Минимальный интервал между редактированиями сообщения
-        self._min_edit_interval_seconds: float = 1.0
+        self._min_edit_interval_seconds: float = 1.5
+        # Адаптивный интервал - увеличивается при длительной работе
+        self._adaptive_interval_base = 1.5
+        self._adaptive_interval_max = 3.0
+        self._adaptive_step_seconds = 60  # Увеличивать интервал каждые 60 секунд
         # Блокировка для последовательного редактирования сообщения
         self._edit_lock = asyncio.Lock()
+    
+    def _get_adaptive_interval(self) -> float:
+        """Получить адаптивный интервал обновления"""
+        elapsed_seconds = (datetime.now() - self.start_time).total_seconds()
+        
+        # Увеличиваем интервал каждые 60 секунд
+        steps = int(elapsed_seconds // self._adaptive_step_seconds)
+        adaptive_interval = self._adaptive_interval_base + (steps * 0.5)
+        
+        # Ограничиваем максимальным значением
+        return min(adaptive_interval, self._adaptive_interval_max)
         
     def add_stage(self, stage_id: str, name: str, emoji: str, description: str):
         """Добавить этап обработки"""
@@ -133,7 +150,7 @@ class ProgressTracker:
                 f"🔄 Продолжаю обработку..."
             )
             
-            await self.message.edit_text(compression_message, parse_mode="Markdown")
+            await safe_edit_text(self.message, compression_message, parse_mode="Markdown")
             
             # Через 2 секунды возвращаемся к обычному отображению
             await asyncio.sleep(2)
@@ -209,7 +226,7 @@ class ProgressTracker:
                 if not final and not force and (now - self._last_edit_at).total_seconds() < self._min_edit_interval_seconds:
                     return
 
-                await self.message.edit_text(text, parse_mode="Markdown")
+                await safe_edit_text(self.message, text, parse_mode="Markdown")
                 self._last_text = text
                 self._last_edit_at = now
                 # Фиксируем смену кадра спиннера только если действительно отредактировали сообщение
@@ -274,7 +291,9 @@ class ProgressTracker:
         """Автоматическое обновление дисплея"""
         try:
             while self.current_stage:
-                await asyncio.sleep(self.update_interval)
+                # Используем адаптивный интервал
+                adaptive_interval = self._get_adaptive_interval()
+                await asyncio.sleep(adaptive_interval)
                 if self.current_stage:  # Проверяем еще раз после сна
                     # Сдвиг спиннера и редактирование производятся внутри update_display
                     # Форсируем редактирование, чтобы анимация крутилась даже при частых апдейтах прогресса
@@ -311,7 +330,7 @@ class ProgressTracker:
         )
         
         try:
-            await self.message.edit_text(text, parse_mode="Markdown")
+            await safe_edit_text(self.message, text, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
     
@@ -332,8 +351,8 @@ class ProgressFactory:
                                            enable_diarization: bool = True) -> ProgressTracker:
         """Создать трекер для обработки файлов"""
         # Создаем начальное сообщение
-        initial_message = await bot.send_message(
-            chat_id, 
+        initial_message = await safe_send_message(
+            bot, chat_id, 
             "🔄 **Начинаю обработку файла...**\n\n⏳ Инициализация...",
             parse_mode="Markdown"
         )

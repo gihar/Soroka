@@ -14,6 +14,7 @@ from src.models.task_queue import QueuedTask, TaskStatus, TaskPriority
 from src.models.processing import ProcessingRequest
 from database import db
 from config import settings
+from src.utils.telegram_safe import safe_send_message, safe_send_document
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -385,32 +386,38 @@ class TaskQueueManager:
             
             # Пытаемся отправить с Markdown, при ошибке - без форматирования
             try:
-                await bot.send_message(
-                    chat_id=task.chat_id,
+                result = await safe_send_message(
+                    bot, task.chat_id,
                     text=result_message,
                     parse_mode="Markdown"
                 )
-            except Exception as markdown_error:
-                logger.warning(f"Ошибка отправки с Markdown: {markdown_error}")
-                # Пробуем отправить без Markdown
-                try:
-                    await bot.send_message(
-                        chat_id=task.chat_id,
+                if not result:
+                    logger.warning("Ошибка отправки с Markdown (возможен flood control)")
+                    # Пробуем отправить без Markdown
+                    result = await safe_send_message(
+                        bot, task.chat_id,
                         text=result_message
                     )
-                except Exception as plain_error:
-                    logger.error(f"Ошибка отправки без Markdown: {plain_error}")
-                    # Отправляем простое уведомление
-                    await bot.send_message(
-                        chat_id=task.chat_id,
-                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
-                    )
+                    if not result:
+                        logger.error("Ошибка отправки без Markdown (возможен flood control)")
+                        # Отправляем простое уведомление
+                        await safe_send_message(
+                            bot, task.chat_id,
+                            text="✅ Протокол успешно создан! Файл отправляется ниже..."
+                        )
+            except Exception as e:
+                logger.error(f"Критическая ошибка при отправке результата: {e}")
+                # Отправляем простое уведомление
+                await safe_send_message(
+                    bot, task.chat_id,
+                    text="✅ Протокол успешно создан! Файл отправляется ниже..."
+                )
             
             # Отправляем протокол
             if not result.protocol_text:
                 logger.warning("protocol_text пустой или None")
-                await bot.send_message(
-                    chat_id=task.chat_id,
+                await safe_send_message(
+                    bot, task.chat_id,
                     text="❌ Протокол не был сгенерирован"
                 )
             else:
@@ -441,8 +448,8 @@ class TaskQueueManager:
                     
                     try:
                         input_file = FSInputFile(temp_path, filename=f"{safe_name}{suffix}")
-                        await bot.send_document(
-                            chat_id=task.chat_id,
+                        await safe_send_document(
+                            bot, task.chat_id,
                             document=input_file,
                             caption="📄 Протокол готов!"
                         )
@@ -455,8 +462,8 @@ class TaskQueueManager:
                     max_length = 4000
                     
                     if len(protocol_text) <= max_length:
-                        await bot.send_message(
-                            chat_id=task.chat_id,
+                        await safe_send_message(
+                            bot, task.chat_id,
                             text=protocol_text,
                             parse_mode="Markdown"
                         )
@@ -479,8 +486,8 @@ class TaskQueueManager:
                         # Отправляем части
                         for i, part in enumerate(parts):
                             header = f"📄 **Протокол встречи** (часть {i+1}/{len(parts)})\n\n"
-                            await bot.send_message(
-                                chat_id=task.chat_id,
+                            await safe_send_message(
+                                bot, task.chat_id,
                                 text=header + part,
                                 parse_mode="Markdown"
                             )
@@ -497,8 +504,8 @@ class TaskQueueManager:
             
             # Пытаемся отправить сообщение об ошибке пользователю
             try:
-                await bot.send_message(
-                    chat_id=task.chat_id,
+                await safe_send_message(
+                    bot, task.chat_id,
                     text=f"❌ Ошибка при отправке результата: {str(e)}"
                 )
             except Exception as send_error:

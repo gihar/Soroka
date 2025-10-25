@@ -187,6 +187,25 @@ class Database:
                 )
             """)
             
+            # Таблица неотправленных сообщений (при Flood control)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS pending_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    message_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    parse_mode TEXT,
+                    reply_markup TEXT,
+                    file_path TEXT,
+                    caption TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    retry_count INTEGER DEFAULT 0,
+                    last_retry_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (telegram_id)
+                )
+            """)
+            
             await db.commit()
             logger.info("База данных инициализирована")
     
@@ -799,6 +818,70 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при получении списка участников: {e}")
             return None
+    
+    async def save_pending_message(self, user_id: int, chat_id: int, message_type: str, 
+                                 content: str, parse_mode: str = None, reply_markup: str = None,
+                                 file_path: str = None, caption: str = None) -> int:
+        """Сохранить неотправленное сообщение в БД"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("""
+                    INSERT INTO pending_messages 
+                    (user_id, chat_id, message_type, content, parse_mode, reply_markup, file_path, caption)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, chat_id, message_type, content, parse_mode, reply_markup, file_path, caption))
+                await db.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Ошибка сохранения неотправленного сообщения: {e}")
+            return None
+    
+    async def get_pending_messages(self, user_id: int = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Получить неотправленные сообщения"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                if user_id:
+                    cursor = await db.execute("""
+                        SELECT * FROM pending_messages 
+                        WHERE user_id = ? 
+                        ORDER BY created_at ASC 
+                        LIMIT ?
+                    """, (user_id, limit))
+                else:
+                    cursor = await db.execute("""
+                        SELECT * FROM pending_messages 
+                        ORDER BY created_at ASC 
+                        LIMIT ?
+                    """, (limit,))
+                
+                rows = await cursor.fetchall()
+                columns = [description[0] for description in cursor.description]
+                return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка получения неотправленных сообщений: {e}")
+            return []
+    
+    async def update_pending_message_retry(self, message_id: int, retry_count: int):
+        """Обновить счетчик попыток отправки"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    UPDATE pending_messages 
+                    SET retry_count = ?, last_retry_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (retry_count, message_id))
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Ошибка обновления счетчика попыток: {e}")
+    
+    async def delete_pending_message(self, message_id: int):
+        """Удалить неотправленное сообщение после успешной отправки"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("DELETE FROM pending_messages WHERE id = ?", (message_id,))
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Ошибка удаления неотправленного сообщения: {e}")
 
 
 # Глобальный экземпляр базы данных
