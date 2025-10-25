@@ -58,6 +58,8 @@ class QueuedTask:
     
     def to_dict(self) -> dict:
         """Преобразовать в словарь для сохранения в БД"""
+        import json
+        
         return {
             "task_id": str(self.task_id),
             "user_id": self.user_id,
@@ -70,6 +72,12 @@ class QueuedTask:
             "llm_provider": self.request.llm_provider,
             "language": self.request.language,
             "is_external_file": self.request.is_external_file,
+            # ДОБАВЛЕНО: Сохранение участников и информации о встрече
+            "participants_list": json.dumps(self.request.participants_list) if self.request.participants_list else None,
+            "meeting_topic": self.request.meeting_topic,
+            "meeting_date": self.request.meeting_date,
+            "meeting_time": self.request.meeting_time,
+            "speaker_mapping": json.dumps(self.request.speaker_mapping) if self.request.speaker_mapping else None,
             "status": self.status.value,
             "priority": self.priority.value,
             "created_at": self.created_at.isoformat(),
@@ -80,6 +88,23 @@ class QueuedTask:
     @classmethod
     def from_db_row(cls, row: dict) -> "QueuedTask":
         """Создать задачу из строки БД"""
+        import json
+        
+        # ДОБАВЛЕНО: Восстановление участников и информации о встрече
+        participants_list = None
+        if row.get("participants_list"):
+            try:
+                participants_list = json.loads(row["participants_list"])
+            except (json.JSONDecodeError, TypeError):
+                participants_list = None
+        
+        speaker_mapping = None
+        if row.get("speaker_mapping"):
+            try:
+                speaker_mapping = json.loads(row["speaker_mapping"])
+            except (json.JSONDecodeError, TypeError):
+                speaker_mapping = None
+        
         # Восстанавливаем ProcessingRequest
         request = ProcessingRequest(
             file_id=row.get("file_id"),
@@ -89,7 +114,13 @@ class QueuedTask:
             llm_provider=row["llm_provider"],
             user_id=row["user_id"],
             language=row.get("language", "ru"),
-            is_external_file=bool(row.get("is_external_file", False))
+            is_external_file=bool(row.get("is_external_file", False)),
+            # ДОБАВЛЕНО: Восстановление участников и информации о встрече
+            participants_list=participants_list,
+            speaker_mapping=speaker_mapping,
+            meeting_topic=row.get("meeting_topic"),
+            meeting_date=row.get("meeting_date"),
+            meeting_time=row.get("meeting_time")
         )
         
         return cls(

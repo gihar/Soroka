@@ -138,6 +138,22 @@ class OptimizedProcessingService(BaseProcessingService):
     
     async def _process_file_optimized(self, request: ProcessingRequest, 
                                     processing_metrics, progress_tracker=None) -> ProcessingResult:
+        
+        # ДОБАВЛЕНО: Логирование данных из ProcessingRequest для диагностики
+        logger.info(f"🔍 Данные из ProcessingRequest при начале обработки:")
+        if request.participants_list:
+            logger.info(f"  participants_list: {len(request.participants_list)} чел.")
+            # Показываем первые 3 участника для проверки
+            for i, p in enumerate(request.participants_list[:3], 1):
+                logger.info(f"    {i}. {p.get('name')} ({p.get('role', 'без роли')})")
+            if len(request.participants_list) > 3:
+                logger.info(f"    ... и еще {len(request.participants_list) - 3} участников")
+        else:
+            logger.warning("  participants_list: None (НЕ ПЕРЕДАН В REQUEST!)")
+        logger.info(f"  meeting_topic: {request.meeting_topic}")
+        logger.info(f"  meeting_date: {request.meeting_date}")
+        logger.info(f"  meeting_time: {request.meeting_time}")
+        logger.info(f"  speaker_mapping: {request.speaker_mapping}")
         """Внутренняя оптимизированная обработка"""
         
         async with optimized_file_processing() as resources:
