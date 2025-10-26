@@ -158,7 +158,10 @@ class DeepgramService:
             raise
         except Exception as e:
             logger.error(f"Ошибка при транскрипции через Deepgram {file_path}: {e}")
-            raise CloudTranscriptionError(str(e), file_path)
+            logger.error(f"Тип ошибки: {type(e).__name__}, repr: {repr(e)}")
+            if not str(e):
+                logger.warning(f"Получено исключение с пустым сообщением: {type(e)}")
+            raise CloudTranscriptionError(str(e), file_path, "deepgram")
     
     def _process_transcript_result(self, response_data: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
         """Обработать результат транскрипции от Deepgram (работа с сырым JSON)"""

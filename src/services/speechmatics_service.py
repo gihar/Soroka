@@ -191,6 +191,9 @@ class SpeechmaticsService:
                         
         except Exception as e:
             logger.error(f"Ошибка при транскрипции через Speechmatics {file_path}: {e}")
+            logger.error(f"Тип ошибки: {type(e).__name__}, repr: {repr(e)}")
+            if not str(e):
+                logger.warning(f"Получено исключение с пустым сообщением: {type(e)}")
             
             # Проверяем, является ли это SSL ошибкой
             if "SSL" in str(e) or "certificate" in str(e).lower():
@@ -201,7 +204,7 @@ class SpeechmaticsService:
                     file_path, str(e)
                 )
             
-            raise CloudTranscriptionError(str(e), file_path)
+            raise CloudTranscriptionError(str(e), file_path, "speechmatics")
     
     def _process_transcript_result(self, transcript: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
         """Обработать результат транскрипции от Speechmatics"""
