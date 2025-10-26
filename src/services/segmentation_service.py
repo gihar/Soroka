@@ -304,6 +304,7 @@ class TranscriptionSegmentationService:
             return [], None
         
         speakers = set()
+        formatted_lines = []
         
         # Используем временные метки из segments
         diarization_segments = diarization_data.get('segments', [])
@@ -314,27 +315,36 @@ class TranscriptionSegmentationService:
                 # Проверяем пересечение временных интервалов
                 if seg_start < segment_end_time and seg_end > segment_start_time:
                     speaker = seg.get('speaker', '')
+                    text = seg.get('text', '')
                     if speaker:
                         speakers.add(speaker)
+                        if text:
+                            formatted_lines.append(f"{speaker}: {text}")
         
         # Если нет segments с временными метками, пробуем старый метод
         if not speakers:
             formatted_transcript = diarization_data.get('formatted_transcript', '')
-            for line in formatted_transcript.split('\n'):
-                match = re.match(r'^(Спикер \d+|Speaker \d+|SPEAKER_\d+):\s*(.+)$', line.strip())
-                if match:
-                    speaker = match.group(1)
-                    text = match.group(2)
-                    # Если часть текста содержится в сегменте
-                    if text[:50] in segment_text or segment_text[:50] in text:
-                        speakers.add(speaker)
+            if formatted_transcript:
+                # Разбираем форматированную транскрипцию построчно
+                for line in formatted_transcript.split('\n'):
+                    match = re.match(r'^(Спикер \d+|Speaker \d+|SPEAKER_\d+):\s*(.+)$', line.strip())
+                    if match:
+                        speaker = match.group(1)
+                        text = match.group(2)
+                        # Если часть текста содержится в сегменте
+                        if text[:50] in segment_text or segment_text[:50] in text:
+                            speakers.add(speaker)
+                            formatted_lines.append(line.strip())
         
         # Применяем маппинг к спикерам если есть
         speakers_list = list(speakers)
         if speaker_mapping:
             speakers_list = [speaker_mapping.get(s, s) for s in speakers_list]
         
-        return speakers_list, None
+        # Формируем финальный форматированный текст
+        formatted_text = '\n'.join(formatted_lines) if formatted_lines else None
+        
+        return speakers_list, formatted_text
     
     def create_segment_summary(self, segment: TranscriptionSegment) -> str:
         """
