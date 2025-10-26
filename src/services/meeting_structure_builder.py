@@ -338,7 +338,7 @@ class MeetingStructureBuilder:
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все обсуждаемые темы.
 
 ТРАНСКРИПЦИЯ:
-{transcription[:3000]}...
+{transcription}
 
 ЗАДАЧА:
 Извлеки все темы, которые обсуждались на встрече. Для каждой темы определи:
@@ -377,7 +377,7 @@ class MeetingStructureBuilder:
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все принятые решения.
 
 ТРАНСКРИПЦИЯ:
-{transcription[:3000]}...
+{transcription}
 
 УЧАСТНИКИ:
 {speakers_info}
@@ -419,7 +419,7 @@ class MeetingStructureBuilder:
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все задачи и поручения.
 
 ТРАНСКРИПЦИЯ:
-{transcription[:3000]}...
+{transcription}
 
 УЧАСТНИКИ:
 {speakers_info}

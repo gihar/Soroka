@@ -281,4 +281,59 @@ class MeetingStructure(BaseModel):
                 "actions_count": len(self.action_items)
             }
         }
+    
+    def format_for_llm_prompt(self) -> str:
+        """
+        Форматировать структуру встречи для добавления в промпт LLM
+        
+        Returns:
+            Компактное текстовое представление структуры для контекста LLM
+        """
+        if not self.topics and not self.decisions and not self.action_items:
+            return ""
+        
+        lines = []
+        lines.append("\n" + "=" * 70)
+        lines.append("ПРЕДВАРИТЕЛЬНЫЙ СТРУКТУРНЫЙ АНАЛИЗ ВСТРЕЧИ")
+        lines.append("=" * 70)
+        lines.append("(Используй этот анализ как дополнительный контекст для улучшения протокола)\n")
+        
+        # Темы обсуждения
+        if self.topics:
+            lines.append(f"📋 ВЫЯВЛЕННЫЕ ТЕМЫ ({len(self.topics)}):")
+            for i, topic in enumerate(self.topics, 1):
+                lines.append(f"{i}. {topic.title}")
+                if topic.key_points:
+                    key_points_str = "; ".join(topic.key_points[:3])
+                    lines.append(f"   Ключевые моменты: {key_points_str}")
+            lines.append("")
+        
+        # Принятые решения
+        if self.decisions:
+            lines.append(f"✅ ПРИНЯТЫЕ РЕШЕНИЯ ({len(self.decisions)}):")
+            for i, decision in enumerate(self.decisions, 1):
+                priority_mark = "❗ " if decision.priority == DecisionPriority.HIGH else ""
+                lines.append(f"{i}. {priority_mark}{decision.text}")
+                if decision.decision_makers:
+                    lines.append(f"   Инициаторы: {', '.join(decision.decision_makers)}")
+            lines.append("")
+        
+        # Задачи и поручения
+        if self.action_items:
+            lines.append(f"📌 ЗАДАЧИ И ПОРУЧЕНИЯ ({len(self.action_items)}):")
+            for i, action in enumerate(self.action_items, 1):
+                priority_mark = "🔴 " if action.priority in [ActionItemPriority.CRITICAL, ActionItemPriority.HIGH] else ""
+                assignee_info = f" → {action.assignee_name or action.assignee}" if action.assignee else " (ответственный не назначен)"
+                deadline_info = f" [до: {action.deadline}]" if action.deadline else ""
+                lines.append(f"{i}. {priority_mark}{action.description}{assignee_info}{deadline_info}")
+            lines.append("")
+        
+        lines.append("=" * 70)
+        lines.append("⚠️ ВАЖНО: Используй этот анализ для:")
+        lines.append("- Корректного структурирования разделов протокола")
+        lines.append("- Проверки полноты охвата всех тем, решений и задач")
+        lines.append("- Точного указания ответственных лиц")
+        lines.append("=" * 70 + "\n")
+        
+        return "\n".join(lines)
 

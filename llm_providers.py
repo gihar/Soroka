@@ -203,6 +203,7 @@ def _build_user_prompt(
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
     participants: Optional[List[Dict[str, str]]] = None,
+    meeting_structure = None,  # MeetingStructure, но избегаем circular import
 ) -> str:
     """Формирует пользовательский промпт с контекстом и требованиями к формату."""
     # Блок контекста (с учётом диаризации)
@@ -333,6 +334,13 @@ def _build_user_prompt(
             meeting_info += f"🕐 Время: {meeting_time}\n"
         meeting_info += "\n"
 
+    # Добавляем структурный анализ если доступен
+    structure_info = ""
+    if meeting_structure:
+        structure_text = meeting_structure.format_for_llm_prompt()
+        if structure_text:
+            structure_info = structure_text
+    
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
 
     # Основной пользовательский промпт
@@ -341,6 +349,7 @@ def _build_user_prompt(
         "ИСХОДНЫЕ ДАННЫЕ ДЛЯ АНАЛИЗА\n"
         "═══════════════════════════════════════════════════════════\n\n"
         f"{transcription_text}\n"
+        f"{structure_info}"
         f"{participants_info}"
         f"{meeting_info}"
         "═══════════════════════════════════════════════════════════\n"
@@ -481,6 +490,7 @@ class OpenAIProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
+        meeting_structure = kwargs.get('meeting_structure')
         user_prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -489,7 +499,8 @@ class OpenAIProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants
+            participants,
+            meeting_structure
         )
         
         try:
@@ -663,6 +674,7 @@ class AnthropicProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
+        meeting_structure = kwargs.get('meeting_structure')
         prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -671,7 +683,8 @@ class AnthropicProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants
+            participants,
+            meeting_structure
         )
         
         try:
@@ -755,6 +768,7 @@ class YandexGPTProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
+        meeting_structure = kwargs.get('meeting_structure')
         prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -763,7 +777,8 @@ class YandexGPTProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants
+            participants,
+            meeting_structure
         )
         
         headers = {
@@ -911,6 +926,7 @@ def _build_extraction_prompt(
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
     participants: Optional[List[Dict[str, str]]] = None,
+    meeting_structure = None,  # MeetingStructure, но избегаем circular import
 ) -> str:
     """
     Промпт для первого этапа: извлечение и структурирование информации
@@ -1005,11 +1021,18 @@ def _build_extraction_prompt(
             meeting_info += f"- Время: {meeting_time}\n"
         meeting_info += "\n"
     
+    # Добавляем структурный анализ если доступен
+    structure_info = ""
+    if meeting_structure:
+        structure_text = meeting_structure.format_for_llm_prompt()
+        if structure_text:
+            structure_info = structure_text
+    
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     
     prompt = f"""ЭТАП 1: ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
 
-{transcription_text}{participants_info}{meeting_info}
+{transcription_text}{structure_info}{participants_info}{meeting_info}
 
 ЗАДАЧА:
 Извлеки из транскрипции информацию для следующих полей:
@@ -1153,6 +1176,7 @@ async def generate_protocol_two_stage(
     template_variables: Dict[str, str],
     diarization_data: Optional[Dict[str, Any]] = None,
     diarization_analysis: Optional[Dict[str, Any]] = None,
+    meeting_structure = None,  # MeetingStructure
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -1189,7 +1213,8 @@ async def generate_protocol_two_stage(
         meeting_topic,
         meeting_date,
         meeting_time,
-        participants
+        participants,
+        meeting_structure
     )
     
     # Используем системный промпт (с учетом классификации если включена)
@@ -1806,6 +1831,7 @@ async def generate_protocol_chain_of_thought(
     segments: List['TranscriptionSegment'],
     diarization_data: Optional[Dict[str, Any]] = None,
     diarization_analysis: Optional[Dict[str, Any]] = None,
+    meeting_structure = None,  # MeetingStructure
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -2045,6 +2071,9 @@ async def generate_protocol_chain_of_thought(
             f"Chain-of-Thought не поддерживается для {provider_name}, "
             f"используем стандартный подход"
         )
+        # Передаем meeting_structure через kwargs
+        if meeting_structure:
+            kwargs['meeting_structure'] = meeting_structure
         return await manager.generate_protocol(
             provider_name, transcription, template_variables, diarization_data, **kwargs
         )

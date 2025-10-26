@@ -701,6 +701,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     segments=segments,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
+                    meeting_structure=meeting_structure,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
@@ -719,6 +720,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     template_variables=template_variables,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
+                    meeting_structure=meeting_structure,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
@@ -741,7 +743,8 @@ class OptimizedProcessingService(BaseProcessingService):
                     request.meeting_topic,
                     request.meeting_date,
                     request.meeting_time,
-                    request.participants_list
+                    request.participants_list,
+                    meeting_structure
                 )
                 
                 if not llm_result.success:
@@ -833,7 +836,8 @@ class OptimizedProcessingService(BaseProcessingService):
 
     async def _generate_llm_response(self, transcription_result, template,
                                    template_variables, llm_provider, openai_model_key=None, speaker_mapping=None,
-                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None):
+                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None,
+                                   meeting_structure=None):
         """Генерация ответа LLM с постобработкой"""
         llm_result = await self.llm_service.generate_protocol_with_fallback(
             llm_provider, transcription_result.transcription, template_variables,
@@ -843,7 +847,8 @@ class OptimizedProcessingService(BaseProcessingService):
             meeting_topic=meeting_topic,
             meeting_date=meeting_date,
             meeting_time=meeting_time,
-            participants=participants
+            participants=participants,
+            meeting_structure=meeting_structure
         )
         
         # Постобработка результатов - проверяем и исправляем неправильные JSON-структуры

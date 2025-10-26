@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     max_parallel_segments: Optional[int] = Field(None, description="Максимальное количество сегментов для параллельной обработки в Chain-of-Thought (None = без ограничений)")
     
     # Структурированные представления
-    enable_meeting_structure: bool = Field(False, description="Включить построение структурированного представления встречи")
+    enable_meeting_structure: bool = Field(True, description="Включить построение структурированного представления встречи")
     structure_extraction_model: Optional[str] = Field(None, description="Модель для извлечения структурированных данных (по умолчанию используется основная модель)")
     cache_meeting_structures: bool = Field(True, description="Кэшировать структурированные представления встреч")
     
