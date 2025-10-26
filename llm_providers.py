@@ -1680,8 +1680,18 @@ async def _process_single_segment(
         logger.debug(f"Content:\n{content}")
         logger.debug("=" * 80)
     
-    # Парсим JSON ответ
-    segment_result = json.loads(content)
+    # Парсим JSON ответ с обработкой ошибок
+    try:
+        segment_result = json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.warning(f"Ошибка парсинга JSON для сегмента {segment_idx + 1}: {e}, пытаюсь извлечь JSON из текста")
+        start_idx = content.find('{')
+        end_idx = content.rfind('}') + 1
+        if start_idx != -1 and end_idx > start_idx:
+            json_str = content[start_idx:end_idx]
+            segment_result = json.loads(json_str)  # Если не удастся - выбросит исключение и сработает retry
+        else:
+            raise  # Нет JSON в ответе - retry
     
     logger.info(f"Сегмент {segment_idx + 1} обработан успешно")
     

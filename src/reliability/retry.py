@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import json
 import time
 from typing import Callable, Any, Type, Union, List, Optional
 from functools import wraps
@@ -176,5 +177,6 @@ LLM_RETRY_CONFIG = RetryConfig(
         ConnectionError,
         TimeoutError,
         RuntimeError,
+        json.JSONDecodeError,
     ]
 )
