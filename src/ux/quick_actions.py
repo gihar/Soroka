@@ -13,6 +13,8 @@ from config import settings
 from aiogram.filters import Command
 from loguru import logger
 
+from src.utils.telegram_safe import safe_edit_text
+
 
 class QuickActionsUI:
     """Интерфейс быстрых действий"""
@@ -499,7 +501,8 @@ def setup_quick_actions_handlers() -> Router:
     @router.callback_query(F.data == "quick_process_default")
     async def quick_process_default_handler(callback: CallbackQuery):
         """Быстрая обработка с настройками по умолчанию"""
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             "🚀 **Быстрая обработка**\n\n"
             "Будут использованы настройки по умолчанию:\n"
             "• 📝 Стандартный шаблон протокола\n"
@@ -524,7 +527,8 @@ def setup_quick_actions_handlers() -> Router:
         
         template_name = template_names.get(template_type, "Выбранный шаблон")
         
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             f"📝 **Выбран шаблон:** {template_name}\n\n"
             f"Теперь отправьте файл для обработки или выберите ИИ для генерации."
         )

@@ -9,6 +9,7 @@ from loguru import logger
 
 from services import UserService, TemplateService, EnhancedLLMService, OptimizedProcessingService
 from src.utils.pdf_converter import convert_markdown_to_pdf
+from src.utils.telegram_safe import safe_edit_text
 
 
 async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
@@ -39,7 +40,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             available_providers = llm_service.get_available_providers()
             provider_name = available_providers.get(llm_provider, llm_provider)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"✅ LLM провайдер изменен на: {provider_name}\n\n"
                 f"Теперь этот LLM будет использоваться автоматически для всех обработок."
             )
@@ -55,7 +56,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         try:
             await user_service.update_user_llm_preference(callback.from_user.id, None)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🔄 Предпочтения LLM сброшены.\n\n"
                 "Теперь бот будет спрашивать выбор LLM при каждой обработке файла."
             )
@@ -109,7 +110,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             templates = await template_service.get_all_templates()
             
             if not templates:
-                await callback.message.edit_text("❌ Шаблоны не найдены. Обратитесь к администратору.")
+                await safe_edit_text(callback.message, "❌ Шаблоны не найдены. Обратитесь к администратору.")
                 return
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -120,7 +121,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 for t in templates
             ])
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "📝 Выберите шаблон для протокола:",
                 reply_markup=keyboard
             )
@@ -170,7 +171,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             mode_name = mode_names.get(mode, mode)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"✅ **Режим транскрипции изменен на:** {mode_name}\n\n"
                 f"Новый режим будет использоваться для всех последующих обработок файлов.",
                 parse_mode="Markdown"
@@ -225,7 +226,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"📝 **{category_title}**\n\n"
                 f"Найдено шаблонов: {len(templates)}",
                 reply_markup=keyboard
@@ -272,7 +273,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             )])
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
             
-            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+            await safe_edit_text(callback.message, text, parse_mode="Markdown", reply_markup=keyboard)
             await callback.answer()
             
         except Exception as e:
@@ -292,7 +293,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     InlineKeyboardButton(text="↩️ Отмена", callback_data=f"view_template_{template_id}")
                 ]
             ])
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"Вы уверены, что хотите удалить шаблон:\n\n• {template.name}",
                 reply_markup=keyboard
             )
@@ -318,7 +319,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )] for t in templates
                 ] + [[InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_template")]])
 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "🗑 Шаблон удалён.\n\n📝 **Доступные шаблоны:**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -376,7 +377,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
@@ -412,7 +413,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 )]
             ])
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🤖 **Выберите предпочитаемый ИИ**\n\n"
                 "Этот ИИ будет использоваться автоматически для всех обработок:",
                 reply_markup=keyboard
@@ -430,7 +431,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             from config import settings as app_settings
             models = getattr(app_settings, 'openai_models', [])
             if not models or len(models) == 0:
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ Не настроены модели OpenAI.\n\n"
                     "Добавьте переменную окружения `OPENAI_MODELS` с перечнем пресетов.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -450,7 +451,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             keyboard_rows.append([InlineKeyboardButton(text="🔄 Сбросить выбор модели", callback_data="reset_openai_model_preference")])
             keyboard_rows.append([InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")])
 
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🧠 **Модель OpenAI**\n\n"
                 "Выберите модель, которая будет использоваться при провайдере OpenAI:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
@@ -473,7 +474,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 model_name = preset.name if preset else model_key
             except Exception:
                 model_name = model_key
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"✅ Модель OpenAI обновлена: {model_name}.\n\n"
                 "Она будет использоваться при выборе провайдера OpenAI.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -490,7 +491,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
         """Сбрасывает предпочитаемую модель OpenAI"""
         try:
             await user_service.update_user_openai_model_preference(callback.from_user.id, None)
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🔄 Выбор модели OpenAI сброшен.\n\n"
                 "Будет использован пресет по умолчанию.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -524,7 +525,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )]
                 ])
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "📝 **Шаблон по умолчанию**\n\n"
                     "У вас пока нет доступных шаблонов.\n"
                     "Создайте шаблон, чтобы установить его по умолчанию:",
@@ -580,7 +581,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "📝 **Шаблон по умолчанию**\n\n"
                     "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
                     "📁 **Категории** - выберите конкретный шаблон\n\n"
@@ -639,7 +640,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"📝 **{category_title}**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон для установки по умолчанию:",
@@ -693,7 +694,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"📝 **{category_title}**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон:",
@@ -751,7 +752,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "📝 **Выберите шаблон для протокола:**\n\n"
                 "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
                 "📁 **Категории** - выберите тип встречи",
@@ -774,7 +775,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             # Не устанавливаем template_id - позволяем ML-селектору выбрать после транскрипции
             await state.update_data(template_id=0, use_smart_selection=True)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🤖 **Умный выбор шаблона активирован!**\n\n"
                 "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
                 "наиболее подходящий шаблон после транскрипции.\n\n"
@@ -799,7 +800,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             # Устанавливаем умный выбор
             await state.update_data(template_id=0, use_smart_selection=True)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🤖 **Умный выбор шаблона**\n\n"
                 "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                 "⏳ Переходим к выбору ИИ для обработки...",
@@ -824,7 +825,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             user = await user_service.get_user_by_telegram_id(callback.from_user.id)
             
             if not user or not user.default_template_id:
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ **Ошибка**\n\n"
                     "У вас не установлен шаблон по умолчанию.",
                     parse_mode="Markdown"
@@ -834,7 +835,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             # Если сохранён умный выбор (template_id = 0)
             if user.default_template_id == 0:
                 await state.update_data(template_id=0, use_smart_selection=True)
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "🤖 **Используется Умный выбор шаблона**\n\n"
                     "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                     "⏳ Переходим к выбору ИИ для обработки...",
@@ -844,7 +845,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 # Используем конкретный шаблон
                 template = await template_service.get_template_by_id(user.default_template_id)
                 if not template:
-                    await callback.message.edit_text(
+                    await safe_edit_text(callback.message, 
                         "❌ **Ошибка**\n\n"
                         "Сохранённый шаблон не найден.",
                         parse_mode="Markdown"
@@ -852,7 +853,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     return
                 
                 await state.update_data(template_id=template.id, use_smart_selection=False)
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     f"📋 **Используется шаблон: {template.name}**\n\n"
                     "⏳ Переходим к выбору ИИ для обработки...",
                     parse_mode="Markdown"
@@ -876,7 +877,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             templates = await template_service.get_all_templates()
             
             if not templates:
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ **Шаблоны не найдены**\n\n"
                     "Обратитесь к администратору.",
                     parse_mode="Markdown"
@@ -923,7 +924,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "⚙️ **Выберите шаблон по умолчанию:**\n\n"
                 "Выбранный шаблон будет сохранён и использован для обработки этого файла.",
                 reply_markup=keyboard,
@@ -978,7 +979,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"⚙️ **{category_title}**\n\n"
                 f"Выберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
@@ -1003,7 +1004,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 await template_service.set_user_default_template(callback.from_user.id, 0)
                 await state.update_data(template_id=0, use_smart_selection=True)
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "✅ **Умный выбор установлен по умолчанию**\n\n"
                     "🤖 ИИ автоматически подберёт подходящий шаблон.\n\n"
                     "⏳ Переходим к выбору ИИ для обработки...",
@@ -1015,7 +1016,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 template = await template_service.get_template_by_id(template_id)
                 
                 if not template:
-                    await callback.message.edit_text(
+                    await safe_edit_text(callback.message, 
                         "❌ **Ошибка**\n\n"
                         "Шаблон не найден.",
                         parse_mode="Markdown"
@@ -1026,7 +1027,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 await template_service.set_user_default_template(callback.from_user.id, template_id)
                 await state.update_data(template_id=template_id, use_smart_selection=False)
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     f"✅ **Шаблон установлен: {template.name}**\n\n"
                     f"Шаблон сохранён по умолчанию и будет использован для обработки.\n\n"
                     "⏳ Переходим к выбору ИИ для обработки...",
@@ -1059,7 +1060,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 )]
             ])
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "🔄 **Настройки сброшены**\n\n"
                 "Все ваши настройки восстановлены по умолчанию:\n\n"
                 "• Предпочтения ИИ сброшены\n"
@@ -1101,7 +1102,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 )]
             ])
 
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "📤 **Вывод протокола**\n\n"
                 "Выберите, как отправлять готовый протокол:\n"
                 "• 💬 В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
@@ -1138,7 +1139,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 )]
             ])
 
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"✅ Режим вывода протокола изменён на: {mode_text}",
                 reply_markup=keyboard
             )
@@ -1155,7 +1156,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             keyboard = QuickActionsUI.create_settings_menu()
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "⚙️ **Настройки бота**\n\n"
                 "Настройте бота под ваши предпочтения:",
                 reply_markup=keyboard
@@ -1187,7 +1188,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 
                 # Если template_id = 0, это "Умный выбор"
                 if template_id == 0:
-                    await callback.message.edit_text(
+                    await safe_edit_text(callback.message, 
                         "✅ **Установлен режим: Умный выбор**\n\n"
                         "🤖 ИИ будет автоматически подбирать подходящий шаблон "
                         "на основе содержания каждой встречи.\n\n"
@@ -1204,7 +1205,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     # Получаем информацию о конкретном шаблоне
                     template = await template_service.get_template_by_id(template_id)
                     
-                    await callback.message.edit_text(
+                    await safe_edit_text(callback.message, 
                         f"✅ **Шаблон по умолчанию установлен!**\n\n"
                         f"Теперь шаблон **{template.name}** будет использоваться автоматически "
                         f"при обработке файлов.\n\n"
@@ -1220,7 +1221,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )]
                 ])
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ **Ошибка установки шаблона**\n\n"
                     "Не удалось установить шаблон по умолчанию.\n"
                     "Возможно, шаблон недоступен или произошла ошибка.",
@@ -1250,7 +1251,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     )]
                 ])
                 
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "🔄 **Шаблон по умолчанию сброшен**\n\n"
                     "Теперь бот будет спрашивать выбор шаблона при каждой обработке файла.\n\n"
                     "💡 **Рекомендуем:** Установите '🤖 Умный выбор' для автоматического подбора "
@@ -1284,7 +1285,7 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
     available_providers = llm_service.get_available_providers()
     
     if not available_providers:
-        await callback.message.edit_text(
+        await safe_edit_text(callback.message, 
             "❌ Нет доступных LLM провайдеров. "
             "Проверьте конфигурацию API ключей."
         )
@@ -1314,7 +1315,7 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
                         llm_display = preset.name
                 except Exception:
                     pass
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"🤖 Используется LLM: {llm_display}\n\n"
                 "⏳ Начинаю обработку..."
             )
@@ -1334,7 +1335,7 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
         for provider_key, provider_name in available_providers.items()
     ])
     
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "🤖 Выберите LLM для обработки:",
         reply_markup=keyboard
     )
@@ -1370,7 +1371,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         
         # Проверяем наличие LLM (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
             )
             await state.clear()
@@ -1378,7 +1379,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         
         # Если не используется умный выбор, проверяем наличие template_id
         if not data.get('use_smart_selection') and not data.get('template_id'):
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
             )
             await state.clear()
@@ -1388,14 +1389,14 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         is_external_file = data.get('is_external_file', False)
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
-                await callback.message.edit_text(
+                await safe_edit_text(callback.message, 
                     "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
                 )
                 await state.clear()
@@ -1473,7 +1474,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await callback.message.edit_text("❌ Произошла ошибка при подготовке обработки файла.")
+        await safe_edit_text(callback.message, "❌ Произошла ошибка при подготовке обработки файла.")
         await state.clear()
 
 

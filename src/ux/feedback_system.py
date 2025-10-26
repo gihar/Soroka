@@ -18,6 +18,7 @@ import os
 # Добавляем корневую директорию в путь для импорта database
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from database import db
+from src.utils.telegram_safe import safe_edit_text
 
 
 @dataclass
@@ -277,7 +278,8 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             
             # Благодарим пользователя
             rating_emoji = "⭐" * rating
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 f"🙏 **Спасибо за оценку!**\n\n"
                 f"Ваша оценка: {rating}/5 {rating_emoji}\n\n",
                 parse_mode="Markdown"
@@ -290,7 +292,8 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
     @router.callback_query(F.data.startswith("feedback_skip_"))
     async def handle_skip_feedback(callback: CallbackQuery):
         """Обработчик пропуска оценки"""
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             "👌 **Оценка пропущена**\n\n"
             "Вы всегда можете оставить обратную связь командой /feedback"
         )
@@ -310,7 +313,8 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             message_text = FeedbackUI.format_feedback_request(feedback_type)
             keyboard = FeedbackUI.create_rating_keyboard(feedback_type)
             
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 message_text,
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -383,7 +387,8 @@ class QuickFeedbackManager:
                     1: "😔 Извините за неудобства. Мы работаем над улучшениями."
                 }
                 
-                await callback.message.edit_text(
+                await safe_edit_text(
+                    callback.message,
                     f"{responses.get(rating, 'Спасибо за оценку!')}\n\n"
                     f"💡 Есть предложения? Используйте команду /feedback"
                 )
@@ -397,7 +402,8 @@ class QuickFeedbackManager:
             """Обработчик перехода к подробной обратной связи"""
             keyboard = FeedbackUI.create_feedback_type_keyboard()
             
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 "📋 **Подробная обратная связь**\n\n"
                 "Выберите, что именно вы хотели бы оценить:",
                 reply_markup=keyboard,

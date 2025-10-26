@@ -266,3 +266,60 @@ async def safe_send_document(
         logger.error(f"Критическая ошибка в safe_send_document: {e}")
         return None
 
+
+async def safe_bot_edit_message(
+    bot,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    parse_mode: Optional[str] = None,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+    disable_web_page_preview: Optional[bool] = None,
+    **kwargs
+) -> Optional[Message]:
+    """
+    Безопасное редактирование текста сообщения через bot
+    
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        message_id: ID сообщения для редактирования
+        text: Новый текст
+        parse_mode: Режим парсинга
+        reply_markup: Клавиатура
+        disable_web_page_preview: Отключить превью ссылок
+        **kwargs: Дополнительные параметры
+    
+    Returns:
+        Отредактированное сообщение или None при ошибке
+    """
+    try:
+        result = await telegram_rate_limiter.safe_send_with_retry(
+            bot.edit_message_text,
+            text=text,
+            chat_id=chat_id,
+            message_id=message_id,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+            disable_web_page_preview=disable_web_page_preview,
+            **kwargs
+        )
+        
+        if result is None:
+            logger.warning(f"Не удалось отредактировать сообщение {message_id} в чате {chat_id}")
+        
+        return result
+    
+    except TelegramBadRequest as e:
+        # Игнорируем ошибку "message is not modified" - это нормально
+        if "message is not modified" in str(e).lower():
+            logger.debug("Сообщение не изменилось, пропускаем редактирование")
+            return None
+        
+        logger.error(f"Ошибка при редактировании сообщения: {e}")
+        return None
+    
+    except Exception as e:
+        logger.error(f"Критическая ошибка в safe_bot_edit_message: {e}")
+        return None
+

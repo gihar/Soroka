@@ -13,6 +13,7 @@ from services.enhanced_llm_service import EnhancedLLMService
 from services.optimized_processing_service import OptimizedProcessingService
 from config import settings
 from src.utils.admin_utils import is_admin
+from src.utils.telegram_safe import safe_edit_text
 
 # Импорт сервиса очистки
 try:
@@ -491,13 +492,13 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         
         try:
             await callback.answer()
-            await callback.message.edit_text("🔄 Получаю статистику системы...")
+            await safe_edit_text(callback.message, "🔄 Получаю статистику системы...")
             
             report = monitoring_api.format_status_report()
-            await callback.message.edit_text(report, parse_mode="Markdown")
+            await safe_edit_text(callback.message, report, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в admin_status_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при получении статуса: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при получении статуса: {e}")
     
     @router.callback_query(F.data == "admin_health")
     async def admin_health_callback(callback: CallbackQuery):
@@ -508,7 +509,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         
         try:
             await callback.answer()
-            await callback.message.edit_text("🔍 Выполняю проверку здоровья системы...")
+            await safe_edit_text(callback.message, "🔍 Выполняю проверку здоровья системы...")
             
             health_results = await health_checker.check_all()
             
@@ -531,10 +532,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 report_lines.append("")
             
             report = "\n".join(report_lines)
-            await callback.message.edit_text(report, parse_mode="Markdown")
+            await safe_edit_text(callback.message, report, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в admin_health_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при проверке здоровья: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при проверке здоровья: {e}")
     
     @router.callback_query(F.data == "admin_performance")
     async def admin_performance_callback(callback: CallbackQuery):
@@ -549,7 +550,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             )
             
             await callback.answer()
-            await callback.message.edit_text("📊 Собираю данные о производительности...")
+            await safe_edit_text(callback.message, "📊 Собираю данные о производительности...")
             
             # Собираем статистику
             cache_stats = performance_cache.get_stats()
@@ -584,10 +585,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 f"• Эффективность: {metrics_stats['processing']['avg_efficiency_ratio']}\n"
             )
             
-            await callback.message.edit_text(report, parse_mode="Markdown")
+            await safe_edit_text(callback.message, report, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в admin_performance_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при получении статистики: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при получении статистики: {e}")
     
     @router.callback_query(F.data == "admin_cleanup")
     async def admin_cleanup_callback(callback: CallbackQuery):
@@ -600,7 +601,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             await callback.answer()
             
             if not CLEANUP_SERVICE_AVAILABLE:
-                await callback.message.edit_text("❌ Сервис очистки недоступен.")
+                await safe_edit_text(callback.message, "❌ Сервис очистки недоступен.")
                 return
             
             # Получаем статистику
@@ -621,10 +622,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 "Используйте команду /cleanup_force для принудительной очистки"
             )
             
-            await callback.message.edit_text(report, parse_mode="Markdown")
+            await safe_edit_text(callback.message, report, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в admin_cleanup_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при получении статистики: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при получении статистики: {e}")
     
     @router.callback_query(F.data == "admin_transcription")
     async def admin_transcription_callback(callback: CallbackQuery):
@@ -676,7 +677,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             
             current_description = mode_descriptions.get(current_mode, "Неизвестный режим")
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"🎙️ **Текущий режим транскрипции:** {current_mode}\n"
                 f"📝 **Описание:** {current_description}\n\n"
                 f"Выберите новый режим:",
@@ -685,7 +686,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             )
         except Exception as e:
             logger.error(f"Ошибка в admin_transcription_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при получении режимов транскрипции: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при получении режимов транскрипции: {e}")
     
     @router.callback_query(F.data == "admin_reset")
     async def admin_reset_callback(callback: CallbackQuery):
@@ -696,7 +697,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         
         try:
             await callback.answer()
-            await callback.message.edit_text("🔄 Сбрасываю компоненты надежности...")
+            await safe_edit_text(callback.message, "🔄 Сбрасываю компоненты надежности...")
             
             # Сбрасываем компоненты
             await llm_service.reset_reliability_components()
@@ -707,10 +708,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 cb.consecutive_failures = 0
                 cb.status = health_checker.HealthStatus.UNKNOWN
             
-            await callback.message.edit_text("✅ Компоненты надежности сброшены успешно.")
+            await safe_edit_text(callback.message, "✅ Компоненты надежности сброшены успешно.")
         except Exception as e:
             logger.error(f"Ошибка в admin_reset_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при сбросе: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при сбросе: {e}")
     
     @router.callback_query(F.data == "admin_export")
     async def admin_export_callback(callback: CallbackQuery):
@@ -721,7 +722,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         
         try:
             await callback.answer()
-            await callback.message.edit_text("📥 Экспортирую статистику...")
+            await safe_edit_text(callback.message, "📥 Экспортирую статистику...")
             
             # Экспортируем статистику
             json_stats = monitoring_api.export_stats_json()
@@ -740,7 +741,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             await callback.message.delete()
         except Exception as e:
             logger.error(f"Ошибка в admin_export_callback: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при экспорте: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка при экспорте: {e}")
     
     @router.callback_query(F.data == "admin_help")
     async def admin_help_callback(callback: CallbackQuery):
@@ -778,7 +779,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 **Примечание:** Административные команды доступны только авторизованным пользователям.
         """
         
-        await callback.message.edit_text(help_text, parse_mode="Markdown")
+        await safe_edit_text(callback.message, help_text, parse_mode="Markdown")
     
     @router.callback_query(F.data == "admin_back_to_main")
     async def admin_back_to_main_callback(callback: CallbackQuery):
@@ -793,7 +794,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         
         # Показываем меню администратора заново
         keyboard = QuickActionsUI.create_admin_menu()
-        await callback.message.edit_text(
+        await safe_edit_text(callback.message, 
             "🔧 **Меню администратора**\n\n"
             "Выберите действие:",
             reply_markup=keyboard,

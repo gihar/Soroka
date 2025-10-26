@@ -11,6 +11,7 @@ from loguru import logger
 from services import TemplateService
 from models.template import TemplateCreate
 from exceptions import TemplateValidationError
+from src.utils.telegram_safe import safe_edit_text
 
 
 class TemplateStates(StatesGroup):
@@ -29,7 +30,8 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Обработчик добавления нового шаблона"""
         try:
             await state.set_state(TemplateStates.waiting_for_name)
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 "📝 **Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
                 parse_mode="Markdown"
@@ -44,7 +46,8 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Обработчик создания шаблона из меню настроек"""
         try:
             await state.set_state(TemplateStates.waiting_for_name)
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 "📝 **Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
                 parse_mode="Markdown"
@@ -168,7 +171,8 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             
             created_template = await template_service.create_template(template_create)
             
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 f"✅ **Шаблон успешно создан!**\n\n"
                 f"**Название:** {created_template.name}\n"
                 f"**ID:** {created_template.id}\n\n"
@@ -180,7 +184,10 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при сохранении шаблона: {e}")
-            await callback.message.edit_text(f"❌ Ошибка при сохранении шаблона: {e}")
+            await safe_edit_text(
+                callback.message,
+                f"❌ Ошибка при сохранении шаблона: {e}"
+            )
         
         await state.clear()
         await callback.answer()
@@ -190,7 +197,8 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Редактирование шаблона"""
         try:
             await state.set_state(TemplateStates.waiting_for_content)
-            await callback.message.edit_text(
+            await safe_edit_text(
+                callback.message,
                 "🔄 **Редактирование шаблона**\n\n"
                 "Введите новое содержимое шаблона:",
                 parse_mode="Markdown"
@@ -205,7 +213,10 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Отмена создания шаблона"""
         try:
             await state.clear()
-            await callback.message.edit_text("❌ Создание шаблона отменено.")
+            await safe_edit_text(
+                callback.message,
+                "❌ Создание шаблона отменено."
+            )
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в cancel_template_callback: {e}")

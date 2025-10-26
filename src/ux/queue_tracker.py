@@ -9,6 +9,8 @@ from aiogram import Bot
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
+from src.utils.telegram_safe import safe_bot_edit_message
+
 
 class QueuePositionTracker:
     """Отслеживает и отображает позицию задачи в очереди"""
@@ -100,20 +102,16 @@ class QueuePositionTracker:
                 return
             
             if self.message_id:
-                try:
-                    await self.bot.edit_message_text(
-                        text=text,
-                        chat_id=self.chat_id,
-                        message_id=self.message_id,
-                        reply_markup=keyboard,
-                        parse_mode="Markdown"
-                    )
+                result = await safe_bot_edit_message(
+                    self.bot,
+                    chat_id=self.chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+                if result is not None:
                     self._last_text = text
-                except Exception as e:
-                    if "message is not modified" in str(e).lower():
-                        logger.debug("Сообщение не изменилось, пропускаем обновление")
-                    else:
-                        logger.error(f"Ошибка обновления позиции в очереди: {e}")
             else:
                 # Если message_id еще не установлен, создаем новое сообщение
                 msg = await self.bot.send_message(
@@ -139,13 +137,15 @@ class QueuePositionTracker:
                 "⏳ Подготовка к обработке..."
             )
             
-            await self.bot.edit_message_text(
-                text=text,
+            result = await safe_bot_edit_message(
+                self.bot,
                 chat_id=self.chat_id,
                 message_id=self.message_id,
+                text=text,
                 parse_mode="Markdown"
             )
-            self._last_text = text
+            if result is not None:
+                self._last_text = text
             
         except Exception as e:
             logger.error(f"Ошибка отображения начала обработки: {e}")
@@ -163,10 +163,11 @@ class QueuePositionTracker:
                 "Обработка файла была отменена по вашему запросу."
             )
             
-            await self.bot.edit_message_text(
-                text=text,
+            await safe_bot_edit_message(
+                self.bot,
                 chat_id=self.chat_id,
                 message_id=self.message_id,
+                text=text,
                 parse_mode="Markdown"
             )
             
@@ -187,10 +188,11 @@ class QueuePositionTracker:
                 "Попробуйте загрузить файл снова."
             )
             
-            await self.bot.edit_message_text(
-                text=text,
+            await safe_bot_edit_message(
+                self.bot,
                 chat_id=self.chat_id,
                 message_id=self.message_id,
+                text=text,
                 parse_mode="Markdown"
             )
             
