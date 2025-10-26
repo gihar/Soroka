@@ -280,50 +280,51 @@ class OptimizedProcessingService(BaseProcessingService):
                     else:
                         logger.warning("⚠️ Speaker mapping вернул пустой результат - протокол будет генерироваться без сопоставления спикеров")
                     
-                    # Отправляем уведомление пользователю о результатах сопоставления
-                    if progress_tracker:
-                        try:
-                            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                            import json
-                            
-                            notification_text = self._format_speaker_mapping_message(
-                                speaker_mapping,
-                                len(request.participants_list)
-                            )
-                            
-                            # Создаем клавиатуру с кнопками действий
-                            keyboard_buttons = []
-                            
-                            # Если есть хотя бы одно сопоставление, добавляем кнопку редактирования
-                            if speaker_mapping:
-                                # Сохраняем данные для callback (ограничим размер)
-                                callback_data = {
-                                    "action": "edit_mapping",
-                                    "task_id": str(request.user_id)  # Используем user_id как идентификатор
-                                }
-                                keyboard_buttons.append([InlineKeyboardButton(
-                                    text="✏️ Изменить сопоставление",
-                                    callback_data=f"edit_mapping:{request.user_id}"
-                                )])
-                            
-                            # Кнопка продолжения (всегда доступна)
-                            keyboard_buttons.append([InlineKeyboardButton(
-                                text="✅ Продолжить с текущим",
-                                callback_data=f"continue_mapping:{request.user_id}"
-                            )])
-                            
-                            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None
-                            
-                            await safe_send_message(
-                                progress_tracker.bot,
-                                progress_tracker.chat_id,
-                                notification_text,
-                                parse_mode="Markdown",
-                                reply_markup=keyboard
-                            )
-                            logger.debug("Уведомление о сопоставлении отправлено пользователю")
-                        except Exception as notify_error:
-                            logger.warning(f"Не удалось отправить уведомление о сопоставлении: {notify_error}")
+                    # ЗАКОММЕНТИРОВАНО: Промежуточное уведомление больше не отправляется
+                    # Информация о сопоставлении будет показана в финальном сообщении с протоколом
+                    # if progress_tracker:
+                    #     try:
+                    #         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    #         import json
+                    #         
+                    #         notification_text = self._format_speaker_mapping_message(
+                    #             speaker_mapping,
+                    #             len(request.participants_list)
+                    #         )
+                    #         
+                    #         # Создаем клавиатуру с кнопками действий
+                    #         keyboard_buttons = []
+                    #         
+                    #         # Если есть хотя бы одно сопоставление, добавляем кнопку редактирования
+                    #         if speaker_mapping:
+                    #             # Сохраняем данные для callback (ограничим размер)
+                    #             callback_data = {
+                    #                 "action": "edit_mapping",
+                    #                 "task_id": str(request.user_id)  # Используем user_id как идентификатор
+                    #             }
+                    #             keyboard_buttons.append([InlineKeyboardButton(
+                    #                 text="✏️ Изменить сопоставление",
+                    #                 callback_data=f"edit_mapping:{request.user_id}"
+                    #             )])
+                    #         
+                    #         # Кнопка продолжения (всегда доступна)
+                    #         keyboard_buttons.append([InlineKeyboardButton(
+                    #             text="✅ Продолжить с текущим",
+                    #             callback_data=f"continue_mapping:{request.user_id}"
+                    #         )])
+                    #         
+                    #         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None
+                    #         
+                    #         await safe_send_message(
+                    #             progress_tracker.bot,
+                    #             progress_tracker.chat_id,
+                    #             notification_text,
+                    #             parse_mode="Markdown",
+                    #             reply_markup=keyboard
+                    #         )
+                    #         logger.debug("Уведомление о сопоставлении отправлено пользователю")
+                    #     except Exception as notify_error:
+                    #         logger.warning(f"Не удалось отправить уведомление о сопоставлении: {notify_error}")
                     
                 except Exception as e:
                     logger.error(f"❌ ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True)
@@ -378,12 +379,19 @@ class OptimizedProcessingService(BaseProcessingService):
             if request.is_external_file:
                 asyncio.create_task(self._cleanup_temp_file(temp_file_path))
             
+            # Определяем название модели для результата
+            openai_model_key = None
+            if request.llm_provider == 'openai':
+                openai_model_key = getattr(user, 'preferred_openai_model_key', None)
+            llm_model_display_name = self._get_model_display_name(request.llm_provider, openai_model_key)
+            
             # Создаем результат
             return ProcessingResult(
                 transcription_result=transcription_result,
                 protocol_text=protocol_text,
                 template_used=template.model_dump() if hasattr(template, 'model_dump') else template.__dict__,
                 llm_provider_used=request.llm_provider,
+                llm_model_used=llm_model_display_name,
                 processing_duration=processing_metrics.total_duration
             )
     
@@ -575,6 +583,9 @@ class OptimizedProcessingService(BaseProcessingService):
                     openai_model_key = getattr(user, 'preferred_openai_model_key', None)
             except Exception:
                 openai_model_key = None
+            
+            # Определяем название используемой модели
+            llm_model_name = self._get_model_display_name(request.llm_provider, openai_model_key)
             
             # Извлекаем анализ диаризации если есть
             diarization_analysis = None
@@ -795,6 +806,23 @@ class OptimizedProcessingService(BaseProcessingService):
             logger.error(f"Ошибка при извлечении переменных из шаблона: {e}")
             # Возвращаем базовый набор переменных как fallback
             return self._get_template_variables()
+
+    def _get_model_display_name(self, provider: str, openai_model_key: Optional[str] = None) -> str:
+        """Получить читаемое название модели"""
+        if provider == "openai":
+            if openai_model_key:
+                # Ищем пресет модели
+                try:
+                    preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                    if preset:
+                        return preset.name  # Используем читаемое имя из пресета
+                except Exception:
+                    pass
+            # Fallback на модель по умолчанию
+            return settings.openai_model or "GPT-4o"
+        
+        # Для других провайдеров - заглавная буква
+        return provider.capitalize()
 
     async def _generate_llm_response(self, transcription_result, template,
                                    template_variables, llm_provider, openai_model_key=None, speaker_mapping=None,

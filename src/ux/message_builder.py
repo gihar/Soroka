@@ -208,24 +208,24 @@ class MessageBuilder:
                     
                     message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB (экономия {ratio:.1f}%, -{saved_mb:.1f}MB)\n"
         
-        # Информация о диаризации (с ограничением списка участников)
-        if result.get("transcription_result", {}).get("diarization"):
+        # Информация о сопоставлении участников
+        speaker_mapping = result.get("speaker_mapping", {})
+        if speaker_mapping:
+            message += "\n👥 **Участники:**\n"
+            # Сортируем по speaker_id для предсказуемого порядка
+            sorted_mapping = sorted(speaker_mapping.items())
+            for speaker_id, participant_name in sorted_mapping:
+                speaker_id_escaped = escape_markdown_v2(speaker_id)
+                participant_name_escaped = escape_markdown_v2(participant_name)
+                message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
+        elif result.get("transcription_result", {}).get("diarization"):
+            # Если нет сопоставления, показываем информацию о количестве спикеров
             diarization = result["transcription_result"]["diarization"]
             speakers_count = diarization.get("total_speakers", 0)
             if speakers_count > 1:
-                speakers = diarization.get("speakers", [])
-                # Применяем маппинг к спикерам если есть
-                speaker_mapping = result.get("speaker_mapping", {})
-                if speaker_mapping:
-                    speakers = [speaker_mapping.get(s, s) for s in speakers]
-                # Ограничиваем список участников, чтобы не превысить лимит
-                if len(speakers) > 5:
-                    speakers_list = ", ".join(speakers[:5]) + f" и еще {len(speakers) - 5}"
-                else:
-                    speakers_list = ", ".join(speakers)
-                # Экранируем специальные символы в именах участников
-                speakers_list = escape_markdown_v2(speakers_list)
-                message += f"👥 Участники: {speakers_count} ({speakers_list})\n"
+                message += f"\n👥 Участников: {speakers_count}\n"
+        
+        message += "\n"
         
         # Время обработки
         if result.get("processing_duration"):
@@ -263,6 +263,23 @@ class MessageBuilder:
                     compressed_mb = compression.get("compressed_size_mb", 0)
                     ratio = compression.get("compression_ratio", 0)
                     message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB ({ratio:.1f}%)\n"
+            
+            # Информация о сопоставлении участников (сокращенная версия)
+            speaker_mapping = result.get("speaker_mapping", {})
+            if speaker_mapping:
+                message += "\n👥 **Участники:**\n"
+                sorted_mapping = sorted(speaker_mapping.items())
+                for speaker_id, participant_name in sorted_mapping:
+                    speaker_id_escaped = escape_markdown_v2(speaker_id)
+                    participant_name_escaped = escape_markdown_v2(participant_name)
+                    message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
+            elif result.get("transcription_result", {}).get("diarization"):
+                diarization = result["transcription_result"]["diarization"]
+                speakers_count = diarization.get("total_speakers", 0)
+                if speakers_count > 1:
+                    message += f"\n👥 Участников: {speakers_count}\n"
+            
+            message += "\n"
             
             if result.get("processing_duration"):
                 duration = result["processing_duration"]

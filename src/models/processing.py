@@ -50,6 +50,7 @@ class ProcessingResult(BaseModel):
     protocol_text: str = Field(..., description="Сгенерированный протокол")
     template_used: Dict[str, Any] = Field(..., description="Использованный шаблон")
     llm_provider_used: str = Field(..., description="Использованный LLM провайдер")
+    llm_model_used: Optional[str] = Field(None, description="Использованная модель LLM")
     processing_duration: Optional[float] = Field(None, description="Время обработки в секундах")
 
 

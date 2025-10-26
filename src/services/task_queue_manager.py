@@ -369,10 +369,15 @@ class TaskQueueManager:
             output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
             
             # Формируем словарь с результатом для MessageBuilder
+            # Определяем название модели для отображения
+            llm_display_name = result.llm_model_used if hasattr(result, 'llm_model_used') and result.llm_model_used else (
+                "OpenAI" if result.llm_provider_used == "openai" else result.llm_provider_used.capitalize()
+            )
+            
             result_dict = {
                 "template_used": result.template_used if hasattr(result, 'template_used') else {"name": "Неизвестный"},
                 "llm_provider_used": result.llm_provider_used,
-                "llm_model_name": result.llm_provider_used,
+                "llm_model_name": llm_display_name,
                 "transcription_result": {
                     "transcription": result.transcription_result.transcription if result.transcription_result else "",
                     "diarization": result.transcription_result.diarization if result.transcription_result else None,
