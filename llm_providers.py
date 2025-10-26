@@ -1823,6 +1823,60 @@ async def _process_single_segment(
     return (segment_idx, segment_result)
 
 
+def _merge_segment_results_fallback(
+    segment_results: List[Dict[str, Any]], 
+    template_variables: Dict[str, str]
+) -> Dict[str, Any]:
+    """
+    Объединяет результаты сегментов в финальный протокол (fallback стратегия).
+    Используется когда синтез через LLM не удался.
+    
+    Args:
+        segment_results: Список результатов обработки сегментов
+        template_variables: Переменные шаблона
+        
+    Returns:
+        Объединенный протокол
+    """
+    logger.warning("Используется fallback-стратегия объединения результатов сегментов")
+    
+    merged = {}
+    
+    for key in template_variables.keys():
+        # Собираем все значения для данного ключа из всех сегментов
+        values = []
+        for segment in segment_results:
+            if key in segment and segment[key]:
+                value = segment[key].strip()
+                # Пропускаем пустые значения и ошибки
+                if value and value != "Не указано" and value != "Нет данных" and "Ошибка" not in value:
+                    values.append(value)
+        
+        # Объединяем значения
+        if values:
+            # Удаляем дубликаты, сохраняя порядок
+            seen = set()
+            unique_values = []
+            for v in values:
+                # Для списков (начинаются с "- ") разбираем на элементы
+                if v.startswith("- ") or v.startswith("• "):
+                    items = [line.strip() for line in v.split('\n') if line.strip()]
+                    for item in items:
+                        if item not in seen:
+                            seen.add(item)
+                            unique_values.append(item)
+                else:
+                    if v not in seen:
+                        seen.add(v)
+                        unique_values.append(v)
+            
+            merged[key] = "\n".join(unique_values) if unique_values else "Не указано"
+        else:
+            merged[key] = "Не указано"
+    
+    return merged
+
+
 async def generate_protocol_chain_of_thought(
     manager: 'LLMManager',
     provider_name: str,
@@ -2053,17 +2107,51 @@ async def generate_protocol_chain_of_thought(
             logger.debug(f"Content:\n{content_synthesis}")
             logger.debug("=" * 80)
         
+        # Проверка на пустой ответ
+        if not content_synthesis or not content_synthesis.strip():
+            logger.error("Получен пустой ответ от LLM на этапе синтеза")
+            logger.warning("Пытаемся использовать fallback-стратегию объединения сегментов")
+            return _merge_segment_results_fallback(segment_results, template_variables)
+        
+        # Проверка на минимальные признаки JSON
+        if '{' not in content_synthesis or '}' not in content_synthesis:
+            logger.error(f"Ответ не содержит JSON структуры. Длина: {len(content_synthesis)}, начало: {content_synthesis[:200]}")
+            logger.warning("Пытаемся использовать fallback-стратегию объединения сегментов")
+            return _merge_segment_results_fallback(segment_results, template_variables)
+        
+        # Первая попытка: прямой парсинг
         try:
             final_protocol = json.loads(content_synthesis)
+            logger.info("Chain-of-Thought генерация завершена успешно (прямой парсинг)")
+            return final_protocol
         except json.JSONDecodeError as e:
-            logger.error(f"Ошибка парсинга JSON на этапе синтеза: {e}")
+            logger.warning(f"Ошибка прямого парсинга JSON на этапе синтеза: {e}")
+            logger.debug(f"Позиция ошибки: line {e.lineno}, column {e.colno}, char {e.pos}")
+            
+            # Вторая попытка: извлечение JSON из текста
             start_idx = content_synthesis.find('{')
             end_idx = content_synthesis.rfind('}') + 1
-            json_str = content_synthesis[start_idx:end_idx] if start_idx != -1 and end_idx > start_idx else content_synthesis
-            final_protocol = json.loads(json_str)
-        
-        logger.info("Chain-of-Thought генерация завершена успешно")
-        return final_protocol
+            
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = content_synthesis[start_idx:end_idx]
+                logger.debug(f"Пытаемся извлечь JSON из текста: длина {len(json_str)}, начало: {json_str[:100]}")
+                
+                try:
+                    final_protocol = json.loads(json_str)
+                    logger.info("Chain-of-Thought генерация завершена успешно (извлечение из текста)")
+                    return final_protocol
+                except json.JSONDecodeError as e2:
+                    logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
+                    logger.error(f"Позиция ошибки: line {e2.lineno}, column {e2.colno}, char {e2.pos}")
+                    logger.error(f"Содержимое ответа (первые 1000 символов):\n{content_synthesis[:1000]}")
+                    logger.error(f"Содержимое ответа (последние 500 символов):\n{content_synthesis[-500:]}")
+            else:
+                logger.error(f"Не удалось найти границы JSON в ответе")
+                logger.error(f"Полное содержимое ответа:\n{content_synthesis}")
+            
+            # Fallback: объединяем результаты сегментов напрямую
+            logger.warning("Все попытки парсинга JSON не удались, используем fallback-стратегию")
+            return _merge_segment_results_fallback(segment_results, template_variables)
     
     else:
         # Для других провайдеров используем стандартный подход
