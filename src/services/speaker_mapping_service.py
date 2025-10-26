@@ -46,7 +46,15 @@ class SpeakerMappingService:
             logger.info(f"Начало сопоставления {len(participants)} участников со спикерами")
             
             # Извлекаем информацию о спикерах из диаризации
-            speakers_info = self._extract_speakers_info(diarization_data)
+            # При full_text_matching не извлекаем фрагменты - вся информация в полной транскрипции
+            extract_samples = not self.full_text_matching
+            if not extract_samples:
+                logger.info("Режим full_text_matching: фрагменты речи не извлекаются (используется полная транскрипция)")
+            
+            speakers_info = self._extract_speakers_info(
+                diarization_data,
+                extract_samples=extract_samples
+            )
             
             if not speakers_info:
                 logger.warning("Нет информации о спикерах для сопоставления")
@@ -82,8 +90,21 @@ class SpeakerMappingService:
             # Возвращаем пустой mapping - протокол будет без имен
             return {}
     
-    def _extract_speakers_info(self, diarization_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Извлечение информации о спикерах из данных диаризации"""
+    def _extract_speakers_info(
+        self, 
+        diarization_data: Dict[str, Any],
+        extract_samples: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Извлечение информации о спикерах из данных диаризации
+        
+        Args:
+            diarization_data: Данные диаризации со спикерами
+            extract_samples: Извлекать ли текстовые фрагменты речи (False при full_text_matching)
+        
+        Returns:
+            Список информации о спикерах
+        """
         speakers_info = []
         
         # Получаем список спикеров
@@ -102,8 +123,13 @@ class SpeakerMappingService:
                 if seg.get('speaker') == speaker
             ]
             
-            # Распределяем фрагменты: начало, середина, конец (всего до 5 фрагментов)
-            text_samples = self._get_distributed_samples(speaker_segments, max_samples=5)
+            # Извлекаем фрагменты только если требуется
+            # При full_text_matching=True полная транскрипция уже содержит всю информацию,
+            # поэтому извлечение фрагментов избыточно и только расходует токены LLM
+            if extract_samples:
+                text_samples = self._get_distributed_samples(speaker_segments, max_samples=5)
+            else:
+                text_samples = []
             
             # Подсчет времени говорения
             total_time = sum(
@@ -284,20 +310,23 @@ class SpeakerMappingService:
                 participants_list.append(f"{i}. {short_name}")
         participants_str = "\n".join(participants_list)
         
-        # Форматируем информацию о спикерах с расширенным набором фрагментов
+        # Форматируем информацию о спикерах с фрагментами (если есть)
         speakers_list = []
         for speaker in speakers_info:
             speaker_id = speaker['speaker_id']
-            samples = speaker['text_samples'][:5]  # Увеличено до 5 фрагментов
+            samples = speaker['text_samples']
             
             speakers_list.append(f"\n{speaker_id}:")
+            
             if samples:
-                for i, sample in enumerate(samples, 1):
+                # Есть фрагменты - показываем их (до 5 штук)
+                for i, sample in enumerate(samples[:5], 1):
                     # Увеличена длина фрагмента до 300 символов
                     sample_text = sample[:300] + "..." if len(sample) > 300 else sample
                     speakers_list.append(f"  Фрагмент {i}: \"{sample_text}\"")
             else:
-                speakers_list.append("  (нет текстовых фрагментов)")
+                # Нет фрагментов - указываем на полную транскрипцию
+                speakers_list.append(f"  (см. полную транскрипцию ниже)")
         
         speakers_str = "\n".join(speakers_list)
         
