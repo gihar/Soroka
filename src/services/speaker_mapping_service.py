@@ -310,25 +310,28 @@ class SpeakerMappingService:
                 participants_list.append(f"{i}. {short_name}")
         participants_str = "\n".join(participants_list)
         
-        # Форматируем информацию о спикерах с фрагментами (если есть)
-        speakers_list = []
-        for speaker in speakers_info:
-            speaker_id = speaker['speaker_id']
-            samples = speaker['text_samples']
-            
-            speakers_list.append(f"\n{speaker_id}:")
-            
-            if samples:
-                # Есть фрагменты - показываем их (до 5 штук)
-                for i, sample in enumerate(samples[:5], 1):
-                    # Увеличена длина фрагмента до 300 символов
-                    sample_text = sample[:300] + "..." if len(sample) > 300 else sample
-                    speakers_list.append(f"  Фрагмент {i}: \"{sample_text}\"")
-            else:
-                # Нет фрагментов - указываем на полную транскрипцию
-                speakers_list.append(f"  (см. полную транскрипцию ниже)")
+        # Форматируем информацию о спикерах (только если есть фрагменты)
+        speakers_str = ""
         
-        speakers_str = "\n".join(speakers_list)
+        # Проверяем, есть ли хотя бы у одного спикера фрагменты
+        has_samples = any(speaker.get('text_samples') for speaker in speakers_info)
+        
+        if has_samples:
+            speakers_list = []
+            for speaker in speakers_info:
+                speaker_id = speaker['speaker_id']
+                samples = speaker['text_samples']
+                
+                speakers_list.append(f"\n{speaker_id}:")
+                
+                if samples:
+                    # Показываем фрагменты (до 5 штук)
+                    for i, sample in enumerate(samples[:5], 1):
+                        # Увеличена длина фрагмента до 300 символов
+                        sample_text = sample[:300] + "..." if len(sample) > 300 else sample
+                        speakers_list.append(f"  Фрагмент {i}: \"{sample_text}\"")
+            
+            speakers_str = "\n".join(speakers_list)
         
         # Получаем контекст транскрипции (полный или превью)
         formatted_transcript = diarization_data.get('formatted_transcript', '')
@@ -380,10 +383,7 @@ class SpeakerMappingService:
 ⚡ Проанализируй ВЕСЬ список участников и примени эту логику!
 ⚡ В результате используй имя в формате 'Имя Фамилия' (БЕЗ отчества) из списка!
 
-ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:
-{speakers_str}
-
-ФРАГМЕНТЫ ТРАНСКРИПЦИИ ДЛЯ АНАЛИЗА:
+{f"ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:{speakers_str}\n\n" if speakers_str else ""}ФРАГМЕНТЫ ТРАНСКРИПЦИИ ДЛЯ АНАЛИЗА:
 {transcript_preview}
 
 ЗАДАЧА:
