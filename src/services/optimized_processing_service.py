@@ -5,6 +5,7 @@
 import asyncio
 import time
 import os
+import json
 import aiofiles
 from typing import Dict, Any, Optional
 from loguru import logger
@@ -559,7 +560,12 @@ class OptimizedProcessingService(BaseProcessingService):
         # Создаем ключ кэша на основе транскрипции и шаблона
         transcription_hash = hash(str(transcription_result.transcription))
         template_hash = hash(str(template))
-        participants_hash = hash(str(sorted(request.participants_list))) if request.participants_list else "none"
+        participants_hash = (
+            hash(json.dumps(
+                sorted(request.participants_list, key=lambda x: x.get('name', '')),
+                sort_keys=True
+            )) if request.participants_list else "none"
+        )
         cache_key = f"llm:{request.llm_provider}:{transcription_hash}:{template_hash}:{participants_hash}"
         
         # Проверяем кэш
