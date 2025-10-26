@@ -1002,11 +1002,17 @@ class OptimizedProcessingService(BaseProcessingService):
     
     def _generate_result_cache_key(self, request: ProcessingRequest) -> str:
         """Генерировать ключ кэша для полного результата"""
-        # Включаем все параметры, влияющие на результат
+        # Для внешних файлов используем оригинальный URL
+        # Для Telegram файлов используем file_id
+        if request.is_external_file and request.file_url:
+            file_identifier = request.file_url
+        elif request.file_id:
+            file_identifier = request.file_id
+        else:
+            file_identifier = request.file_path
+        
         key_data = {
-            "file_id": request.file_id if not request.is_external_file else None,
-            "file_path": request.file_path if request.is_external_file else None,
-            "file_name": request.file_name,  # Добавляем имя файла для уникальности
+            "file_identifier": file_identifier,
             "template_id": request.template_id,
             "llm_provider": request.llm_provider,
             "language": request.language,

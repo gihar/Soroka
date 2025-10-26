@@ -1407,6 +1407,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             file_id=data.get('file_id') if not is_external_file else None,
             file_path=data.get('file_path') if is_external_file else None,
             file_name=data['file_name'],
+            file_url=data.get('file_url'),  # Оригинальный URL для внешних файлов
             template_id=data['template_id'],
             llm_provider=data['llm_provider'],
             user_id=callback.from_user.id,

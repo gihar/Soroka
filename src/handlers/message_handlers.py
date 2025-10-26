@@ -298,6 +298,7 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             file_id=data.get('file_id') if not is_external_file else None,
             file_path=data.get('file_path') if is_external_file else None,
             file_name=data['file_name'],
+            file_url=data.get('file_url'),  # Оригинальный URL для внешних файлов
             template_id=data['template_id'],
             llm_provider=data['llm_provider'],
             user_id=message.from_user.id,
@@ -649,6 +650,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await state.update_data(
                     file_path=temp_path,
                     file_name=original_filename,
+                    file_url=url,  # Сохраняем оригинальный URL для кеширования
                     is_external_file=True  # Флаг для отличия от Telegram файлов
                 )
                 
