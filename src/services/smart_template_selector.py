@@ -9,6 +9,16 @@ from loguru import logger
 from src.models.template import Template
 
 
+# Маппинг типов встреч к ключевым словам категорий шаблонов
+MEETING_TYPE_TO_CATEGORIES = {
+    'technical': ['техническое', 'code review', 'разработка', 'архитектура', 'технический'],
+    'business': ['деловое', 'переговоры', 'бизнес', 'продажи', 'коммерческ'],
+    'educational': ['обучение', 'презентация', 'лекция', 'тренинг', 'образовательн'],
+    'brainstorm': ['брейншторм', 'мозговой штурм', 'идеи', 'генерация'],
+    'status': ['статус', 'отчет', 'ретроспектива', 'стендап', 'отчетн'],
+}
+
+
 class SmartTemplateSelector:
     """Умный выбор шаблона на основе ML"""
     
@@ -80,7 +90,9 @@ class SmartTemplateSelector:
         transcription: str,
         templates: List[Template],
         top_k: int = 3,
-        user_history: Optional[List[int]] = None
+        user_history: Optional[List[int]] = None,
+        meeting_type: Optional[str] = None,
+        type_scores: Optional[Dict[str, float]] = None
     ) -> List[Tuple[Template, float]]:
         """
         Предложить подходящие шаблоны
@@ -90,6 +102,8 @@ class SmartTemplateSelector:
             templates: Доступные шаблоны
             top_k: Количество рекомендаций
             user_history: История использования (template_id)
+            meeting_type: Классифицированный тип встречи (для boost)
+            type_scores: Оценки по всем типам (для тонкой настройки)
         
         Returns:
             List[(template, confidence_score)]
@@ -129,7 +143,22 @@ class SmartTemplateSelector:
                     frequency = user_history.count(template.id)
                     history_boost = min(0.1 * frequency, 0.3)  # макс +30%
                 
-                final_score = similarity + history_boost
+                # Бонус за соответствие типу встречи
+                category_boost = 0.0
+                if meeting_type and meeting_type in MEETING_TYPE_TO_CATEGORIES:
+                    category_keywords = MEETING_TYPE_TO_CATEGORIES[meeting_type]
+                    template_text = f"{template.name} {template.description or ''} {template.category or ''}".lower()
+                    
+                    for keyword in category_keywords:
+                        if keyword in template_text:
+                            category_boost = 0.15  # +15% за соответствие категории
+                            logger.debug(
+                                f"Категорийный boost для шаблона '{template.name}': "
+                                f"meeting_type={meeting_type}, keyword='{keyword}'"
+                            )
+                            break
+                
+                final_score = similarity + history_boost + category_boost
                 scores.append((template, float(final_score)))
             
             # Сортируем по убыванию score

@@ -165,3 +165,159 @@ async def test_extract_keywords():
     assert "ретроспектива" in keywords
     assert "backlog" in keywords
 
+
+@pytest.mark.asyncio
+async def test_suggest_with_meeting_type_boost():
+    """Тест категорийного boost для типа встречи"""
+    selector = SmartTemplateSelector()
+    
+    templates = [
+        Template(
+            id=1,
+            name="Общее совещание",
+            description="Общие вопросы",
+            content="# Общее",
+            category="general",
+            tags=[],
+            keywords=[],
+            is_default=True,
+            created_at=datetime.now()
+        ),
+        Template(
+            id=2,
+            name="Техническое совещание",
+            description="Обсуждение технических вопросов",
+            content="# Техническое",
+            category="technical",
+            tags=["техническое"],
+            keywords=["архитектура", "код"],
+            is_default=True,
+            created_at=datetime.now()
+        )
+    ]
+    
+    # Тестовая транскрипция (техническая)
+    transcription = """
+    Обсудим архитектуру нашего API.
+    Нужно выбрать базу данных и настроить сервер.
+    Рассмотрим алгоритмы кэширования.
+    """
+    
+    # Без meeting_type - выбор на основе только similarity
+    suggestions_without_type = await selector.suggest_templates(
+        transcription, templates, top_k=2
+    )
+    
+    # С meeting_type='technical' - должен получить boost
+    suggestions_with_type = await selector.suggest_templates(
+        transcription, templates, top_k=2, meeting_type='technical'
+    )
+    
+    # Технический шаблон должен иметь более высокий score с boost
+    assert len(suggestions_with_type) > 0
+    tech_template_with_boost = next(
+        (s for s in suggestions_with_type if s[0].id == 2), None
+    )
+    assert tech_template_with_boost is not None
+    
+    # Проверяем, что boost действительно применился
+    if len(suggestions_without_type) > 0:
+        tech_template_without_boost = next(
+            (s for s in suggestions_without_type if s[0].id == 2), None
+        )
+        if tech_template_without_boost:
+            # Score с boost должен быть выше
+            assert tech_template_with_boost[1] > tech_template_without_boost[1]
+
+
+@pytest.mark.asyncio
+async def test_technical_meeting_selects_technical_template():
+    """Тест выбора технического шаблона для технической встречи"""
+    selector = SmartTemplateSelector()
+    
+    templates = [
+        Template(
+            id=1,
+            name="Деловая встреча",
+            description="Обсуждение бизнес-вопросов",
+            content="# Деловое",
+            category="business",
+            tags=["бизнес"],
+            keywords=["бюджет", "продажи"],
+            is_default=True,
+            created_at=datetime.now()
+        ),
+        Template(
+            id=2,
+            name="Code Review",
+            description="Обзор кода и технических решений",
+            content="# Code Review",
+            category="technical",
+            tags=["техническое", "разработка"],
+            keywords=["код", "архитектура"],
+            is_default=True,
+            created_at=datetime.now()
+        )
+    ]
+    
+    transcription = """
+    Сегодня проведем code review нового функционала.
+    Рассмотрим архитектуру микросервисов и API endpoints.
+    Обсудим алгоритмы обработки данных и оптимизацию запросов к базе.
+    """
+    
+    suggestions = await selector.suggest_templates(
+        transcription, templates, top_k=2, meeting_type='technical'
+    )
+    
+    assert len(suggestions) > 0
+    # Технический шаблон должен быть первым
+    assert suggestions[0][0].id == 2
+    assert suggestions[0][1] > 0.3  # Уверенность должна быть выше
+
+
+@pytest.mark.asyncio
+async def test_educational_meeting_selects_educational_template():
+    """Тест выбора образовательного шаблона для обучающей встречи"""
+    selector = SmartTemplateSelector()
+    
+    templates = [
+        Template(
+            id=1,
+            name="Статус встреча",
+            description="Отчет по статусу проекта",
+            content="# Статус",
+            category="status",
+            tags=["отчет"],
+            keywords=["статус", "прогресс"],
+            is_default=True,
+            created_at=datetime.now()
+        ),
+        Template(
+            id=2,
+            name="Обучающая сессия",
+            description="Образовательная презентация",
+            content="# Обучение",
+            category="educational",
+            tags=["обучение", "презентация"],
+            keywords=["лекция", "тренинг"],
+            is_default=True,
+            created_at=datetime.now()
+        )
+    ]
+    
+    transcription = """
+    Проведем обучающую сессию по новым технологиям.
+    Я подготовил презентацию с примерами.
+    В конце будет время для вопросов и практических упражнений.
+    """
+    
+    suggestions = await selector.suggest_templates(
+        transcription, templates, top_k=2, meeting_type='educational'
+    )
+    
+    assert len(suggestions) > 0
+    # Образовательный шаблон должен быть первым
+    assert suggestions[0][0].id == 2
+    assert suggestions[0][1] > 0.3
+

@@ -411,6 +411,17 @@ class OptimizedProcessingService(BaseProcessingService):
             all_templates = await self.template_service.get_all_templates()
             return all_templates[0] if all_templates else None
         
+        # Классифицируем тип встречи для улучшения рекомендации
+        from src.services.meeting_classifier import meeting_classifier
+        meeting_type, type_scores = meeting_classifier.classify(
+            transcription_result.transcription,
+            diarization_analysis=None
+        )
+        logger.info(
+            f"Тип встречи для рекомендации шаблона: {meeting_type} "
+            f"(оценки: {', '.join(f'{k}={v:.2f}' for k, v in list(type_scores.items())[:3])})"
+        )
+        
         # Получаем историю использования с защитой от ошибок
         user_stats = await db.get_user_stats(request.user_id)
         template_history = []
@@ -421,19 +432,21 @@ class OptimizedProcessingService(BaseProcessingService):
                 if isinstance(t, dict) and 'id' in t
             ]
         
-        # ML-based рекомендация
+        # ML-based рекомендация с учетом типа встречи
         suggestions = await smart_selector.suggest_templates(
             transcription=transcription_result.transcription,
             templates=templates,  # уже список объектов Template
             top_k=3,
-            user_history=template_history
+            user_history=template_history,
+            meeting_type=meeting_type,
+            type_scores=type_scores
         )
         
         if suggestions:
             best_template, confidence = suggestions[0]
             logger.info(
                 f"Рекомендован шаблон '{best_template.name}' "
-                f"(уверенность: {confidence:.2%})"
+                f"(уверенность: {confidence:.2%}, тип встречи: {meeting_type})"
             )
             
             # Возвращаем лучший вариант
