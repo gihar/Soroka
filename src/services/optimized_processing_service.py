@@ -559,7 +559,8 @@ class OptimizedProcessingService(BaseProcessingService):
         # Создаем ключ кэша на основе транскрипции и шаблона
         transcription_hash = hash(str(transcription_result.transcription))
         template_hash = hash(str(template))
-        cache_key = f"llm:{request.llm_provider}:{transcription_hash}:{template_hash}"
+        participants_hash = hash(str(sorted(request.participants_list))) if request.participants_list else "none"
+        cache_key = f"llm:{request.llm_provider}:{transcription_hash}:{template_hash}:{participants_hash}"
         
         # Проверяем кэш
         cached_llm_result = await performance_cache.get(cache_key)
@@ -1057,7 +1058,8 @@ class OptimizedProcessingService(BaseProcessingService):
             "template_id": request.template_id,
             "llm_provider": request.llm_provider,
             "language": request.language,
-            "is_external_file": request.is_external_file
+            "is_external_file": request.is_external_file,
+            "participants_list": request.participants_list
         }
         return performance_cache._generate_key("full_result", key_data)
     
