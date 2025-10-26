@@ -477,6 +477,21 @@ class OpenAIProvider(LLMProvider):
             _snippet = user_prompt[:400].replace("\n", " ")
             logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
 
+            # DEBUG логирование запроса
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug("[DEBUG] OpenAI REQUEST - generate_protocol")
+                logger.debug("=" * 80)
+                logger.debug(f"Model: {selected_model}")
+                logger.debug(f"Base URL: {selected_base_url}")
+                logger.debug(f"Temperature: 0.1")
+                logger.debug(f"Extra headers: {extra_headers}")
+                logger.debug("-" * 80)
+                logger.debug(f"System prompt:\n{system_prompt}")
+                logger.debug("-" * 80)
+                logger.debug(f"User prompt:\n{user_prompt}")
+                logger.debug("=" * 80)
+
             logger.info(f"Отправляем запрос в OpenAI с моделью {selected_model}")
             
             # Формируем extra_headers для атрибуции
@@ -526,6 +541,19 @@ class OpenAIProvider(LLMProvider):
             logger.info("Получен ответ от OpenAI API")
             
             content = response.choices[0].message.content
+            
+            # DEBUG логирование ответа
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug("[DEBUG] OpenAI RESPONSE - generate_protocol")
+                logger.debug("=" * 80)
+                if hasattr(response, 'usage'):
+                    logger.debug(f"Usage: {response.usage}")
+                finish_reason = response.choices[0].finish_reason
+                logger.debug(f"Finish reason: {finish_reason}")
+                logger.debug("-" * 80)
+                logger.debug(f"Content:\n{content}")
+                logger.debug("=" * 80)
             logger.info(f"Получен ответ от OpenAI (длина: {len(content) if content else 0}): {content[:200] if content else 'None'}...")
             
             if not content or not content.strip():
@@ -1099,6 +1127,17 @@ async def generate_protocol_two_stage(
         if settings.x_title:
             extra_headers["X-Title"] = settings.x_title
         
+        # DEBUG логирование запроса этапа 1
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI REQUEST - Two-Stage Extraction (Stage 1)")
+            logger.debug("=" * 80)
+            logger.debug(f"Model: {selected_model}")
+            logger.debug(f"System prompt:\n{system_prompt}")
+            logger.debug("-" * 80)
+            logger.debug(f"Extraction prompt:\n{extraction_prompt}")
+            logger.debug("=" * 80)
+        
         # Этап 1: Извлечение
         async def _call_openai_stage1():
             return await asyncio.to_thread(
@@ -1138,6 +1177,16 @@ async def generate_protocol_two_stage(
         
         content1 = response1.choices[0].message.content
         
+        # DEBUG логирование ответа этапа 1
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - Two-Stage Extraction (Stage 1)")
+            logger.debug("=" * 80)
+            if hasattr(response1, 'usage'):
+                logger.debug(f"Usage: {response1.usage}")
+            logger.debug(f"Content:\n{content1}")
+            logger.debug("=" * 80)
+        
         try:
             extracted_data = json.loads(content1)
         except json.JSONDecodeError as e:
@@ -1155,6 +1204,14 @@ async def generate_protocol_two_stage(
         reflection_prompt = _build_reflection_prompt(
             extracted_data, transcription, template_variables, diarization_analysis
         )
+        
+        # DEBUG логирование запроса этапа 2
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI REQUEST - Two-Stage Reflection (Stage 2)")
+            logger.debug("=" * 80)
+            logger.debug(f"Reflection prompt:\n{reflection_prompt}")
+            logger.debug("=" * 80)
         
         async def _call_openai_stage2():
             return await asyncio.to_thread(
@@ -1194,6 +1251,17 @@ async def generate_protocol_two_stage(
         
         content2 = response2.choices[0].message.content
         finish_reason = response2.choices[0].finish_reason
+        
+        # DEBUG логирование ответа этапа 2
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - Two-Stage Reflection (Stage 2)")
+            logger.debug("=" * 80)
+            if hasattr(response2, 'usage'):
+                logger.debug(f"Usage: {response2.usage}")
+            logger.debug(f"Finish reason: {response2.choices[0].finish_reason}")
+            logger.debug(f"Content:\n{content2}")
+            logger.debug("=" * 80)
         
         # Логирование полученного ответа
         logger.info(f"Этап 2: получен ответ длиной {len(content2) if content2 else 0} символов, finish_reason={finish_reason}")
@@ -1414,6 +1482,14 @@ async def _process_single_segment(
         template_variables=template_variables
     )
     
+    # DEBUG логирование запроса сегмента
+    if settings.llm_debug_log:
+        logger.debug("=" * 80)
+        logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Segment {segment_idx + 1}/{total_segments}")
+        logger.debug("=" * 80)
+        logger.debug(f"Segment prompt:\n{segment_prompt}")
+        logger.debug("=" * 80)
+    
     # Функция для вызова OpenAI API
     async def _call_openai_api():
         return await asyncio.to_thread(
@@ -1453,6 +1529,16 @@ async def _process_single_segment(
         raise
     
     content = response.choices[0].message.content
+    
+    # DEBUG логирование ответа сегмента
+    if settings.llm_debug_log:
+        logger.debug("=" * 80)
+        logger.debug(f"[DEBUG] OpenAI RESPONSE - Chain-of-Thought Segment {segment_idx + 1}/{total_segments}")
+        logger.debug("=" * 80)
+        if hasattr(response, 'usage'):
+            logger.debug(f"Usage: {response.usage}")
+        logger.debug(f"Content:\n{content}")
+        logger.debug("=" * 80)
     
     # Парсим JSON ответ
     segment_result = json.loads(content)
@@ -1627,6 +1713,14 @@ async def generate_protocol_chain_of_thought(
             participants=participants
         )
         
+        # DEBUG логирование запроса синтеза
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Synthesis ({len(segment_results)} segments)")
+            logger.debug("=" * 80)
+            logger.debug(f"Synthesis prompt:\n{synthesis_prompt}")
+            logger.debug("=" * 80)
+        
         async def _call_openai_synthesis():
             return await asyncio.to_thread(
                 client.chat.completions.create,
@@ -1664,6 +1758,16 @@ async def generate_protocol_chain_of_thought(
             raise
         
         content_synthesis = response_synthesis.choices[0].message.content
+        
+        # DEBUG логирование ответа синтеза
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - Chain-of-Thought Synthesis")
+            logger.debug("=" * 80)
+            if hasattr(response_synthesis, 'usage'):
+                logger.debug(f"Usage: {response_synthesis.usage}")
+            logger.debug(f"Content:\n{content_synthesis}")
+            logger.debug("=" * 80)
         
         try:
             final_protocol = json.loads(content_synthesis)

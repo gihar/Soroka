@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     enable_speaker_mapping: bool = Field(True, description="Включить автоматическое сопоставление спикеров с участниками")
     speaker_mapping_confidence_threshold: float = Field(0.7, description="Порог уверенности для сопоставления спикеров (0.0-1.0)")
     max_participants: int = Field(20, description="Максимальное количество участников в списке")
-    mapping_log: bool = Field(False, description="Выводить в лог запросы и ответы LLM при сопоставлении спикеров")
+    llm_debug_log: bool = Field(False, description="Выводить в DEBUG лог все запросы и ответы LLM (генерация протоколов и сопоставление спикеров)")
     full_text_matching: bool = Field(False, description="Использовать полный текст транскрипции для сопоставления участников (увеличивает расход токенов)")
     
     # Настройки очереди задач

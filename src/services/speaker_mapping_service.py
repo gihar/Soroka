@@ -443,7 +443,7 @@ class SpeakerMappingService:
             )
             
             # Логирование запроса (если включено)
-            if settings.mapping_log:
+            if settings.llm_debug_log:
                 logger.debug("=" * 80)
                 logger.debug("=== LLM MAPPING REQUEST ===")
                 logger.debug("=" * 80)
@@ -492,7 +492,7 @@ class SpeakerMappingService:
                 content = response.choices[0].message.content
                 
                 # Логирование ответа (если включено)
-                if settings.mapping_log:
+                if settings.llm_debug_log:
                     logger.debug("=" * 80)
                     logger.debug("=== LLM MAPPING RESPONSE ===")
                     logger.debug("=" * 80)
@@ -504,7 +504,7 @@ class SpeakerMappingService:
                     result = json.loads(content)
                     
                     # Краткое резюме результата (если включено логирование)
-                    if settings.mapping_log:
+                    if settings.llm_debug_log:
                         mapped_count = sum(1 for k in result.keys() if k not in ['confidence', 'reasoning'])
                         logger.info(f"LLM сопоставил {mapped_count} спикеров")
                     
