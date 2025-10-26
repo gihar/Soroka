@@ -214,6 +214,10 @@ class MessageBuilder:
             speakers_count = diarization.get("total_speakers", 0)
             if speakers_count > 1:
                 speakers = diarization.get("speakers", [])
+                # Применяем маппинг к спикерам если есть
+                speaker_mapping = result.get("speaker_mapping", {})
+                if speaker_mapping:
+                    speakers = [speaker_mapping.get(s, s) for s in speakers]
                 # Ограничиваем список участников, чтобы не превысить лимит
                 if len(speakers) > 5:
                     speakers_list = ", ".join(speakers[:5]) + f" и еще {len(speakers) - 5}"

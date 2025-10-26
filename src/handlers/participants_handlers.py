@@ -255,24 +255,58 @@ def setup_participants_handlers() -> Router:
                 await message.answer("❌ Ввод участников отменен.")
                 return
 
-            # Проверяем, есть ли информация о встрече для автоизвлечения
+            # Гибридный подход: пробуем автоизвлечение, затем обычный парсинг
             meeting_info = participants_service.extract_from_meeting_text(text)
+            
+            # Всегда парсим весь текст как обычный список участников
+            text_participants = participants_service.parse_participants_text(text)
+            
+            # Объединяем участников из обоих источников
+            all_participants = []
+            participants_dict = {}  # Для избежания дубликатов по имени
+            
+            # Добавляем участников из meeting_info (если есть)
+            if meeting_info and meeting_info.participants:
+                for participant in meeting_info.participants:
+                    key = participant.name.lower().strip()
+                    if key not in participants_dict:
+                        participants_dict[key] = {
+                            "name": participant.name,
+                            "role": participant.role or ""
+                        }
+                        all_participants.append(participants_dict[key])
+            
+            # Добавляем участников из обычного парсинга
+            for participant in text_participants:
+                key = participant["name"].lower().strip()
+                if key not in participants_dict:
+                    participants_dict[key] = participant
+                    all_participants.append(participant)
 
-            if meeting_info:
-                # Если извлекли информацию о встрече, показываем для подтверждения
-                is_valid, error_message = participants_service.validate_meeting_info(meeting_info)
+            # Проверяем, есть ли участники
+            if not all_participants:
+                await message.answer(
+                    f"❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
+                    f"Попробуйте другой текст или отправьте /cancel для отмены.",
+                    parse_mode="Markdown"
+                )
+                return
 
-                if not is_valid:
-                    await message.answer(
-                        f"❌ **Ошибка извлечения:**\n{error_message}\n\n"
-                        f"Попробуйте другой текст или отправьте /cancel для отмены.",
-                        parse_mode="Markdown"
-                    )
-                    return
+            # Валидируем объединенный список
+            is_valid, error_message = participants_service.validate_participants(all_participants)
+            if not is_valid:
+                await message.answer(
+                    f"❌ **Ошибка валидации:**\n{error_message}\n\n"
+                    f"Попробуйте еще раз или отправьте /cancel для отмены.",
+                    parse_mode="Markdown"
+                )
+                return
 
+            # Если есть информация о встрече (тема/дата), используем её
+            if meeting_info and (meeting_info.topic or meeting_info.start_time):
                 # Сохраняем информацию о встрече в состояние
                 await state.update_data(meeting_info=meeting_info.model_dump())
-                await state.update_data(participants_list=meeting_info.get_participants_for_llm())
+                await state.update_data(participants_list=all_participants)
 
                 # Сохраняем тему и дату для использования в промптах
                 if meeting_info.topic:
@@ -285,6 +319,11 @@ def setup_participants_handlers() -> Router:
 
                 # Показываем извлеченную информацию
                 display_text = participants_service.format_meeting_info_for_display(meeting_info)
+                
+                # Добавляем предупреждение если есть
+                warning_text = ""
+                if meeting_info.topic == "Не указана":
+                    warning_text = "\n\n⚠️ Тема встречи не указана, будет использовано значение по умолчанию"
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
@@ -297,32 +336,18 @@ def setup_participants_handlers() -> Router:
 
                 await message.answer(
                     f"🔍 **Автоматически извлечена информация о встрече:**\n\n"
-                    f"{display_text}\n\n**Использовать эту информацию?**",
+                    f"{display_text}{warning_text}\n\n**Использовать эту информацию?**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
                 )
 
             else:
-                # Обычный парсинг списка участников
-                participants = participants_service.parse_participants_text(text)
-
-                # Валидируем
-                is_valid, error_message = participants_service.validate_participants(participants)
-
-                if not is_valid:
-                    await message.answer(
-                        f"❌ **Ошибка валидации:**\n{error_message}\n\n"
-                        f"Попробуйте еще раз или отправьте /cancel для отмены.",
-                        parse_mode="Markdown"
-                    )
-                    return
-
-                # Сохраняем в состояние
-                await state.update_data(participants_list=participants)
+                # Обычный список участников без информации о встрече
+                await state.update_data(participants_list=all_participants)
                 await state.set_state(ParticipantsInput.confirm_participants)
 
                 # Показываем для подтверждения
-                display_text = participants_service.format_participants_for_display(participants)
+                display_text = participants_service.format_participants_for_display(all_participants)
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [

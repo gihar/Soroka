@@ -65,18 +65,16 @@ class OptimizedProcessingService(BaseProcessingService):
             )
         
         mapped_count = len(speaker_mapping)
-        message_lines = [
-            "✅ *Сопоставление участников завершено*\n",
-            f"Сопоставлено {mapped_count} из {total_participants} участников:\n"
-        ]
+        message = "✅ *Сопоставление участников завершено*\n\n"
+        message += f"Сопоставлено {mapped_count} из {total_participants} участников:\n\n"
         
         # Сортируем по speaker_id для предсказуемого порядка
         sorted_mapping = sorted(speaker_mapping.items())
         
         for speaker_id, participant_name in sorted_mapping:
-            message_lines.append(f"• {speaker_id} → {participant_name}")
+            message += f"• {speaker_id} -> {participant_name}\n"
         
-        return "\n".join(message_lines)
+        return message.rstrip()
     
     @performance_timer("file_processing")
     async def process_file(self, request: ProcessingRequest, progress_tracker=None) -> ProcessingResult:
@@ -647,14 +645,16 @@ class OptimizedProcessingService(BaseProcessingService):
                     logger.info("Сегментация по спикерам")
                     segments = segmentation_service.segment_by_speakers(
                         diarization_data=diarization_data_raw,
-                        transcription=transcription_result.transcription
+                        transcription=transcription_result.transcription,
+                        speaker_mapping=request.speaker_mapping
                     )
                 else:
                     logger.info("Сегментация по времени")
                     segments = segmentation_service.segment_by_time(
                         transcription=transcription_result.transcription,
                         diarization_data=diarization_data_raw,
-                        target_minutes=int(settings.chain_of_thought_threshold_minutes / 6)  # ~5 мин сегменты
+                        target_minutes=int(settings.chain_of_thought_threshold_minutes / 6),  # ~5 мин сегменты
+                        speaker_mapping=request.speaker_mapping
                     )
                 
                 # Логирование сегментов

@@ -128,7 +128,78 @@ class MeetingInfoService:
                         is_required=False  # Участники в копии не обязательны
                     ))
 
+        # Дополнительно парсим все строки как потенциальных участников
+        # если не нашли участников в email-полях
+        if not participants:
+            participants = self._parse_text_as_participants_list(text)
+
         return participants
+
+    def _parse_text_as_participants_list(self, text: str) -> List[MeetingParticipant]:
+        """Парсинг текста как обычного списка участников"""
+        participants = []
+        lines = text.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Пропускаем строки, которые выглядят как email-поля
+            if any(line.lower().startswith(prefix) for prefix in ['от:', 'кому:', 'копия:', 'тема:', 'когда:', 'дата:', 'время:']):
+                continue
+                
+            participant = self._parse_single_participant_line(line)
+            if participant:
+                participants.append(participant)
+        
+        return participants
+
+    def _parse_single_participant_line(self, line: str) -> Optional[MeetingParticipant]:
+        """Парсинг одной строки с участником"""
+        # Убираем номера списков в начале (1., 2., -, •, etc)
+        line = re.sub(r'^[\d\-•*]+[\.\)]\s*', '', line).strip()
+        
+        if not line:
+            return None
+        
+        # Паттерны для извлечения имени и роли
+        patterns = [
+            # "Иван Петров, менеджер"
+            r'^(.+?)\s*,\s*(.+)$',
+            # "Иван Петров - менеджер"
+            r'^(.+?)\s*-\s*(.+)$',
+            # "Иван Петров (менеджер)"
+            r'^(.+?)\s*\((.+?)\)\s*$',
+            # "Иван Петров | менеджер"
+            r'^(.+?)\s*\|\s*(.+)$',
+        ]
+        
+        name = ""
+        role = ""
+        
+        for pattern in patterns:
+            match = re.match(pattern, line)
+            if match:
+                name = match.group(1).strip()
+                role = match.group(2).strip()
+                break
+        
+        # Если не удалось распарсить с ролью, берем всю строку как имя
+        if not name:
+            if len(line) >= 2:
+                name = line
+                role = ""
+        
+        # Возвращаем только если есть имя
+        if name and len(name) >= 2:
+            return MeetingParticipant(
+                name=name,
+                role=role,
+                is_required=True
+            )
+        
+        return None
 
     def _extract_topic(self, text: str) -> Optional[str]:
         """Извлечь тему встречи"""
@@ -318,9 +389,13 @@ class MeetingInfoService:
 
     def validate_meeting_info(self, meeting_info: MeetingInfo) -> Tuple[bool, str]:
         """Валидация извлеченной информации о встрече"""
+        warnings = []
+        
+        # Проверяем тему - если не указана, добавляем предупреждение, но не блокируем
         if not meeting_info.topic or meeting_info.topic == "Не указана":
-            return False, "Не удалось определить тему встречи"
+            warnings.append("⚠️ Тема встречи не указана, будет использовано значение по умолчанию")
 
+        # Строгая проверка участников - это критично
         if not meeting_info.participants:
             return False, "Не удалось найти участников встречи"
 
@@ -329,6 +404,10 @@ class MeetingInfoService:
         if not required_participants:
             return False, "Не найдено обязательных участников"
 
+        # Если есть предупреждения, возвращаем их, но валидация успешна
+        if warnings:
+            return True, warnings[0]
+        
         return True, "Информация о встрече корректна"
 
 

@@ -64,7 +64,8 @@ class TranscriptionSegmentationService:
         self,
         transcription: str,
         diarization_data: Optional[Dict[str, Any]] = None,
-        target_minutes: int = 5
+        target_minutes: int = 5,
+        speaker_mapping: Optional[Dict[str, str]] = None
     ) -> List[TranscriptionSegment]:
         """
         Разделить транскрипцию на временные сегменты
@@ -126,7 +127,7 @@ class TranscriptionSegmentationService:
             
             # Извлекаем спикеров если есть диаризация
             speakers, formatted_text = self._extract_speakers_from_segment(
-                segment_text, diarization_data
+                segment_text, diarization_data, speaker_mapping, start_time, end_time
             )
             
             segment = TranscriptionSegment(
@@ -155,7 +156,8 @@ class TranscriptionSegmentationService:
         self,
         diarization_data: Dict[str, Any],
         transcription: str,
-        max_segment_duration: float = 600.0  # 10 минут
+        max_segment_duration: float = 600.0,  # 10 минут
+        speaker_mapping: Optional[Dict[str, str]] = None
     ) -> List[TranscriptionSegment]:
         """
         Разделить транскрипцию по изменениям доминирующего спикера
@@ -214,12 +216,17 @@ class TranscriptionSegmentationService:
                 start_time = (start_idx / len(speaker_turns)) * (len(transcription.split()) / self.words_per_minute) * 60
                 end_time = (idx / len(speaker_turns)) * (len(transcription.split()) / self.words_per_minute) * 60
                 
+                # Применяем маппинг к спикерам если есть
+                speakers_list = list(current_speakers_set)
+                if speaker_mapping:
+                    speakers_list = [speaker_mapping.get(s, s) for s in speakers_list]
+                
                 segment = TranscriptionSegment(
                     segment_id=segment_id,
                     start_time=start_time,
                     end_time=end_time,
                     text=segment_text,
-                    speakers=list(current_speakers_set),
+                    speakers=speakers_list,
                     word_count=len(segment_text.split()),
                     has_diarization=True,
                     formatted_text=formatted_segment
@@ -247,12 +254,17 @@ class TranscriptionSegmentationService:
             start_time = (start_idx / len(speaker_turns)) * (len(transcription.split()) / self.words_per_minute) * 60
             end_time = len(transcription.split()) / self.words_per_minute * 60
             
+            # Применяем маппинг к спикерам если есть
+            speakers_list = list(current_speakers_set)
+            if speaker_mapping:
+                speakers_list = [speaker_mapping.get(s, s) for s in speakers_list]
+            
             segment = TranscriptionSegment(
                 segment_id=segment_id,
                 start_time=start_time,
                 end_time=end_time,
                 text=segment_text,
-                speakers=list(current_speakers_set),
+                speakers=speakers_list,
                 word_count=len(segment_text.split()),
                 has_diarization=True,
                 formatted_text=formatted_segment
@@ -270,7 +282,10 @@ class TranscriptionSegmentationService:
     def _extract_speakers_from_segment(
         self,
         segment_text: str,
-        diarization_data: Optional[Dict[str, Any]]
+        diarization_data: Optional[Dict[str, Any]],
+        speaker_mapping: Optional[Dict[str, str]] = None,
+        segment_start_time: float = 0,
+        segment_end_time: float = 0
     ) -> Tuple[List[str], Optional[str]]:
         """
         Извлечь список спикеров из сегмента
@@ -278,6 +293,9 @@ class TranscriptionSegmentationService:
         Args:
             segment_text: Текст сегмента
             diarization_data: Данные диаризации
+            speaker_mapping: Маппинг спикеров на имена
+            segment_start_time: Время начала сегмента
+            segment_end_time: Время окончания сегмента
             
         Returns:
             (список спикеров, форматированный текст)
@@ -285,21 +303,38 @@ class TranscriptionSegmentationService:
         if not diarization_data:
             return [], None
         
-        # Пытаемся найти упоминания спикеров в тексте сегмента
         speakers = set()
-        formatted_transcript = diarization_data.get('formatted_transcript', '')
         
-        # Ищем все упоминания спикеров в исходном форматированном тексте
-        for line in formatted_transcript.split('\n'):
-            match = re.match(r'^(Спикер \d+|Speaker \d+):\s*(.+)$', line.strip())
-            if match:
-                speaker = match.group(1)
-                text = match.group(2)
-                # Если часть текста содержится в сегменте
-                if text[:50] in segment_text or segment_text[:50] in text:
-                    speakers.add(speaker)
+        # Используем временные метки из segments
+        diarization_segments = diarization_data.get('segments', [])
+        if diarization_segments and segment_start_time < segment_end_time:
+            for seg in diarization_segments:
+                seg_start = seg.get('start', 0)
+                seg_end = seg.get('end', 0)
+                # Проверяем пересечение временных интервалов
+                if seg_start < segment_end_time and seg_end > segment_start_time:
+                    speaker = seg.get('speaker', '')
+                    if speaker:
+                        speakers.add(speaker)
         
-        return list(speakers), None
+        # Если нет segments с временными метками, пробуем старый метод
+        if not speakers:
+            formatted_transcript = diarization_data.get('formatted_transcript', '')
+            for line in formatted_transcript.split('\n'):
+                match = re.match(r'^(Спикер \d+|Speaker \d+|SPEAKER_\d+):\s*(.+)$', line.strip())
+                if match:
+                    speaker = match.group(1)
+                    text = match.group(2)
+                    # Если часть текста содержится в сегменте
+                    if text[:50] in segment_text or segment_text[:50] in text:
+                        speakers.add(speaker)
+        
+        # Применяем маппинг к спикерам если есть
+        speakers_list = list(speakers)
+        if speaker_mapping:
+            speakers_list = [speaker_mapping.get(s, s) for s in speakers_list]
+        
+        return speakers_list, None
     
     def create_segment_summary(self, segment: TranscriptionSegment) -> str:
         """

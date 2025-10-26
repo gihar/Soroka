@@ -378,7 +378,8 @@ class TaskQueueManager:
                     "diarization": result.transcription_result.diarization if result.transcription_result else None,
                     "compression_info": result.transcription_result.compression_info if result.transcription_result else None
                 },
-                "processing_duration": result.processing_duration if hasattr(result, 'processing_duration') else None
+                "processing_duration": result.processing_duration if hasattr(result, 'processing_duration') else None,
+                "speaker_mapping": task.request.speaker_mapping if hasattr(task.request, 'speaker_mapping') else None
             }
             
             # Формируем сообщение с результатом
