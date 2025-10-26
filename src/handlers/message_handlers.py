@@ -547,7 +547,7 @@ async def _show_template_selection(message: Message, template_service: TemplateS
                     # Если сохранён конкретный шаблон
                     default_template = await template_service.get_template_by_id(user.default_template_id)
                     if default_template:
-                        button_text = f"📋 Протокол по шаблону: {default_template.name}"
+                        button_text = f"📋 По шаблону: {default_template.name}"
                     else:
                         button_text = None
                 
@@ -559,13 +559,19 @@ async def _show_template_selection(message: Message, template_service: TemplateS
             except Exception as e:
                 logger.warning(f"Не удалось получить шаблон по умолчанию: {e}")
         
-        # Кнопка 3: Задать шаблон по умолчанию (всегда)
+        # Кнопка 3: Выбрать шаблон (для разового использования)
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="📋 Выбрать шаблон",
+            callback_data="select_template_once"
+        )])
+        
+        # Кнопка 4: Задать шаблон по умолчанию (всегда)
         keyboard_buttons.append([InlineKeyboardButton(
             text="⚙️ Задать шаблон по умолчанию",
             callback_data="quick_set_default"
         )])
         
-        # Кнопка 4: Добавить участников встречи
+        # Кнопка 5: Добавить участников встречи
         keyboard_buttons.append([InlineKeyboardButton(
             text="👥 Указать участников встречи",
             callback_data="add_participants"
@@ -577,6 +583,7 @@ async def _show_template_selection(message: Message, template_service: TemplateS
             "📝 **Выберите способ создания протокола:**\n\n"
             "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
             "📋 **По шаблону** - использовать сохранённый шаблон\n"
+            "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки\n"
             "⚙️ **Задать шаблон** - выбрать и сохранить новый шаблон по умолчанию\n"
             "👥 **Указать участников** - добавить список для замены 'Спикер N' на имена",
             reply_markup=keyboard,
