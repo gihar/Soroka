@@ -98,10 +98,11 @@ class MeetingInfoService:
         # Извлекаем из поля "От"
         organizer_match = self._find_pattern(text, 'email_from') or self._find_pattern(text, 'participants_from')
         if organizer_match:
-            organizer_name = self._extract_name_from_email_line(organizer_match)
-            if organizer_name:
+            organizer_names = self._extract_name_from_email_line(organizer_match)
+            # Обычно организатор один, берем первое имя
+            if organizer_names:
                 participants.append(MeetingParticipant(
-                    name=organizer_name,
+                    name=organizer_names[0],
                     is_organizer=True,
                     is_required=True
                 ))
@@ -237,7 +238,9 @@ class MeetingInfoService:
         """Извлечь организатора встречи"""
         organizer_match = self._find_pattern(text, 'email_from') or self._find_pattern(text, 'participants_from')
         if organizer_match:
-            return self._extract_name_from_email_line(organizer_match)
+            names = self._extract_name_from_email_line(organizer_match)
+            # Возвращаем первое имя из списка как организатора
+            return names[0] if names else None
         return None
 
     def _find_pattern(self, text: str, pattern_name: str) -> Optional[str]:
@@ -257,22 +260,29 @@ class MeetingInfoService:
 
         return None
 
-    def _extract_name_from_email_line(self, line: str) -> Optional[str]:
-        """Извлечь имя из строки типа 'Тимченко Алексей Александрович'"""
+    def _extract_name_from_email_line(self, line: str) -> List[str]:
+        """Извлечь все имена из строки (может содержать несколько ФИО через запятую)
+        
+        Args:
+            line: Строка с одним или несколькими ФИО
+            
+        Returns:
+            Список извлеченных имен
+        """
         # Убираем email если есть
         line = re.sub(r'<[^>]+>', '', line)
 
-        # Ищем полное имя (3 слова или более)
-        name_match = re.search(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)', line)
-        if name_match:
-            return name_match.group(1).strip()
+        # Ищем ВСЕ полные имена (3 слова: Фамилия Имя Отчество)
+        name_matches = re.findall(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)', line)
+        if name_matches:
+            return [name.strip() for name in name_matches]
 
-        # Если не нашли полное имя, берем первые 2-3 слова
+        # Если не нашли полные имена, берем первые 2-3 слова как одно имя
         words = line.strip().split()
         if len(words) >= 2:
-            return ' '.join(words[:3])
+            return [' '.join(words[:3])]
 
-        return None
+        return []
 
     def _extract_names_from_list(self, text: str) -> List[str]:
         """Извлечь имена из списка через точку с запятой"""
@@ -284,9 +294,10 @@ class MeetingInfoService:
         for part in parts:
             part = part.strip()
             if part:
-                name = self._extract_name_from_email_line(part)
-                if name:
-                    names.append(name)
+                # _extract_name_from_email_line теперь возвращает список имен
+                extracted_names = self._extract_name_from_email_line(part)
+                if extracted_names:
+                    names.extend(extracted_names)
 
         return names
 

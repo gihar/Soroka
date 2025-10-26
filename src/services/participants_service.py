@@ -56,6 +56,12 @@ class ParticipantsService:
         if not line:
             return None
         
+        # Фильтруем строки с email-полями - они не являются участниками
+        email_field_prefixes = ['от:', 'кому:', 'копия:', 'cc:', 'тема:', 'subject:', 
+                                'когда:', 'when:', 'дата:', 'date:', 'время:', 'time:']
+        if any(line.lower().startswith(prefix) for prefix in email_field_prefixes):
+            return None
+        
         participant = {"name": "", "role": ""}
         
         # Паттерны для извлечения имени и роли
