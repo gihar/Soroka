@@ -83,12 +83,12 @@ class SpeakerMappingSchema(BaseModel):
 class TopicExtraction(BaseModel):
     """Тема обсуждения для extraction (без id)"""
     title: str = Field(..., description="Название темы")
-    description: str = Field(default="", description="Описание темы")
+    description: Optional[str] = Field(default="", description="Описание темы")
     start_time: Optional[float] = Field(default=None, description="Начало обсуждения (секунды)")
     end_time: Optional[float] = Field(default=None, description="Конец обсуждения (секунды)")
     duration: Optional[float] = Field(default=None, description="Длительность обсуждения")
-    participants: List[str] = Field(default_factory=list, description="ID участников обсуждения")
-    key_points: List[str] = Field(default_factory=list, description="Ключевые моменты")
+    participants: Optional[List[str]] = Field(default_factory=list, description="ID участников обсуждения")
+    key_points: Optional[List[str]] = Field(default_factory=list, description="Ключевые моменты")
     sentiment: Optional[str] = Field(default=None, description="Общий тон обсуждения")
     
     class Config:
@@ -98,10 +98,10 @@ class TopicExtraction(BaseModel):
 class DecisionExtraction(BaseModel):
     """Решение для extraction (без id)"""
     text: str = Field(..., description="Текст решения")
-    context: str = Field(default="", description="Контекст принятия решения")
-    decision_makers: List[str] = Field(default_factory=list, description="ID спикеров, принявших решение")
-    mentioned_speakers: List[str] = Field(default_factory=list, description="Упомянутые спикеры")
-    priority: Optional[str] = Field("medium", description="Важность решения: high/medium/low")
+    context: Optional[str] = Field(default="", description="Контекст принятия решения")
+    decision_makers: Optional[List[str]] = Field(default_factory=list, description="ID спикеров, принявших решение")
+    mentioned_speakers: Optional[List[str]] = Field(default_factory=list, description="Упомянутые спикеры")
+    priority: Optional[str] = Field(default="medium", description="Важность решения: high/medium/low")
     timestamp: Optional[float] = Field(default=None, description="Временная метка в секундах")
     
     class Config:
@@ -114,8 +114,8 @@ class ActionItemExtraction(BaseModel):
     assignee: Optional[str] = Field(default=None, description="ID ответственного спикера")
     assignee_name: Optional[str] = Field(default=None, description="Имя ответственного (если извлечено)")
     deadline: Optional[str] = Field(default=None, description="Срок выполнения")
-    priority: Optional[str] = Field("medium", description="Приоритет: critical/high/medium/low")
-    context: str = Field(default="", description="Контекст задачи")
+    priority: Optional[str] = Field(default="medium", description="Приоритет: critical/high/medium/low")
+    context: Optional[str] = Field(default="", description="Контекст задачи")
     timestamp: Optional[float] = Field(default=None, description="Временная метка в секундах")
     
     class Config:
