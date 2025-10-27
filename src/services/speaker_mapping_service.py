@@ -430,30 +430,30 @@ class SpeakerMappingService:
 ФОРМАТ ВЫВОДА:
 Строго валидный JSON объект без комментариев:
 {{
-  "SPEAKER_1": "Имя Участника",
-  "SPEAKER_2": "Имя Участника",
-  "confidence": {{
+  "speaker_mappings": {{
+    "SPEAKER_1": "Имя Участника",
+    "SPEAKER_2": "Имя Участника"
+  }},
+  "confidence_scores": {{
     "SPEAKER_1": 0.95,
     "SPEAKER_2": 0.80
   }},
-  "reasoning": {{
-    "SPEAKER_1": "Краткое объяснение (представился, роль руководителя, ведет встречу)",
-    "SPEAKER_2": "Краткое объяснение (обращаются 'Мария', отчитывается, роль разработчика)"
-  }}
+  "unmapped_speakers": [],
+  "mapping_notes": "Краткие объяснения для каждого сопоставления"
 }}
 
 ПРИМЕР:
 {{
-  "SPEAKER_1": "Иван Петров",
-  "SPEAKER_2": "Мария Иванова",
-  "confidence": {{
+  "speaker_mappings": {{
+    "SPEAKER_1": "Иван Петров",
+    "SPEAKER_2": "Мария Иванова"
+  }},
+  "confidence_scores": {{
     "SPEAKER_1": 0.95,
     "SPEAKER_2": 0.85
   }},
-  "reasoning": {{
-    "SPEAKER_1": "Представился в начале, ведет встречу, принимает решения — соответствует роли Менеджера",
-    "SPEAKER_2": "К ней обращаются 'Мария', отчитывается о технических задачах — соответствует роли Разработчика"
-  }}
+  "unmapped_speakers": [],
+  "mapping_notes": "SPEAKER_1 представился в начале, ведет встречу, принимает решения — соответствует роли Менеджера. SPEAKER_2 обращаются 'Мария', отчитывается о технических задачах — соответствует роли Разработчика."
 }}
 
 Выведи ТОЛЬКО JSON, без дополнительных комментариев."""
@@ -572,19 +572,17 @@ class SpeakerMappingService:
         
         from src.services.participants_service import participants_service
 
-        # Извлекаем confidence scores
-        confidence_scores = mapping_result.get('confidence', {})
-        reasoning = mapping_result.get('reasoning', {})
+        # Извлекаем данные из нового формата схемы SpeakerMappingSchema
+        speaker_mappings = mapping_result.get('speaker_mappings', {})
+        confidence_scores = mapping_result.get('confidence_scores', {})
+        mapping_notes = mapping_result.get('mapping_notes', '')
         
         # Строим карту имен для сопоставления
         name_lookup, ambiguous_variants = participants_service.build_name_lookup(participants)
         used_display_names: Set[str] = set()
         
         # Валидируем каждое сопоставление
-        for speaker_id, participant_name in mapping_result.items():
-            # Пропускаем служебные поля
-            if speaker_id in ['confidence', 'reasoning']:
-                continue
+        for speaker_id, participant_name in speaker_mappings.items():
             
             candidate_variants = participants_service.generate_name_variants(participant_name)
             normalized_raw = participants_service.normalize_name_for_matching(participant_name)
@@ -649,13 +647,10 @@ class SpeakerMappingService:
             # Добавляем в валидированный mapping
             validated_mapping[speaker_id] = display_name
             used_display_names.add(display_name)
-            
-            # Логируем reasoning если есть
-            if speaker_id in reasoning:
-                logger.info(
-                    f"Сопоставление {speaker_id} → {display_name}: "
-                    f"{reasoning[speaker_id]}"
-                )
+        
+        # Логируем общие заметки по маппингу если есть
+        if mapping_notes and settings.llm_debug_log:
+            logger.info(f"Заметки по сопоставлению: {mapping_notes}")
         
         return validated_mapping
 
