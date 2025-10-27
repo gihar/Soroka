@@ -6,6 +6,8 @@ from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 import json
 
+from src.models.meeting_structure import DecisionPriority, ActionItemPriority
+
 
 class ProtocolSchema(BaseModel):
     """Схема для основного протокола встречи"""
@@ -57,22 +59,74 @@ class SpeakerMappingSchema(BaseModel):
     mapping_notes: Optional[str] = Field(None, description="Заметки по сопоставлению")
 
 
+# Промежуточные модели для extraction (без поля id, которое генерируется в коде)
+class TopicExtraction(BaseModel):
+    """Тема обсуждения для extraction (без id)"""
+    title: str = Field(..., description="Название темы")
+    description: str = Field(default="", description="Описание темы")
+    start_time: Optional[float] = Field(None, description="Начало обсуждения (секунды)")
+    end_time: Optional[float] = Field(None, description="Конец обсуждения (секунды)")
+    duration: Optional[float] = Field(None, description="Длительность обсуждения")
+    participants: List[str] = Field(default_factory=list, description="ID участников обсуждения")
+    key_points: List[str] = Field(default_factory=list, description="Ключевые моменты")
+    sentiment: Optional[str] = Field(None, description="Общий тон обсуждения")
+    
+    class Config:
+        extra = "forbid"
+
+
+class DecisionExtraction(BaseModel):
+    """Решение для extraction (без id)"""
+    text: str = Field(..., description="Текст решения")
+    context: str = Field(default="", description="Контекст принятия решения")
+    decision_makers: List[str] = Field(default_factory=list, description="ID спикеров, принявших решение")
+    mentioned_speakers: List[str] = Field(default_factory=list, description="Упомянутые спикеры")
+    priority: Optional[str] = Field("medium", description="Важность решения: high/medium/low")
+    timestamp: Optional[float] = Field(None, description="Временная метка в секундах")
+    
+    class Config:
+        extra = "forbid"
+
+
+class ActionItemExtraction(BaseModel):
+    """Задача для extraction (без id)"""
+    description: str = Field(..., description="Описание задачи")
+    assignee: Optional[str] = Field(None, description="ID ответственного спикера")
+    assignee_name: Optional[str] = Field(None, description="Имя ответственного (если извлечено)")
+    deadline: Optional[str] = Field(None, description="Срок выполнения")
+    priority: Optional[str] = Field("medium", description="Приоритет: critical/high/medium/low")
+    context: str = Field(default="", description="Контекст задачи")
+    timestamp: Optional[float] = Field(None, description="Временная метка в секундах")
+    
+    class Config:
+        extra = "forbid"
+
+
 class TopicsExtractionSchema(BaseModel):
     """Схема для извлечения тем обсуждения"""
-    topics: List[Dict[str, Any]] = Field(description="Список извлеченных тем")
-    extraction_confidence: float = Field(description="Уверенность в извлечении тем (0.0-1.0)")
+    topics: List[TopicExtraction] = Field(description="Список извлеченных тем")
+    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении тем (0.0-1.0)")
+    
+    class Config:
+        extra = "forbid"
 
 
 class DecisionsExtractionSchema(BaseModel):
     """Схема для извлечения решений"""
-    decisions: List[Dict[str, Any]] = Field(description="Список извлеченных решений")
-    extraction_confidence: float = Field(description="Уверенность в извлечении решений (0.0-1.0)")
+    decisions: List[DecisionExtraction] = Field(description="Список извлеченных решений")
+    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении решений (0.0-1.0)")
+    
+    class Config:
+        extra = "forbid"
 
 
 class ActionItemsExtractionSchema(BaseModel):
     """Схема для извлечения задач и поручений"""
-    action_items: List[Dict[str, Any]] = Field(description="Список извлеченных задач")
-    extraction_confidence: float = Field(description="Уверенность в извлечении задач (0.0-1.0)")
+    action_items: List[ActionItemExtraction] = Field(description="Список извлеченных задач")
+    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении задач (0.0-1.0)")
+    
+    class Config:
+        extra = "forbid"
 
 
 def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
