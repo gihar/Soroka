@@ -26,6 +26,12 @@ from src.reliability.retry import RetryManager, LLM_RETRY_CONFIG
 # Импорт исключений
 from src.exceptions.processing import LLMInsufficientCreditsError
 
+# Импорт JSON Schema для structured outputs
+from src.models.llm_schemas import (
+    PROTOCOL_SCHEMA, TWO_STAGE_EXTRACTION_SCHEMA, TWO_STAGE_REFLECTION_SCHEMA,
+    SEGMENT_SCHEMA, SYNTHESIS_SCHEMA
+)
+
 if TYPE_CHECKING:
     from src.services.segmentation_service import TranscriptionSegment
 
@@ -575,7 +581,7 @@ class OpenAIProvider(LLMProvider):
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"},
+                    response_format={"type": "json_schema", "json_schema": PROTOCOL_SCHEMA},
                     extra_headers=extra_headers
                 )
             
@@ -1277,7 +1283,7 @@ async def generate_protocol_two_stage(
                     {"role": "user", "content": extraction_prompt}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"},
+                response_format={"type": "json_schema", "json_schema": TWO_STAGE_EXTRACTION_SCHEMA},
                 extra_headers=extra_headers
             )
         
@@ -1351,7 +1357,7 @@ async def generate_protocol_two_stage(
                     {"role": "user", "content": reflection_prompt}
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"},
+                response_format={"type": "json_schema", "json_schema": TWO_STAGE_REFLECTION_SCHEMA},
                 extra_headers=extra_headers
             )
         
@@ -1785,7 +1791,7 @@ async def _process_single_segment(
                 {"role": "user", "content": segment_prompt}
             ],
             temperature=temperature,
-            response_format={"type": "json_object"},
+            response_format={"type": "json_schema", "json_schema": SEGMENT_SCHEMA},
             extra_headers=extra_headers
         )
     
@@ -2311,7 +2317,7 @@ async def generate_protocol_chain_of_thought(
                         {"role": "user", "content": synthesis_prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"},
+                    response_format={"type": "json_schema", "json_schema": SYNTHESIS_SCHEMA},
                     extra_headers=extra_headers
                 )
             

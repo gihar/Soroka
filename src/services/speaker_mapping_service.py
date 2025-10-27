@@ -9,6 +9,7 @@ from loguru import logger
 
 from llm_providers import llm_manager
 from config import settings
+from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
 
 class SpeakerMappingService:
@@ -513,7 +514,7 @@ class SpeakerMappingService:
                             {"role": "user", "content": prompt}
                         ],
                         temperature=0.1,
-                        response_format={"type": "json_object"},
+                        response_format={"type": "json_schema", "json_schema": SPEAKER_MAPPING_SCHEMA},
                         extra_headers=extra_headers
                     )
                 

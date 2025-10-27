@@ -14,6 +14,7 @@ from src.models.meeting_structure import (
     DecisionPriority, ActionItemPriority, ActionItemStatus
 )
 from config import settings
+from src.models.llm_schemas import get_schema_by_type
 
 
 class MeetingStructureBuilder:
@@ -480,6 +481,9 @@ class MeetingStructureBuilder:
             if settings.x_title:
                 extra_headers["X-Title"] = settings.x_title
             
+            # Выбираем соответствующую схему в зависимости от типа извлечения
+            schema = get_schema_by_type(extraction_type)
+            
             async def _call_openai():
                 return await asyncio.to_thread(
                     provider.client.chat.completions.create,
@@ -489,7 +493,7 @@ class MeetingStructureBuilder:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.1,
-                    response_format={"type": "json_object"},
+                    response_format={"type": "json_schema", "json_schema": schema},
                     extra_headers=extra_headers
                 )
             
