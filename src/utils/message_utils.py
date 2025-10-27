@@ -6,7 +6,7 @@ from aiogram import Bot
 from typing import Optional
 from loguru import logger
 
-from exceptions import BotException
+from src.exceptions import BotException
 
 
 def escape_markdown_v2(text: str) -> str:

@@ -1712,10 +1712,11 @@ async def _process_single_segment(
     extra_headers: Dict[str, str],
     retry_manager: RetryManager,
     speaker_mapping: Optional[Dict[str, str]] = None,
-    participants: Optional[List[Dict[str, str]]] = None
+    participants: Optional[List[Dict[str, str]]] = None,
+    attempt_number: int = 1
 ) -> Tuple[int, Dict[str, Any]]:
     """
-    Обработать один сегмент транскрипции
+    Обработать один сегмент транскрипции с улучшенной обработкой ошибок
     
     Args:
         segment: Сегмент транскрипции
@@ -1729,16 +1730,20 @@ async def _process_single_segment(
         retry_manager: Менеджер для повторных попыток
         speaker_mapping: Сопоставление спикеров с участниками
         participants: Список участников встречи
+        attempt_number: Номер попытки (для адаптивной температуры)
         
     Returns:
         Кортеж (индекс_сегмента, результат_обработки)
     """
-    logger.info(f"Обработка сегмента {segment_idx + 1}/{total_segments}")
+    logger.info(f"Обработка сегмента {segment_idx + 1}/{total_segments} (попытка {attempt_number})")
     
     # Используем форматированный текст если есть, иначе обычный
     segment_text = segment.formatted_text if segment.formatted_text else segment.text
     
-    # Формируем промпт для сегмента
+    # Адаптивная температура: 0.1 → 0.3 → 0.5
+    temperature = 0.1 + (attempt_number - 1) * 0.2
+    
+    # Формируем промпт для сегмента с усиленным напоминанием о JSON на повторных попытках
     segment_prompt = _build_segment_analysis_prompt(
         segment_text=segment_text,
         segment_id=segment_idx,
@@ -1748,15 +1753,29 @@ async def _process_single_segment(
         participants=participants
     )
     
+    # Добавляем усиленное напоминание о JSON на попытках 2-3
+    if attempt_number > 1:
+        json_reminder = f"""
+
+⚠️ ВАЖНО: Это попытка {attempt_number}. ОБЯЗАТЕЛЬНО верни ВАЛИДНЫЙ JSON!
+- Начинай ответ сразу с {{ и заканчивай }}
+- Все значения должны быть строками
+- НЕ добавляй комментарии или объяснения вне JSON
+- Если не уверен в данных - используй "Не указано"
+
+"""
+        segment_prompt = json_reminder + segment_prompt
+    
     # DEBUG логирование запроса сегмента
     if settings.llm_debug_log:
         logger.debug("=" * 80)
-        logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Segment {segment_idx + 1}/{total_segments}")
+        logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Segment {segment_idx + 1}/{total_segments} (попытка {attempt_number})")
         logger.debug("=" * 80)
+        logger.debug(f"Temperature: {temperature}")
         logger.debug(f"Segment prompt:\n{segment_prompt}")
         logger.debug("=" * 80)
     
-    # Функция для вызова OpenAI API
+    # Функция для вызова OpenAI API с адаптивной температурой
     async def _call_openai_api():
         return await asyncio.to_thread(
             client.chat.completions.create,
@@ -1765,7 +1784,7 @@ async def _process_single_segment(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": segment_prompt}
             ],
-            temperature=0.1,
+            temperature=temperature,
             response_format={"type": "json_object"},
             extra_headers=extra_headers
         )
@@ -1799,29 +1818,227 @@ async def _process_single_segment(
     # DEBUG логирование ответа сегмента
     if settings.llm_debug_log:
         logger.debug("=" * 80)
-        logger.debug(f"[DEBUG] OpenAI RESPONSE - Chain-of-Thought Segment {segment_idx + 1}/{total_segments}")
+        logger.debug(f"[DEBUG] OpenAI RESPONSE - Chain-of-Thought Segment {segment_idx + 1}/{total_segments} (попытка {attempt_number})")
         logger.debug("=" * 80)
         if hasattr(response, 'usage'):
             logger.debug(f"Usage: {response.usage}")
         logger.debug(f"Content:\n{content}")
         logger.debug("=" * 80)
     
-    # Парсим JSON ответ с обработкой ошибок
+    # Улучшенная обработка парсинга JSON с fallback на частичные данные
+    segment_result = None
+    
+    # Попытка 1: Прямой парсинг JSON
     try:
         segment_result = json.loads(content)
+        logger.debug(f"Сегмент {segment_idx + 1}: JSON успешно распарсен (прямой парсинг)")
     except json.JSONDecodeError as e:
-        logger.warning(f"Ошибка парсинга JSON для сегмента {segment_idx + 1}: {e}, пытаюсь извлечь JSON из текста")
+        logger.warning(f"Сегмент {segment_idx + 1}: Ошибка прямого парсинга JSON: {e}")
+        
+        # Попытка 2: Извлечение JSON из текста
         start_idx = content.find('{')
         end_idx = content.rfind('}') + 1
+        
         if start_idx != -1 and end_idx > start_idx:
             json_str = content[start_idx:end_idx]
-            segment_result = json.loads(json_str)  # Если не удастся - выбросит исключение и сработает retry
+            try:
+                segment_result = json.loads(json_str)
+                logger.debug(f"Сегмент {segment_idx + 1}: JSON успешно извлечен из текста")
+            except json.JSONDecodeError as e2:
+                logger.warning(f"Сегмент {segment_idx + 1}: Ошибка парсинга извлеченного JSON: {e2}")
+                # Попытка 3: Извлечение частичных данных
+                segment_result = _extract_partial_data_from_text(content, template_variables)
+                logger.warning(f"Сегмент {segment_idx + 1}: Использован fallback на частичные данные")
         else:
-            raise  # Нет JSON в ответе - retry
+            logger.warning(f"Сегмент {segment_idx + 1}: JSON не найден в ответе")
+            # Попытка 3: Извлечение частичных данных
+            segment_result = _extract_partial_data_from_text(content, template_variables)
+            logger.warning(f"Сегмент {segment_idx + 1}: Использован fallback на частичные данные")
+    
+    # Проверяем, что результат содержит все необходимые ключи
+    if not segment_result:
+        logger.error(f"Сегмент {segment_idx + 1}: Получен пустой результат, создаем заглушку")
+        segment_result = {key: "Ошибка обработки сегмента" for key in template_variables.keys()}
+    else:
+        # Убеждаемся, что все ключи присутствуют
+        for key in template_variables.keys():
+            if key not in segment_result:
+                segment_result[key] = "Не указано"
     
     logger.info(f"Сегмент {segment_idx + 1} обработан успешно")
     
     return (segment_idx, segment_result)
+
+
+async def _process_single_segment_with_adaptive_retry(
+    segment: 'TranscriptionSegment',
+    segment_idx: int,
+    total_segments: int,
+    client: openai.OpenAI,
+    selected_model: str,
+    system_prompt: str,
+    template_variables: Dict[str, str],
+    extra_headers: Dict[str, str],
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    participants: Optional[List[Dict[str, str]]] = None
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Обработать один сегмент с адаптивной retry-логикой (3 попытки с разной температурой)
+    
+    Args:
+        segment: Сегмент транскрипции
+        segment_idx: Индекс сегмента
+        total_segments: Общее количество сегментов
+        client: OpenAI клиент
+        selected_model: Модель для использования
+        system_prompt: Системный промпт
+        template_variables: Переменные шаблона
+        extra_headers: Дополнительные HTTP заголовки
+        speaker_mapping: Сопоставление спикеров с участниками
+        participants: Список участников встречи
+        
+    Returns:
+        Кортеж (индекс_сегмента, результат_обработки)
+    """
+    max_attempts = 3
+    last_exception = None
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.debug(f"Попытка {attempt}/{max_attempts} для сегмента {segment_idx + 1}")
+            
+            result = await _process_single_segment(
+                segment=segment,
+                segment_idx=segment_idx,
+                total_segments=total_segments,
+                client=client,
+                selected_model=selected_model,
+                system_prompt=system_prompt,
+                template_variables=template_variables,
+                extra_headers=extra_headers,
+                retry_manager=None,  # Не используем стандартный retry_manager
+                speaker_mapping=speaker_mapping,
+                participants=participants,
+                attempt_number=attempt
+            )
+            
+            if attempt > 1:
+                logger.info(f"Сегмент {segment_idx + 1} успешно обработан после {attempt} попыток")
+            
+            return result
+            
+        except Exception as e:
+            last_exception = e
+            
+            # Если это ошибка недостатка кредитов - немедленно прерываем
+            if isinstance(e, LLMInsufficientCreditsError):
+                logger.error(f"Недостаточно кредитов для сегмента {segment_idx + 1}: {e}")
+                raise
+            
+            # Если это последняя попытка - используем fallback
+            if attempt == max_attempts:
+                logger.warning(f"Все попытки исчерпаны для сегмента {segment_idx + 1}: {e}")
+                logger.warning(f"Используем fallback на частичные данные для сегмента {segment_idx + 1}")
+                
+                # Создаем минимальный результат с частичными данными
+                segment_text = segment.formatted_text if segment.formatted_text else segment.text
+                fallback_result = _extract_partial_data_from_text(segment_text, template_variables)
+                
+                return (segment_idx, fallback_result)
+            
+            # Задержка перед следующей попыткой
+            delay = 1.0 * (2 ** (attempt - 1))  # 1s, 2s, 4s
+            logger.warning(f"Попытка {attempt} неудачна для сегмента {segment_idx + 1}: {e}. Повтор через {delay:.1f}с")
+            await asyncio.sleep(delay)
+    
+    # Этот код не должен достигаться, но на всякий случай
+    if last_exception:
+        logger.error(f"Критическая ошибка в сегменте {segment_idx + 1}: {last_exception}")
+        # Создаем заглушку
+        fallback_result = {key: "Ошибка обработки сегмента" for key in template_variables.keys()}
+        return (segment_idx, fallback_result)
+
+
+def _extract_partial_data_from_text(
+    content: str,
+    template_variables: Dict[str, str]
+) -> Dict[str, str]:
+    """
+    Извлекает частичные данные из текстового ответа когда JSON невалиден.
+    Использует эвристики для поиска ключевых слов и структур.
+    
+    Args:
+        content: Текстовый ответ от LLM
+        template_variables: Переменные шаблона для которых нужно извлечь данные
+        
+    Returns:
+        Словарь с извлеченными данными (всегда содержит все ключи)
+    """
+    logger.warning(f"Извлечение частичных данных из текста (длина: {len(content)})")
+    
+    result = {}
+    content_lower = content.lower()
+    
+    # Маппинг ключей на ключевые слова для поиска
+    key_patterns = {
+        'participants': ['участники', 'участник', 'присутствовали', 'присутствует', 'список участников'],
+        'decisions': ['решения', 'решение', 'принято', 'решили', 'договорились'],
+        'tasks': ['задачи', 'задача', 'действия', 'план', 'следующие шаги'],
+        'discussion': ['обсуждение', 'обсуждали', 'темы', 'вопросы', 'проблемы'],
+        'agenda': ['повестка', 'пункты', 'вопросы повестки', 'план встречи'],
+        'time': ['время', 'дата', 'продолжительность', 'начало', 'окончание'],
+        'date': ['дата', 'число', 'день', 'месяц', 'год'],
+        'next_steps': ['следующие шаги', 'дальнейшие действия', 'план действий']
+    }
+    
+    for key in template_variables.keys():
+        result[key] = "Не указано"  # Значение по умолчанию
+        
+        # Ищем паттерны для данного ключа
+        patterns = key_patterns.get(key, [key])
+        
+        for pattern in patterns:
+            # Ищем упоминания ключевого слова
+            pattern_pos = content_lower.find(pattern)
+            if pattern_pos != -1:
+                # Извлекаем текст после ключевого слова
+                start_pos = pattern_pos + len(pattern)
+                remaining_text = content[start_pos:start_pos + 500]  # Берем 500 символов после
+                
+                # Ищем список или структурированный текст
+                lines = remaining_text.split('\n')
+                extracted_lines = []
+                
+                for line in lines[:10]:  # Проверяем первые 10 строк
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Пропускаем служебные слова
+                    if any(skip in line.lower() for skip in ['json', 'формат', 'вывод', 'ответ']):
+                        continue
+                    
+                    # Если строка содержит полезную информацию
+                    if len(line) > 3 and not line.startswith('{') and not line.startswith('}'):
+                        # Очищаем от лишних символов
+                        clean_line = line.strip('.,:;').strip()
+                        if clean_line and clean_line not in ['Не указано', 'Нет данных']:
+                            extracted_lines.append(clean_line)
+                
+                if extracted_lines:
+                    # Форматируем как список если нужно
+                    if key in ['decisions', 'tasks', 'next_steps', 'agenda']:
+                        formatted_lines = [f"- {line}" for line in extracted_lines[:5]]  # Максимум 5 пунктов
+                        result[key] = "\n".join(formatted_lines)
+                    else:
+                        result[key] = "\n".join(extracted_lines[:3])  # Максимум 3 строки
+                    break
+    
+    # Логируем результат извлечения
+    extracted_count = sum(1 for v in result.values() if v != "Не указано")
+    logger.info(f"Извлечено частичных данных: {extracted_count}/{len(template_variables)} полей")
+    
+    return result
 
 
 def _merge_segment_results_fallback(
@@ -1963,17 +2180,17 @@ async def generate_protocol_chain_of_thought(
         # Проверяем настройку ограничения параллелизма
         max_parallel = settings.max_parallel_segments
         
-        # Обрабатываем каждый сегмент параллельно
+        # Обрабатываем каждый сегмент параллельно с адаптивной retry-логикой
         if max_parallel:
             logger.info(
                 f"Запуск параллельной обработки {len(segments)} сегментов "
-                f"(ограничение: {max_parallel} одновременно)"
+                f"(ограничение: {max_parallel} одновременно) с адаптивной retry-логикой"
             )
             semaphore = asyncio.Semaphore(max_parallel)
             
             async def _process_with_semaphore(segment):
                 async with semaphore:
-                    return await _process_single_segment(
+                    return await _process_single_segment_with_adaptive_retry(
                         segment=segment,
                         segment_idx=segment.segment_id,
                         total_segments=len(segments),
@@ -1982,17 +2199,16 @@ async def generate_protocol_chain_of_thought(
                         system_prompt=system_prompt,
                         template_variables=template_variables,
                         extra_headers=extra_headers,
-                        retry_manager=retry_manager,
                         speaker_mapping=speaker_mapping,
                         participants=participants
                     )
             
             tasks = [_process_with_semaphore(segment) for segment in segments]
         else:
-            logger.info(f"Запуск параллельной обработки {len(segments)} сегментов (без ограничений)")
+            logger.info(f"Запуск параллельной обработки {len(segments)} сегментов (без ограничений) с адаптивной retry-логикой")
             
             tasks = [
-                _process_single_segment(
+                _process_single_segment_with_adaptive_retry(
                     segment=segment,
                     segment_idx=segment.segment_id,
                     total_segments=len(segments),
@@ -2001,7 +2217,6 @@ async def generate_protocol_chain_of_thought(
                     system_prompt=system_prompt,
                     template_variables=template_variables,
                     extra_headers=extra_headers,
-                    retry_manager=retry_manager,
                     speaker_mapping=speaker_mapping,
                     participants=participants
                 )
@@ -2011,148 +2226,217 @@ async def generate_protocol_chain_of_thought(
         # Параллельная обработка всех сегментов
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Обработка результатов
+        # Обработка результатов с детальным логированием
         successful_count = 0
         failed_count = 0
+        partial_success_count = 0
+        
+        logger.info(f"Начинаем обработку результатов {len(results)} сегментов")
         
         # Сортируем результаты по индексу сегмента для сохранения порядка
-        for result in results:
+        for i, result in enumerate(results):
             if isinstance(result, Exception):
                 # Если это ошибка недостатка кредитов - немедленно прерываем
                 if isinstance(result, LLMInsufficientCreditsError):
-                    logger.error(f"Обнаружена ошибка недостатка кредитов, прерываем обработку")
+                    logger.error(f"Обнаружена ошибка недостатка кредитов в сегменте {i+1}, прерываем обработку")
                     raise result
                 
                 failed_count += 1
-                logger.error(f"Ошибка при обработке сегмента: {result}")
-                # Добавляем пустой результат
-                segment_results.append({
-                    key: "Ошибка обработки сегмента" 
-                    for key in template_variables.keys()
-                })
+                logger.error(f"Критическая ошибка при обработке сегмента {i+1}: {result}")
+                
+                # Добавляем заглушку с детальным логированием
+                error_result = {key: "Ошибка обработки сегмента" for key in template_variables.keys()}
+                segment_results.append(error_result)
+                
             else:
-                successful_count += 1
                 segment_id, data = result
+                
+                # Проверяем качество результата
+                valid_fields = sum(1 for v in data.values() if v and v not in ["Не указано", "Ошибка обработки сегмента"])
+                total_fields = len(template_variables)
+                
+                if valid_fields == total_fields:
+                    successful_count += 1
+                    logger.debug(f"Сегмент {segment_id + 1}: Полностью успешная обработка ({valid_fields}/{total_fields} полей)")
+                elif valid_fields > 0:
+                    partial_success_count += 1
+                    logger.info(f"Сегмент {segment_id + 1}: Частично успешная обработка ({valid_fields}/{total_fields} полей)")
+                else:
+                    failed_count += 1
+                    logger.warning(f"Сегмент {segment_id + 1}: Неудачная обработка (0/{total_fields} полей)")
+                
                 segment_results.append(data)
         
+        # Детальная статистика обработки
         logger.info(
-            f"Обработка сегментов завершена: успешно {successful_count}/{len(segments)}, "
-            f"ошибок {failed_count}/{len(segments)}"
+            f"Обработка сегментов завершена: "
+            f"полностью успешно {successful_count}/{len(segments)}, "
+            f"частично успешно {partial_success_count}/{len(segments)}, "
+            f"неудачно {failed_count}/{len(segments)}"
         )
         
-        # ЭТАП 2: Синтез финального протокола
+        # Предупреждение если много неудачных сегментов
+        if failed_count > len(segments) * 0.5:  # Более 50% неудачных
+            logger.warning(f"Высокий процент неудачных сегментов: {failed_count}/{len(segments)} ({failed_count/len(segments)*100:.1f}%)")
+        elif partial_success_count > 0:
+            logger.info(f"Использованы частичные данные для {partial_success_count} сегментов")
+        
+        # ЭТАП 2: Синтез финального протокола с защитой от ошибок
         logger.info("Этап 2: Синтез финального протокола из сегментов")
         
-        participants = kwargs.get('participants')
-        synthesis_prompt = _build_synthesis_prompt(
-            segment_results=segment_results,
-            transcription=transcription,
-            template_variables=template_variables,
-            diarization_analysis=diarization_analysis,
-            participants=participants
-        )
-        
-        # DEBUG логирование запроса синтеза
-        if settings.llm_debug_log:
-            logger.debug("=" * 80)
-            logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Synthesis ({len(segment_results)} segments)")
-            logger.debug("=" * 80)
-            logger.debug(f"Synthesis prompt:\n{synthesis_prompt}")
-            logger.debug("=" * 80)
-        
-        async def _call_openai_synthesis():
-            return await asyncio.to_thread(
-                client.chat.completions.create,
-                model=selected_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": synthesis_prompt}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                extra_headers=extra_headers
+        try:
+            participants = kwargs.get('participants')
+            synthesis_prompt = _build_synthesis_prompt(
+                segment_results=segment_results,
+                transcription=transcription,
+                template_variables=template_variables,
+                diarization_analysis=diarization_analysis,
+                participants=participants
             )
-        
-        try:
-            response_synthesis = await _call_openai_synthesis()
-        except openai.APIStatusError as e:
-            # Проверяем на ошибку 402 - недостаточно кредитов
-            if e.status_code == 402:
-                error_message = e.message
-                # Пытаемся извлечь более подробное сообщение из тела ответа
-                if hasattr(e, 'response') and e.response:
-                    try:
-                        error_body = e.response.json()
-                        if 'error' in error_body and 'message' in error_body['error']:
-                            error_message = error_body['error']['message']
-                    except:
-                        pass
-                logger.error(f"Недостаточно кредитов для LLM (синтез): {error_message}")
-                raise LLMInsufficientCreditsError(
-                    message=error_message,
-                    provider="openai",
-                    model=selected_model
+            
+            # DEBUG логирование запроса синтеза
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug(f"[DEBUG] OpenAI REQUEST - Chain-of-Thought Synthesis ({len(segment_results)} segments)")
+                logger.debug("=" * 80)
+                logger.debug(f"Synthesis prompt:\n{synthesis_prompt}")
+                logger.debug("=" * 80)
+            
+            async def _call_openai_synthesis():
+                return await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=selected_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": synthesis_prompt}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    extra_headers=extra_headers
                 )
-            # Другие ошибки API пробрасываем дальше
-            raise
-        
-        content_synthesis = response_synthesis.choices[0].message.content
-        
-        # DEBUG логирование ответа синтеза
-        if settings.llm_debug_log:
-            logger.debug("=" * 80)
-            logger.debug("[DEBUG] OpenAI RESPONSE - Chain-of-Thought Synthesis")
-            logger.debug("=" * 80)
-            if hasattr(response_synthesis, 'usage'):
-                logger.debug(f"Usage: {response_synthesis.usage}")
-            logger.debug(f"Content:\n{content_synthesis}")
-            logger.debug("=" * 80)
-        
-        # Проверка на пустой ответ
-        if not content_synthesis or not content_synthesis.strip():
-            logger.error("Получен пустой ответ от LLM на этапе синтеза")
-            logger.warning("Пытаемся использовать fallback-стратегию объединения сегментов")
-            return _merge_segment_results_fallback(segment_results, template_variables)
-        
-        # Проверка на минимальные признаки JSON
-        if '{' not in content_synthesis or '}' not in content_synthesis:
-            logger.error(f"Ответ не содержит JSON структуры. Длина: {len(content_synthesis)}, начало: {content_synthesis[:200]}")
-            logger.warning("Пытаемся использовать fallback-стратегию объединения сегментов")
-            return _merge_segment_results_fallback(segment_results, template_variables)
-        
-        # Первая попытка: прямой парсинг
-        try:
-            final_protocol = json.loads(content_synthesis)
-            logger.info("Chain-of-Thought генерация завершена успешно (прямой парсинг)")
-            return final_protocol
-        except json.JSONDecodeError as e:
-            logger.warning(f"Ошибка прямого парсинга JSON на этапе синтеза: {e}")
-            logger.debug(f"Позиция ошибки: line {e.lineno}, column {e.colno}, char {e.pos}")
             
-            # Вторая попытка: извлечение JSON из текста
-            start_idx = content_synthesis.find('{')
-            end_idx = content_synthesis.rfind('}') + 1
+            try:
+                response_synthesis = await _call_openai_synthesis()
+            except openai.APIStatusError as e:
+                # Проверяем на ошибку 402 - недостаточно кредитов
+                if e.status_code == 402:
+                    error_message = e.message
+                    # Пытаемся извлечь более подробное сообщение из тела ответа
+                    if hasattr(e, 'response') and e.response:
+                        try:
+                            error_body = e.response.json()
+                            if 'error' in error_body and 'message' in error_body['error']:
+                                error_message = error_body['error']['message']
+                        except:
+                            pass
+                    logger.error(f"Недостаточно кредитов для LLM (синтез): {error_message}")
+                    raise LLMInsufficientCreditsError(
+                        message=error_message,
+                        provider="openai",
+                        model=selected_model
+                    )
+                # Другие ошибки API пробрасываем дальше
+                raise
             
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = content_synthesis[start_idx:end_idx]
-                logger.debug(f"Пытаемся извлечь JSON из текста: длина {len(json_str)}, начало: {json_str[:100]}")
+            content_synthesis = response_synthesis.choices[0].message.content
+            
+            # DEBUG логирование ответа синтеза
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug("[DEBUG] OpenAI RESPONSE - Chain-of-Thought Synthesis")
+                logger.debug("=" * 80)
+                if hasattr(response_synthesis, 'usage'):
+                    logger.debug(f"Usage: {response_synthesis.usage}")
+                logger.debug(f"Content:\n{content_synthesis}")
+                logger.debug("=" * 80)
+            
+            # Проверка на пустой ответ
+            if not content_synthesis or not content_synthesis.strip():
+                logger.error("Получен пустой ответ от LLM на этапе синтеза")
+                logger.warning("Используем fallback-стратегию объединения сегментов")
+                return _merge_segment_results_fallback(segment_results, template_variables)
+            
+            # Проверка на минимальные признаки JSON
+            if '{' not in content_synthesis or '}' not in content_synthesis:
+                logger.error(f"Ответ не содержит JSON структуры. Длина: {len(content_synthesis)}, начало: {content_synthesis[:200]}")
+                logger.warning("Используем fallback-стратегию объединения сегментов")
+                return _merge_segment_results_fallback(segment_results, template_variables)
+            
+            # Первая попытка: прямой парсинг
+            try:
+                final_protocol = json.loads(content_synthesis)
+                logger.info("Chain-of-Thought генерация завершена успешно (прямой парсинг)")
                 
-                try:
-                    final_protocol = json.loads(json_str)
-                    logger.info("Chain-of-Thought генерация завершена успешно (извлечение из текста)")
-                    return final_protocol
-                except json.JSONDecodeError as e2:
-                    logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
-                    logger.error(f"Позиция ошибки: line {e2.lineno}, column {e2.colno}, char {e2.pos}")
-                    logger.error(f"Содержимое ответа (первые 1000 символов):\n{content_synthesis[:1000]}")
-                    logger.error(f"Содержимое ответа (последние 500 символов):\n{content_synthesis[-500:]}")
-            else:
-                logger.error(f"Не удалось найти границы JSON в ответе")
-                logger.error(f"Полное содержимое ответа:\n{content_synthesis}")
+                # Финальная проверка результата
+                if not isinstance(final_protocol, dict):
+                    logger.warning("Результат синтеза не является словарем, используем fallback")
+                    return _merge_segment_results_fallback(segment_results, template_variables)
+                
+                # Проверяем, что все ключи присутствуют
+                for key in template_variables.keys():
+                    if key not in final_protocol:
+                        final_protocol[key] = "Не указано"
+                
+                return final_protocol
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"Ошибка прямого парсинга JSON на этапе синтеза: {e}")
+                logger.debug(f"Позиция ошибки: line {e.lineno}, column {e.colno}, char {e.pos}")
+                
+                # Вторая попытка: извлечение JSON из текста
+                start_idx = content_synthesis.find('{')
+                end_idx = content_synthesis.rfind('}') + 1
+                
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = content_synthesis[start_idx:end_idx]
+                    logger.debug(f"Пытаемся извлечь JSON из текста: длина {len(json_str)}, начало: {json_str[:100]}")
+                    
+                    try:
+                        final_protocol = json.loads(json_str)
+                        logger.info("Chain-of-Thought генерация завершена успешно (извлечение из текста)")
+                        
+                        # Финальная проверка результата
+                        if not isinstance(final_protocol, dict):
+                            logger.warning("Извлеченный результат не является словарем, используем fallback")
+                            return _merge_segment_results_fallback(segment_results, template_variables)
+                        
+                        # Проверяем, что все ключи присутствуют
+                        for key in template_variables.keys():
+                            if key not in final_protocol:
+                                final_protocol[key] = "Не указано"
+                        
+                        return final_protocol
+                        
+                    except json.JSONDecodeError as e2:
+                        logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
+                        logger.error(f"Позиция ошибки: line {e2.lineno}, column {e2.colno}, char {e2.pos}")
+                        logger.error(f"Содержимое ответа (первые 1000 символов):\n{content_synthesis[:1000]}")
+                        logger.error(f"Содержимое ответа (последние 500 символов):\n{content_synthesis[-500:]}")
+                else:
+                    logger.error(f"Не удалось найти границы JSON в ответе")
+                    logger.error(f"Полное содержимое ответа:\n{content_synthesis}")
+                
+                # Fallback: объединяем результаты сегментов напрямую
+                logger.warning("Все попытки парсинга JSON не удались, используем fallback-стратегию")
+                return _merge_segment_results_fallback(segment_results, template_variables)
+        
+        except Exception as e:
+            # Критическая защита: любая ошибка в синтезе приводит к fallback
+            logger.error(f"Критическая ошибка в синтезе финального протокола: {e}")
+            logger.error(f"Тип ошибки: {type(e).__name__}")
+            logger.warning("Принудительно используем fallback-стратегию объединения сегментов")
             
-            # Fallback: объединяем результаты сегментов напрямую
-            logger.warning("Все попытки парсинга JSON не удались, используем fallback-стратегию")
-            return _merge_segment_results_fallback(segment_results, template_variables)
+            # Гарантируем, что возвращаем валидный результат
+            try:
+                fallback_result = _merge_segment_results_fallback(segment_results, template_variables)
+                logger.info("Fallback-стратегия выполнена успешно")
+                return fallback_result
+            except Exception as fallback_error:
+                logger.error(f"Ошибка даже в fallback-стратегии: {fallback_error}")
+                # Последний резерв - создаем минимальный результат
+                emergency_result = {key: "Ошибка обработки" for key in template_variables.keys()}
+                logger.warning("Использован аварийный режим - минимальный результат")
+                return emergency_result
     
     else:
         # Для других провайдеров используем стандартный подход

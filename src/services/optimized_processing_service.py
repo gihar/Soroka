@@ -20,7 +20,7 @@ from src.performance.async_optimization import (
     OptimizedHTTPClient, async_lru_cache
 )
 from src.performance.memory_management import memory_optimizer
-from reliability.middleware import monitoring_middleware
+from src.reliability.middleware import monitoring_middleware
 from database import db
 from src.utils.telegram_safe import safe_send_message
 
