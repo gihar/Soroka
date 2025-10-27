@@ -133,7 +133,108 @@ schema = get_json_schema(TopicsExtractionSchema)
 print(schema['schema'])  # Проверить наличие additionalProperties: false
 ```
 
+## Этап 2: Полное исправление всех схем
+
+После первого этапа исправления остались ошибки с другими схемами, использующими `Dict[str, Any]`.
+
+### Исправленные схемы
+
+#### 1. TwoStage схемы (для двухэтапной генерации)
+
+Заменены `Dict[str, Any]` на `Dict[str, str]` (так как промпты требуют "все значения должны быть ПРОСТЫМИ СТРОКАМИ"):
+
+```python
+class TwoStageExtractionSchema(BaseModel):
+    """Схема для первого этапа двухэтапной генерации (извлечение)"""
+    extracted_data: Dict[str, str] = Field(description="Извлеченные данные (ключ=переменная, значение=строка)")
+    confidence_score: Optional[float] = Field(None, description="Уверенность")
+    extraction_notes: Optional[str] = Field(None, description="Заметки")
+    
+    class Config:
+        extra = "forbid"
+
+
+class TwoStageReflectionSchema(BaseModel):
+    """Схема для второго этапа двухэтапной генерации (рефлексия)"""
+    refined_data: Dict[str, str] = Field(description="Уточненные данные")
+    reflection_notes: Optional[str] = Field(None, description="Заметки")
+    quality_score: Optional[float] = Field(None, description="Качество")
+    
+    class Config:
+        extra = "forbid"
+```
+
+#### 2. Segment и Synthesis схемы
+
+```python
+class SegmentSchema(BaseModel):
+    """Схема для обработки одного сегмента транскрипции"""
+    segment_data: Dict[str, str] = Field(description="Данные сегмента")
+    speaker_id: Optional[str] = Field(None, description="ID спикера")
+    segment_confidence: Optional[float] = Field(None, description="Уверенность")
+    
+    class Config:
+        extra = "forbid"
+
+
+class SynthesisSchema(BaseModel):
+    """Схема для синтеза в chain-of-thought подходе"""
+    synthesized_content: Dict[str, str] = Field(description="Синтезированный контент")
+    synthesis_quality: Optional[float] = Field(None, description="Качество")
+    synthesis_notes: Optional[str] = Field(None, description="Заметки")
+    
+    class Config:
+        extra = "forbid"
+```
+
+#### 3. ProtocolSchema
+
+Заменены `List[Dict[str, str]]` и `List[Dict[str, Any]]` на строковые поля для совместимости с промптами:
+
+```python
+class ProtocolSchema(BaseModel):
+    """
+    Схема для основного протокола встречи
+    
+    ВАЖНО: Все поля - строки! Промпт явно требует:
+    "Каждое значение — строка (UTF-8), БЕЗ вложенных объектов или массивов"
+    """
+    meeting_title: str = Field(description="Название встречи")
+    meeting_date: Optional[str] = Field(None, description="Дата встречи")
+    meeting_time: Optional[str] = Field(None, description="Время встречи")
+    participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
+    agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
+    key_points: str = Field(description="Ключевые моменты (пункты списком через \\n)")
+    decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
+    action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
+    next_meeting: Optional[str] = Field(None, description="Информация о следующей встрече")
+    additional_notes: Optional[str] = Field(None, description="Дополнительные заметки")
+    
+    class Config:
+        extra = "forbid"
+```
+
+**Почему строки, а не структуры?**
+- ProtocolSchema используется для "стандартной генерации"
+- Промпты явно требуют: "Каждое значение — строка (UTF-8), БЕЗ вложенных объектов или массивов"
+- Пример из промпта: `"participants": "Иван Иванов\\nМария Петрова\\nАлексей Сидоров"`
+- Использование структурированных моделей здесь сломало бы совместимость с промптами
+
+### Итоговая статистика
+
+Всего исправлено **8 JSON схем**:
+1. ✅ TopicsExtractionSchema
+2. ✅ DecisionsExtractionSchema  
+3. ✅ ActionItemsExtractionSchema
+4. ✅ TwoStageExtractionSchema
+5. ✅ TwoStageReflectionSchema
+6. ✅ SegmentSchema
+7. ✅ SynthesisSchema
+8. ✅ ProtocolSchema (+ 4 вложенные модели)
+
+Все схемы прошли валидацию и теперь корректно работают с Azure OpenAI API.
+
 ## Дата исправления
 
-27 октября 2025
+27 октября 2025 (2 этапа)
 

@@ -10,45 +10,65 @@ from src.models.meeting_structure import DecisionPriority, ActionItemPriority
 
 
 class ProtocolSchema(BaseModel):
-    """Схема для основного протокола встречи"""
+    """
+    Схема для основного протокола встречи
+    
+    ВАЖНО: Все поля - строки! Промпт явно требует:
+    "Каждое значение — строка (UTF-8), БЕЗ вложенных объектов или массивов"
+    """
     meeting_title: str = Field(description="Название встречи")
     meeting_date: Optional[str] = Field(None, description="Дата встречи")
     meeting_time: Optional[str] = Field(None, description="Время встречи")
-    participants: List[Dict[str, str]] = Field(description="Список участников")
-    agenda: List[str] = Field(description="Повестка дня")
-    key_points: List[str] = Field(description="Ключевые моменты")
-    decisions: List[Dict[str, Any]] = Field(description="Принятые решения")
-    action_items: List[Dict[str, Any]] = Field(description="Задачи и поручения")
-    next_meeting: Optional[Dict[str, str]] = Field(None, description="Следующая встреча")
+    participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
+    agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
+    key_points: str = Field(description="Ключевые моменты (пункты списком через \\n)")
+    decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
+    action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
+    next_meeting: Optional[str] = Field(None, description="Информация о следующей встрече")
     additional_notes: Optional[str] = Field(None, description="Дополнительные заметки")
+    
+    class Config:
+        extra = "forbid"
 
 
 class TwoStageExtractionSchema(BaseModel):
     """Схема для первого этапа двухэтапной генерации (извлечение)"""
-    extracted_data: Dict[str, Any] = Field(description="Извлеченные данные из транскрипции")
-    confidence_score: float = Field(description="Уровень уверенности в извлечении (0.0-1.0)")
+    extracted_data: Dict[str, str] = Field(description="Извлеченные данные из транскрипции (ключ=переменная шаблона, значение=строка)")
+    confidence_score: Optional[float] = Field(None, description="Уровень уверенности в извлечении (0.0-1.0)")
     extraction_notes: Optional[str] = Field(None, description="Заметки по извлечению")
+    
+    class Config:
+        extra = "forbid"
 
 
 class TwoStageReflectionSchema(BaseModel):
     """Схема для второго этапа двухэтапной генерации (рефлексия)"""
-    refined_data: Dict[str, Any] = Field(description="Уточненные данные после рефлексии")
+    refined_data: Dict[str, str] = Field(description="Уточненные данные после рефлексии (ключ=переменная шаблона, значение=строка)")
     reflection_notes: Optional[str] = Field(None, description="Заметки по рефлексии")
-    quality_score: float = Field(description="Оценка качества результата (0.0-1.0)")
+    quality_score: Optional[float] = Field(None, description="Оценка качества результата (0.0-1.0)")
+    
+    class Config:
+        extra = "forbid"
 
 
 class SegmentSchema(BaseModel):
     """Схема для обработки одного сегмента транскрипции"""
-    segment_data: Dict[str, Any] = Field(description="Данные сегмента")
+    segment_data: Dict[str, str] = Field(description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
     speaker_id: Optional[str] = Field(None, description="ID спикера")
-    segment_confidence: float = Field(description="Уверенность в обработке сегмента (0.0-1.0)")
+    segment_confidence: Optional[float] = Field(None, description="Уверенность в обработке сегмента (0.0-1.0)")
+    
+    class Config:
+        extra = "forbid"
 
 
 class SynthesisSchema(BaseModel):
     """Схема для синтеза в chain-of-thought подходе"""
-    synthesized_content: Dict[str, Any] = Field(description="Синтезированный контент")
-    synthesis_quality: float = Field(description="Качество синтеза (0.0-1.0)")
+    synthesized_content: Dict[str, str] = Field(description="Синтезированный контент (ключ=переменная шаблона, значение=строка)")
+    synthesis_quality: Optional[float] = Field(None, description="Качество синтеза (0.0-1.0)")
     synthesis_notes: Optional[str] = Field(None, description="Заметки по синтезу")
+    
+    class Config:
+        extra = "forbid"
 
 
 class SpeakerMappingSchema(BaseModel):
