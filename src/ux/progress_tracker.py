@@ -10,6 +10,7 @@ from loguru import logger
 from datetime import datetime
 
 from src.utils.telegram_safe import safe_edit_text, safe_send_message
+from src.reliability.telegram_rate_limiter import telegram_rate_limiter
 
 
 class ProgressStage:
@@ -29,6 +30,11 @@ class ProgressStage:
 class ProgressTracker:
     """Упрощенный трекер прогресса"""
     
+    # Глобальный счётчик активных обновлений для ограничения параллельных запросов
+    _active_updates = 0
+    _max_parallel_updates = 3
+    _updates_lock = asyncio.Lock()
+    
     def __init__(self, bot: Bot, chat_id: int, message: Message):
         self.bot = bot
         self.chat_id = chat_id
@@ -37,23 +43,29 @@ class ProgressTracker:
         self.current_stage: Optional[str] = None
         self.start_time = datetime.now()
         self.update_task: Optional[asyncio.Task] = None
-        # Интервал автообновления (под спиннер и легкие изменения UI)
-        # Поддерживаем частоту ~1.5–3 сек, чтобы анимация казалась живой,
-        # но без излишней нагрузки на Telegram API
-        self.update_interval = 1.5
+        # Интервал автообновления (увеличен для снижения нагрузки на API)
+        self.update_interval = 2.5
         self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
         self._spinner_index = 0
         # Поля для дедупликации и троттлинга обновлений сообщения
         self._last_text: str = ""
         self._last_edit_at: datetime = datetime.min
-        # Минимальный интервал между редактированиями сообщения
-        self._min_edit_interval_seconds: float = 1.5
+        # Минимальный интервал между редактированиями сообщения (увеличен)
+        self._min_edit_interval_seconds: float = 2.5
         # Адаптивный интервал - увеличивается при длительной работе
-        self._adaptive_interval_base = 1.5
-        self._adaptive_interval_max = 3.0
+        self._adaptive_interval_base = 2.5
+        self._adaptive_interval_max = 5.0
         self._adaptive_step_seconds = 60  # Увеличивать интервал каждые 60 секунд
         # Блокировка для последовательного редактирования сообщения
         self._edit_lock = asyncio.Lock()
+        # Счётчики для диагностики
+        self._total_updates_attempted = 0
+        self._updates_skipped_flood_control = 0
+        self._updates_skipped_throttle = 0
+        self._updates_skipped_dedup = 0
+        # Экспоненциальная задержка после flood control
+        self._post_flood_interval = 2.5  # Начальное значение
+        self._is_recovering_from_flood = False
     
     def _get_adaptive_interval(self) -> float:
         """Получить адаптивный интервал обновления"""
@@ -171,41 +183,87 @@ class ProgressTracker:
     async def update_display(self, final: bool = False, force: bool = False):
         """Обновить отображение прогресса"""
         try:
+            self._total_updates_attempted += 1
+            message_id = self.message.message_id if self.message else "unknown"
+            
             # Проверяем, что сообщение существует
             if self.message is None:
                 logger.warning("Попытка обновить прогресс без сообщения")
                 return
-                
-            # Исключаем гонки между параллельными вызовами
-            async with self._edit_lock:
-                # Планируем следующий кадр спиннера, но применяем его только при реальном редактировании
-                planned_index = None
-                if not final and any(s.is_active for s in self.stages.values()):
-                    planned_index = (self._spinner_index + 1) % len(self._spinner_frames)
-
-                text = self._format_progress_text(final, spinner_index=planned_index)
-
-                # Дедупликация текста: пропускаем, если текст не изменился
-                if text == self._last_text:
+            
+            # Проверяем flood control ПЕРЕД любыми попытками обновления
+            is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(self.chat_id)
+            if is_blocked:
+                self._updates_skipped_flood_control += 1
+                if self._updates_skipped_flood_control % 5 == 1:  # Логируем каждое 5-е пропущенное обновление
+                    logger.warning(
+                        f"⏸️ Обновление прогресса приостановлено из-за flood control "
+                        f"(msg_id={message_id}, осталось {remaining:.0f}с, пропущено {self._updates_skipped_flood_control})"
+                    )
+                self._is_recovering_from_flood = True
+                return
+            
+            # Если только что сняли блокировку - начинаем с увеличенного интервала
+            if self._is_recovering_from_flood:
+                logger.info(f"✅ Flood control снят, возобновляем обновления с увеличенным интервалом (msg_id={message_id})")
+                self._post_flood_interval = 5.0
+                self._is_recovering_from_flood = False
+            
+            # Проверяем глобальный лимит параллельных обновлений
+            async with ProgressTracker._updates_lock:
+                if ProgressTracker._active_updates >= ProgressTracker._max_parallel_updates and not final:
+                    logger.debug(
+                        f"⏭️ Обновление пропущено: достигнут лимит параллельных обновлений "
+                        f"({ProgressTracker._active_updates}/{ProgressTracker._max_parallel_updates})"
+                    )
                     return
+                ProgressTracker._active_updates += 1
+            
+            try:
+                # Исключаем гонки между параллельными вызовами
+                async with self._edit_lock:
+                    # Планируем следующий кадр спиннера, но применяем его только при реальном редактировании
+                    planned_index = None
+                    if not final and any(s.is_active for s in self.stages.values()):
+                        planned_index = (self._spinner_index + 1) % len(self._spinner_frames)
 
-                # Троттлинг: не обновлять чаще, чем раз в _min_edit_interval (кроме финального сообщения)
-                now = datetime.now()
-                if not final and not force and (now - self._last_edit_at).total_seconds() < self._min_edit_interval_seconds:
-                    return
+                    text = self._format_progress_text(final, spinner_index=planned_index)
 
-                await safe_edit_text(self.message, text, parse_mode="Markdown")
-                self._last_text = text
-                self._last_edit_at = now
-                # Фиксируем смену кадра спиннера только если действительно отредактировали сообщение
-                if planned_index is not None:
-                    self._spinner_index = planned_index
+                    # Дедупликация текста: пропускаем, если текст не изменился
+                    if text == self._last_text:
+                        self._updates_skipped_dedup += 1
+                        logger.debug(f"⏭️ Дедупликация: текст не изменился (msg_id={message_id})")
+                        return
+
+                    # Троттлинг: не обновлять чаще, чем раз в _min_edit_interval (кроме финального сообщения)
+                    now = datetime.now()
+                    if not final and not force and (now - self._last_edit_at).total_seconds() < self._min_edit_interval_seconds:
+                        self._updates_skipped_throttle += 1
+                        logger.debug(f"⏭️ Троттлинг: слишком частое обновление (msg_id={message_id})")
+                        return
+
+                    logger.debug(f"📝 Обновление прогресса (msg_id={message_id}, попыток={self._total_updates_attempted})")
+                    await safe_edit_text(self.message, text, parse_mode="Markdown")
+                    self._last_text = text
+                    self._last_edit_at = now
+                    
+                    # Постепенно снижаем интервал после flood control
+                    if self._post_flood_interval > self._adaptive_interval_base:
+                        self._post_flood_interval = max(self._adaptive_interval_base, self._post_flood_interval - 0.5)
+                    
+                    # Фиксируем смену кадра спиннера только если действительно отредактировали сообщение
+                    if planned_index is not None:
+                        self._spinner_index = planned_index
+            finally:
+                async with ProgressTracker._updates_lock:
+                    ProgressTracker._active_updates -= 1
+                    
         except Exception as e:
             # Тихо игнорируем частый случай: сообщение не изменилось
             if "message is not modified" in str(e).lower():
-                logger.debug("Пропущено обновление: текст не изменился")
+                logger.debug(f"⏭️ Сообщение не изменилось (msg_id={message_id})")
                 return
-            logger.error(f"Ошибка обновления прогресса: {e}")
+            logger.error(f"❌ Ошибка обновления прогресса (msg_id={message_id}): {e}")
     
     def _format_progress_text(self, final: bool = False, spinner_index: Optional[int] = None) -> str:
         """Сформировать упрощенный текст с прогрессом"""
@@ -256,20 +314,40 @@ class ProgressTracker:
         return text
     
     async def _auto_update(self):
-        """Автоматическое обновление дисплея"""
+        """Автоматическое обновление дисплея с учётом flood control"""
         try:
             while self.current_stage:
-                # Используем адаптивный интервал
-                adaptive_interval = self._get_adaptive_interval()
-                await asyncio.sleep(adaptive_interval)
+                # Проверяем flood control перед каждым циклом
+                is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(self.chat_id)
+                
+                if is_blocked:
+                    # Ждём полного снятия блокировки + небольшой запас
+                    wait_time = remaining + 1.0
+                    logger.info(
+                        f"⏸️ Автообновление прогресса приостановлено на {wait_time:.0f}с из-за flood control"
+                    )
+                    await asyncio.sleep(wait_time)
+                    # После снятия блокировки помечаем состояние восстановления
+                    self._is_recovering_from_flood = True
+                    continue
+                
+                # Используем адаптивный интервал или post-flood интервал
+                if self._is_recovering_from_flood and self._post_flood_interval > self._adaptive_interval_base:
+                    interval = self._post_flood_interval
+                    logger.debug(f"Используем увеличенный интервал после flood control: {interval}с")
+                else:
+                    interval = self._get_adaptive_interval()
+                
+                await asyncio.sleep(interval)
+                
                 if self.current_stage:  # Проверяем еще раз после сна
                     # Сдвиг спиннера и редактирование производятся внутри update_display
                     # Форсируем редактирование, чтобы анимация крутилась даже при частых апдейтах прогресса
                     await self.update_display(force=True)
         except asyncio.CancelledError:
-            pass
+            logger.debug("Автообновление прогресса отменено")
         except Exception as e:
-            logger.error(f"Ошибка в авто-обновлении прогресса: {e}")
+            logger.error(f"❌ Ошибка в авто-обновлении прогресса: {e}")
     
     async def error(self, stage_id: str, error_message: str):
         """Отметить ошибку на этапе"""

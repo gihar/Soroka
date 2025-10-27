@@ -80,10 +80,22 @@ async def safe_edit_text(
         Отредактированное сообщение или None при ошибке
     """
     try:
+        message_id = message.message_id
+        chat_id = message.chat.id
+        
+        # ПРЕДВАРИТЕЛЬНАЯ проверка flood control до вызова rate limiter
+        is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(chat_id)
+        if is_blocked:
+            logger.debug(
+                f"safe_edit_text: Редактирование блокировано flood control "
+                f"(msg_id={message_id}, chat_id={chat_id}, осталось {remaining:.0f}с)"
+            )
+            return None
+        
         result = await telegram_rate_limiter.safe_send_with_retry(
             message.edit_text,
             text,
-            chat_id=message.chat.id,
+            chat_id=chat_id,
             parse_mode=parse_mode,
             reply_markup=reply_markup,
             disable_web_page_preview=disable_web_page_preview,
@@ -91,21 +103,26 @@ async def safe_edit_text(
         )
         
         if result is None:
-            logger.warning(f"Не удалось отредактировать сообщение {message.message_id}")
+            logger.warning(
+                f"Не удалось отредактировать сообщение "
+                f"(msg_id={message_id}, chat_id={chat_id})"
+            )
+        else:
+            logger.debug(f"Сообщение успешно отредактировано (msg_id={message_id})")
         
         return result
     
     except TelegramBadRequest as e:
         # Игнорируем ошибку "message is not modified" - это нормально
         if "message is not modified" in str(e).lower():
-            logger.debug("Сообщение не изменилось, пропускаем редактирование")
+            logger.debug(f"Сообщение не изменилось, пропускаем редактирование (msg_id={message.message_id})")
             return message
         
-        logger.error(f"Ошибка при редактировании сообщения: {e}")
+        logger.error(f"Ошибка при редактировании сообщения (msg_id={message.message_id}): {e}")
         return None
     
     except Exception as e:
-        logger.error(f"Критическая ошибка в safe_edit_text: {e}")
+        logger.error(f"Критическая ошибка в safe_edit_text (msg_id={message.message_id}): {e}")
         return None
 
 
@@ -294,6 +311,15 @@ async def safe_bot_edit_message(
         Отредактированное сообщение или None при ошибке
     """
     try:
+        # ПРЕДВАРИТЕЛЬНАЯ проверка flood control
+        is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(chat_id)
+        if is_blocked:
+            logger.debug(
+                f"safe_bot_edit_message: Редактирование блокировано flood control "
+                f"(msg_id={message_id}, chat_id={chat_id}, осталось {remaining:.0f}с)"
+            )
+            return None
+        
         result = await telegram_rate_limiter.safe_send_with_retry(
             bot.edit_message_text,
             text=text,
@@ -307,19 +333,21 @@ async def safe_bot_edit_message(
         
         if result is None:
             logger.warning(f"Не удалось отредактировать сообщение {message_id} в чате {chat_id}")
+        else:
+            logger.debug(f"Сообщение успешно отредактировано (msg_id={message_id}, chat_id={chat_id})")
         
         return result
     
     except TelegramBadRequest as e:
         # Игнорируем ошибку "message is not modified" - это нормально
         if "message is not modified" in str(e).lower():
-            logger.debug("Сообщение не изменилось, пропускаем редактирование")
+            logger.debug(f"Сообщение не изменилось, пропускаем редактирование (msg_id={message_id})")
             return None
         
-        logger.error(f"Ошибка при редактировании сообщения: {e}")
+        logger.error(f"Ошибка при редактировании сообщения (msg_id={message_id}): {e}")
         return None
     
     except Exception as e:
-        logger.error(f"Критическая ошибка в safe_bot_edit_message: {e}")
+        logger.error(f"Критическая ошибка в safe_bot_edit_message (msg_id={message_id}): {e}")
         return None
 
