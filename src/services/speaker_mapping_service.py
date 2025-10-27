@@ -538,7 +538,7 @@ class SpeakerMappingService:
                     
                     # Краткое резюме результата (если включено логирование)
                     if settings.llm_debug_log:
-                        mapped_count = sum(1 for k in result.keys() if k not in ['confidence', 'reasoning'])
+                        mapped_count = len(result.get('speaker_mappings', {}))
                         logger.info(f"LLM сопоставил {mapped_count} спикеров")
                     
                     return result
