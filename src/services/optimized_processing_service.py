@@ -101,31 +101,62 @@ class OptimizedProcessingService(BaseProcessingService):
                 success=success
             )
         
+        temp_file_path = None
+        cache_check_only = False  # Флаг, что файл скачан только для проверки кеша
+        
         try:
-            # Начинаем отслеживание прогресса (первый видимый этап — "preparation")
+            # Шаг 1: Получаем путь к файлу (скачиваем или используем существующий)
+            if request.is_external_file:
+                # Для внешних файлов путь уже указан
+                temp_file_path = request.file_path
+                if not os.path.exists(temp_file_path):
+                    raise ProcessingError(
+                        f"Файл не найден: {temp_file_path}", 
+                        request.file_name, 
+                        "file_preparation"
+                    )
+            else:
+                # Для Telegram файлов - скачиваем
+                temp_file_path = await self._download_telegram_file(request)
+                cache_check_only = True  # Отметим, что файл скачан специально для проверки кеша
             
-            # Проверяем кэш полного результата
-            cache_key = self._generate_result_cache_key(request)
+            # Шаг 2: Вычисляем хеш файла
+            file_hash = await self._calculate_file_hash(temp_file_path)
+            logger.debug(f"Вычислен хеш файла: {file_hash}")
+            
+            # Шаг 3: Генерируем ключ кеша с хешем
+            cache_key = self._generate_result_cache_key(request, file_hash)
+            
+            # Шаг 4: Проверяем кэш полного результата
             cached_result = await performance_cache.get(cache_key)
             
             if cached_result:
-                logger.info(f"Найден кэшированный результат для {request.file_name}")
+                logger.info(f"✅ Найден кэшированный результат для {request.file_name} (file_hash: {file_hash})")
                 processing_metrics.end_time = processing_metrics.start_time  # Мгновенный результат
                 metrics_collector.finish_processing_metrics(processing_metrics)
                 record_monitoring(True)
                 await self._save_processing_history(request, cached_result)
                 if progress_tracker:
                     await progress_tracker.complete_all()
+                
+                # Если файл был скачан только для проверки кеша - удаляем его
+                if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
+                    await self._cleanup_temp_file(temp_file_path)
+                
                 return cached_result
             
-            # Если кэша нет, выполняем оптимизированную обработку
-            result = await self._process_file_optimized(request, processing_metrics, progress_tracker)
+            logger.info(f"❌ Кеш не найден для {request.file_name} (file_hash: {file_hash}), начинаем обработку")
+            cache_check_only = False  # Файл будет использован для обработки
             
-            # Кэшируем результат
+            # Шаг 5: Если кэша нет, выполняем оптимизированную обработку
+            result = await self._process_file_optimized(request, processing_metrics, progress_tracker, temp_file_path)
+            
+            # Шаг 6: Кэшируем результат
             await performance_cache.set(
                 cache_key, result, 
                 cache_type="processing_result"
             )
+            logger.info(f"💾 Результат закеширован для {request.file_name} (file_hash: {file_hash})")
             
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
@@ -136,6 +167,9 @@ class OptimizedProcessingService(BaseProcessingService):
             logger.error(f"Ошибка в оптимизированной обработке {request.file_name}: {e}")
             metrics_collector.finish_processing_metrics(processing_metrics, e)
             record_monitoring(False)
+            # Если файл был скачан только для проверки кеша - удаляем его
+            if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
+                await self._cleanup_temp_file(temp_file_path)
             raise
 
     async def _save_processing_history(
@@ -172,7 +206,16 @@ class OptimizedProcessingService(BaseProcessingService):
             logger.error(f"Ошибка при сохранении истории обработки: {err}")
     
     async def _process_file_optimized(self, request: ProcessingRequest, 
-                                    processing_metrics, progress_tracker=None) -> ProcessingResult:
+                                    processing_metrics, progress_tracker=None, 
+                                    temp_file_path: str = None) -> ProcessingResult:
+        """Внутренняя оптимизированная обработка
+        
+        Args:
+            request: Запрос на обработку
+            processing_metrics: Метрики производительности
+            progress_tracker: Трекер прогресса
+            temp_file_path: Путь к уже скачанному файлу (если None, файл будет скачан)
+        """
         
         # ДОБАВЛЕНО: Логирование данных из ProcessingRequest для диагностики
         logger.info(f"🔍 Данные из ProcessingRequest при начале обработки:")
@@ -189,7 +232,6 @@ class OptimizedProcessingService(BaseProcessingService):
         logger.info(f"  meeting_date: {request.meeting_date}")
         logger.info(f"  meeting_time: {request.meeting_time}")
         logger.info(f"  speaker_mapping: {request.speaker_mapping}")
-        """Внутренняя оптимизированная обработка"""
         
         async with optimized_file_processing() as resources:
             http_client = resources["http_client"]
@@ -209,31 +251,43 @@ class OptimizedProcessingService(BaseProcessingService):
                 await progress_tracker.start_stage("preparation")
             
             with PerformanceTimer("file_download", metrics_collector):
-                if request.is_external_file:
-                    # Для внешних файлов путь уже указан
-                    temp_file_path = request.file_path
-                    
-                    # Получаем размер файла
+                # Если путь к файлу не передан, скачиваем файл
+                if temp_file_path is None:
+                    if request.is_external_file:
+                        # Для внешних файлов путь уже указан
+                        temp_file_path = request.file_path
+                        
+                        # Получаем размер файла
+                        if os.path.exists(temp_file_path):
+                            file_size = os.path.getsize(temp_file_path)
+                            processing_metrics.file_size_bytes = file_size
+                            processing_metrics.download_duration = 0.1  # Минимальное время
+                        else:
+                            raise ProcessingError(f"Файл не найден: {temp_file_path}", 
+                                                request.file_name, "file_preparation")
+                    else:
+                        # Для Telegram файлов - скачиваем как обычно
+                        file_url = await self.file_service.get_telegram_file_url(request.file_id)
+                        temp_file_path = f"temp/{request.file_name}"
+                        
+                        download_result = await http_client.download_file(file_url, temp_file_path)
+                        
+                        if not download_result["success"]:
+                            raise ProcessingError(f"Ошибка скачивания: {download_result['error']}", 
+                                                request.file_name, "download")
+                        
+                        processing_metrics.download_duration = download_result["duration"]
+                        processing_metrics.file_size_bytes = download_result["bytes_downloaded"]
+                else:
+                    # Файл уже скачан, просто получаем метрики
                     if os.path.exists(temp_file_path):
                         file_size = os.path.getsize(temp_file_path)
                         processing_metrics.file_size_bytes = file_size
-                        processing_metrics.download_duration = 0.1  # Минимальное время
+                        processing_metrics.download_duration = 0.0  # Файл уже был скачан ранее
+                        logger.debug(f"Используем уже скачанный файл: {temp_file_path} ({file_size} байт)")
                     else:
                         raise ProcessingError(f"Файл не найден: {temp_file_path}", 
                                             request.file_name, "file_preparation")
-                else:
-                    # Для Telegram файлов - скачиваем как обычно
-                    file_url = await self.file_service.get_telegram_file_url(request.file_id)
-                    temp_file_path = f"temp/{request.file_name}"
-                    
-                    download_result = await http_client.download_file(file_url, temp_file_path)
-                    
-                    if not download_result["success"]:
-                        raise ProcessingError(f"Ошибка скачивания: {download_result['error']}", 
-                                            request.file_name, "download")
-                    
-                    processing_metrics.download_duration = download_result["duration"]
-                    processing_metrics.file_size_bytes = download_result["bytes_downloaded"]
                 
                 processing_metrics.file_format = os.path.splitext(request.file_name)[1]
             
@@ -1043,6 +1097,35 @@ class OptimizedProcessingService(BaseProcessingService):
         
         return hash_obj.hexdigest()[:16]  # Берем первые 16 символов
     
+    async def _download_telegram_file(self, request: ProcessingRequest) -> str:
+        """Скачать Telegram файл и вернуть путь
+        
+        Args:
+            request: Запрос на обработку с file_id
+            
+        Returns:
+            Путь к скачанному файлу
+            
+        Raises:
+            ProcessingError: Если файл не удалось скачать
+        """
+        file_url = await self.file_service.get_telegram_file_url(request.file_id)
+        temp_file_path = f"temp/{request.file_name}"
+        
+        # Используем OptimizedHTTPClient для скачивания
+        async with OptimizedHTTPClient() as http_client:
+            result = await http_client.download_file(file_url, temp_file_path)
+            
+            if not result["success"]:
+                raise ProcessingError(
+                    f"Ошибка скачивания: {result['error']}", 
+                    request.file_name, 
+                    "download"
+                )
+        
+        logger.info(f"Файл скачан: {temp_file_path} ({result['bytes_downloaded']} байт)")
+        return temp_file_path
+    
     async def _cleanup_temp_file(self, file_path: str):
         """Асинхронная очистка временного файла"""
         try:
@@ -1053,24 +1136,26 @@ class OptimizedProcessingService(BaseProcessingService):
         except Exception as e:
             logger.warning(f"Не удалось удалить временный файл {file_path}: {e}")
     
-    def _generate_result_cache_key(self, request: ProcessingRequest) -> str:
-        """Генерировать ключ кэша для полного результата"""
-        # Для внешних файлов используем оригинальный URL
-        # Для Telegram файлов используем file_id
-        if request.is_external_file and request.file_url:
-            file_identifier = request.file_url
-        elif request.file_id:
-            file_identifier = request.file_id
-        else:
-            file_identifier = request.file_path
+    def _generate_result_cache_key(self, request: ProcessingRequest, file_hash: str) -> str:
+        """Генерировать ключ кэша для полного результата
         
+        Args:
+            request: Запрос на обработку
+            file_hash: SHA-256 хеш содержимого файла
+            
+        Returns:
+            Ключ кэша
+        """
         key_data = {
-            "file_identifier": file_identifier,
+            "file_hash": file_hash,  # Используем хеш содержимого вместо file_id
             "template_id": request.template_id,
             "llm_provider": request.llm_provider,
             "language": request.language,
-            "is_external_file": request.is_external_file,
-            "participants_list": request.participants_list
+            "participants_list": request.participants_list,
+            "meeting_topic": request.meeting_topic,
+            "meeting_date": request.meeting_date,
+            "meeting_time": request.meeting_time,
+            "speaker_mapping": request.speaker_mapping
         }
         return performance_cache._generate_key("full_result", key_data)
     
