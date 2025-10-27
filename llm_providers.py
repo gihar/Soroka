@@ -1750,12 +1750,21 @@ def _build_segment_analysis_prompt(
         participants_info += "   • Преобразуй уменьшительные: Света→Светлана, Леша→Алексей, Володя→Владимир\n"
         participants_info += "   • Если полное имя не упомянуто, используй то что есть: \"Марат\" или \"Викулин\"\n\n"
         
-        participants_info += "⚠️ КРИТИЧЕСКИ ВАЖНО - ВОЗВРАТ МАППИНГА:\n"
+        participants_info += "📊 ФОРМАТ ДЕТАЛЬНОГО МАППИНГА В ОТВЕТЕ:\n\n"
+        participants_info += "Для каждого SPEAKER_N который ты сопоставил с именем, укажи:\n\n"
+        participants_info += "1. speaker_mapping: {\"SPEAKER_1\": \"Имя Фамилия\", ...}\n"
+        participants_info += "2. confidence_scores: {\"SPEAKER_1\": 0.85, ...} где:\n"
+        participants_info += "   - 0.9-1.0: очень высокая уверенность (прямое представление)\n"
+        participants_info += "   - 0.7-0.9: высокая уверенность (обращение + ответ)\n"
+        participants_info += "   - 0.5-0.7: средняя уверенность (подтверждение чужих слов)\n"
+        participants_info += "   - < 0.5: низкая уверенность (НЕ включай в маппинг!)\n"
+        participants_info += "3. unmapped_speakers: [\"SPEAKER_5\", \"SPEAKER_8\"] - спикеры без уверенного сопоставления\n"
+        participants_info += "4. mapping_notes: \"краткое пояснение логики сопоставления\"\n\n"
+        participants_info += "⚠️ КРИТИЧЕСКИ ВАЖНО:\n"
         participants_info += "   • НЕ заменяй SPEAKER_N на имена в полях segment_data!\n"
-        participants_info += "   • Вместо этого верни отдельное поле speaker_mapping\n"
-        participants_info += "   • Формат: {\"SPEAKER_1\": \"Имя Фамилия\", \"SPEAKER_2\": \"Имя Фамилия\"}\n"
-        participants_info += "   • Если имя для SPEAKER_N не найдено - НЕ включай его в маппинг\n"
-        participants_info += "   • Если уверенность < 70% - лучше НЕ включай в маппинг\n\n"
+        participants_info += "   • Вместо этого верни отдельные поля speaker_mapping, confidence_scores, unmapped_speakers\n"
+        participants_info += "   • Если имя для SPEAKER_N не найдено - добавь его в unmapped_speakers\n"
+        participants_info += "   • Если уверенность < 0.5 - НЕ включай в маппинг, добавь в unmapped_speakers\n\n"
         
         participants_info += "🚫 СТРОГИЕ ЗАПРЕТЫ:\n"
         participants_info += "   ❌ НЕ придумывай имена, которых НЕТ в транскрипции\n"
@@ -1774,9 +1783,14 @@ def _build_segment_analysis_prompt(
         participants_info += "  \"speaker_mapping\": {\n"
         participants_info += "    \"SPEAKER_2\": \"Марат Аббасламов\"\n"
         participants_info += "  },\n"
+        participants_info += "  \"confidence_scores\": {\n"
+        participants_info += "    \"SPEAKER_2\": 0.85\n"
+        participants_info += "  },\n"
+        participants_info += "  \"unmapped_speakers\": [\"SPEAKER_1\", \"SPEAKER_3\"],\n"
+        participants_info += "  \"mapping_notes\": \"SPEAKER_2 назван 'Марат' при обращении от SPEAKER_1. SPEAKER_1 и SPEAKER_3 не определены.\",\n"
         participants_info += "  \"segment_confidence\": 0.85\n"
         participants_info += "}\n"
-        participants_info += "Пояснение: Для SPEAKER_1 и SPEAKER_3 недостаточно данных, поэтому не включены.\n\n"
+        participants_info += "Пояснение: Для SPEAKER_1 и SPEAKER_3 недостаточно данных, они в unmapped_speakers.\n\n"
         
         participants_info += "Пример Б - Нет уверенных сопоставлений:\n"
         participants_info += "{\n"
@@ -1785,9 +1799,12 @@ def _build_segment_analysis_prompt(
         participants_info += "    \"decisions\": \"- SPEAKER_1 предложил новый подход\"\n"
         participants_info += "  },\n"
         participants_info += "  \"speaker_mapping\": {},\n"
+        participants_info += "  \"confidence_scores\": {},\n"
+        participants_info += "  \"unmapped_speakers\": [\"SPEAKER_1\", \"SPEAKER_2\"],\n"
+        participants_info += "  \"mapping_notes\": \"В сегменте нет явных упоминаний имен или обращений.\",\n"
         participants_info += "  \"segment_confidence\": 0.75\n"
         participants_info += "}\n"
-        participants_info += "Пояснение: В сегменте нет явных упоминаний имен или обращений.\n\n"
+        participants_info += "Пояснение: Все спикеры в unmapped_speakers так как нет данных для сопоставления.\n\n"
     
     prompt = f"""CHAIN-OF-THOUGHT: АНАЛИЗ СЕГМЕНТА {segment_id + 1} ИЗ {total_segments}
 
@@ -1822,9 +1839,12 @@ def _build_segment_analysis_prompt(
 - Для списков используй формат: "- пункт1\\n- пункт2"
 
 ФОРМАТ ВЫВОДА:
-JSON-объект с тремя полями:
+JSON-объект с ШЕСТЬЮ полями:
 - segment_data: объект с ключами из списка категорий (значения - строки)
-- speaker_mapping: объект с маппингом SPEAKER_N → имена (только найденные)
+- speaker_mapping: объект с маппингом SPEAKER_N → имена (только найденные с уверенностью ≥ 0.5)
+- confidence_scores: объект с уверенностью для каждого SPEAKER_N из speaker_mapping (0.0-1.0)
+- unmapped_speakers: массив со SPEAKER_N которых не удалось сопоставить
+- mapping_notes: строка с пояснением логики сопоставления
 - segment_confidence: число от 0.0 до 1.0
 
 Выведи ТОЛЬКО JSON, без комментариев."""
@@ -1909,6 +1929,30 @@ def _build_synthesis_prompt(
    - Используй final_speaker_mapping для замены SPEAKER_N на имена в финальном протоколе
    - Если для SPEAKER_N нет маппинга - оставь SPEAKER_N как есть
 
+8. АГРЕГАЦИЯ ДЕТАЛЬНОЙ ИНФОРМАЦИИ О МАППИНГАХ:
+   
+   Из всех сегментов собери:
+   - speaker_mapping и confidence_scores из каждого сегмента
+   
+   Создай final_speaker_mapping (см. пункт 7)
+   
+   Создай final_confidence_scores:
+   - Для каждого SPEAKER_N в final_speaker_mapping: максимальная confidence из всех сегментов
+   - Если в разных сегментах разные confidence для одного спикера - бери максимальную
+   - Пример: SPEAKER_1 в сегменте 1 = 0.85, в сегменте 3 = 0.92 → final = 0.92
+   
+   Создай final_unmapped_speakers:
+   - Все SPEAKER_N которые встречаются в unmapped_speakers хотя бы в одном сегменте
+   - НО исключи тех, для кого найден маппинг в других сегментах (есть в final_speaker_mapping)
+   - Пример: SPEAKER_5 в unmapped в сегментах 1,2,3 и нет в маппингах → добавь в final_unmapped
+   
+   Создай aggregation_notes:
+   - Опиши как разрешены конфликты (если были)
+   - Укажи количество сегментов с маппингами (например "3 из 5 сегментов содержали маппинги")
+   - Отметь спикеров с низкой уверенностью (< 0.7)
+   - Перечисли unmapped спикеров если есть
+   - Пример: "Найдены маппинги в 3 из 5 сегментов. SPEAKER_1 (confidence 0.92) и SPEAKER_2 (0.85) сопоставлены. SPEAKER_3, SPEAKER_5 не сопоставлены."
+
 СПЕЦИАЛЬНЫЕ ПРАВИЛА:
 - Если информация из разных сегментов конфликтует - используй более детальную
 - Объединяй похожие пункты в списках
@@ -1960,11 +2004,14 @@ def _build_synthesis_prompt(
 }}
 
 ФОРМАТ ВЫВОДА:
-JSON-объект с четырьмя полями:
+JSON-объект с СЕМЬЮ полями:
 - synthesized_content: объект с ключами из template_variables (значения - строки с заменой SPEAKER_N на имена)
 - final_speaker_mapping: объект с итоговым маппингом SPEAKER_N → имена
+- final_confidence_scores: объект с уверенностью для каждого спикера из final_speaker_mapping (0.0-1.0)
+- final_unmapped_speakers: массив со SPEAKER_N которых не удалось сопоставить
+- aggregation_notes: строка с заметками по агрегации маппингов из сегментов
 - synthesis_quality: число от 0.0 до 1.0
-- synthesis_notes: строка с заметками
+- synthesis_notes: строка с заметками по синтезу контента
 
 Выведи ТОЛЬКО JSON, без комментариев."""
 
@@ -2135,6 +2182,9 @@ async def _process_single_segment(
         segment_result = {
             'segment_data': {key: "Ошибка обработки сегмента" for key in template_variables.keys()},
             'speaker_mapping': {},
+            'confidence_scores': {},
+            'unmapped_speakers': [],
+            'mapping_notes': '',
             'segment_confidence': 0.0
         }
     else:
@@ -2145,6 +2195,9 @@ async def _process_single_segment(
             segment_result = {
                 'segment_data': segment_data,
                 'speaker_mapping': segment_result.get('speaker_mapping', {}),
+                'confidence_scores': segment_result.get('confidence_scores', {}),
+                'unmapped_speakers': segment_result.get('unmapped_speakers', []),
+                'mapping_notes': segment_result.get('mapping_notes', ''),
                 'segment_confidence': segment_result.get('segment_confidence', 0.0)
             }
         else:
@@ -2152,10 +2205,24 @@ async def _process_single_segment(
             for key in template_variables.keys():
                 if key not in segment_result['segment_data']:
                     segment_result['segment_data'][key] = "Не указано"
+            
+            # Убеждаемся, что детальные поля присутствуют
+            if 'confidence_scores' not in segment_result:
+                segment_result['confidence_scores'] = {}
+            if 'unmapped_speakers' not in segment_result:
+                segment_result['unmapped_speakers'] = []
+            if 'mapping_notes' not in segment_result:
+                segment_result['mapping_notes'] = ''
         
-        # Логируем speaker_mapping если есть
+        # Логируем speaker_mapping и детальную информацию если есть
         if segment_result.get('speaker_mapping'):
             logger.debug(f"Сегмент {segment_idx + 1}: найден speaker_mapping: {segment_result['speaker_mapping']}")
+        
+        if segment_result.get('confidence_scores'):
+            logger.debug(f"Сегмент {segment_idx + 1}: confidence_scores: {segment_result['confidence_scores']}")
+        
+        if segment_result.get('unmapped_speakers'):
+            logger.debug(f"Сегмент {segment_idx + 1}: unmapped_speakers: {segment_result['unmapped_speakers']}")
     
     logger.info(f"Сегмент {segment_idx + 1} обработан успешно")
     
@@ -2330,10 +2397,13 @@ def _extract_partial_data_from_text(
     extracted_count = sum(1 for v in result.values() if v != "Не указано")
     logger.info(f"Извлечено частичных данных: {extracted_count}/{len(template_variables)} полей")
     
-    # Возвращаем в новом формате с segment_data
+    # Возвращаем в новом формате с segment_data и детальными полями
     return {
         'segment_data': result,
         'speaker_mapping': {},
+        'confidence_scores': {},
+        'unmapped_speakers': [],
+        'mapping_notes': 'Fallback извлечение: speaker mapping недоступен',
         'segment_confidence': 0.5  # Средняя уверенность для fallback
     }
 
@@ -2357,17 +2427,62 @@ def _merge_segment_results_fallback(
     
     # Собираем speaker_mapping из всех сегментов
     combined_speaker_mapping = {}
+    combined_confidence_scores = {}
+    all_unmapped_speakers = set()
+    
+    segments_with_mappings = 0
+    
     for segment in segment_results:
         if 'speaker_mapping' in segment and segment['speaker_mapping']:
+            segments_with_mappings += 1
+            
             for speaker_id, name in segment['speaker_mapping'].items():
                 if speaker_id not in combined_speaker_mapping:
                     combined_speaker_mapping[speaker_id] = name
+                    # Инициализируем confidence
+                    combined_confidence_scores[speaker_id] = 0.0
                 elif len(name) > len(combined_speaker_mapping[speaker_id]):
                     # Приоритет более полному варианту
                     combined_speaker_mapping[speaker_id] = name
+            
+            # Собираем confidence_scores
+            if 'confidence_scores' in segment and segment['confidence_scores']:
+                for speaker_id, confidence in segment['confidence_scores'].items():
+                    # Берем максимальную confidence из всех сегментов
+                    if speaker_id in combined_confidence_scores:
+                        combined_confidence_scores[speaker_id] = max(
+                            combined_confidence_scores[speaker_id], 
+                            confidence
+                        )
+                    else:
+                        combined_confidence_scores[speaker_id] = confidence
+        
+        # Собираем unmapped_speakers
+        if 'unmapped_speakers' in segment and segment['unmapped_speakers']:
+            all_unmapped_speakers.update(segment['unmapped_speakers'])
+    
+    # Исключаем из unmapped тех, кто есть в маппинге
+    final_unmapped_speakers = list(all_unmapped_speakers - set(combined_speaker_mapping.keys()))
     
     if combined_speaker_mapping:
         logger.info(f"Объединенный speaker_mapping: {combined_speaker_mapping}")
+    
+    if combined_confidence_scores:
+        logger.info(f"Объединенные confidence scores: {combined_confidence_scores}")
+    
+    if final_unmapped_speakers:
+        logger.warning(f"Unmapped speakers (fallback): {final_unmapped_speakers}")
+    
+    # Формируем aggregation notes
+    aggregation_notes = f"Fallback агрегация: маппинги найдены в {segments_with_mappings} из {len(segment_results)} сегментов."
+    if combined_speaker_mapping:
+        low_confidence = [f"{sid} ({conf:.2f})" for sid, conf in combined_confidence_scores.items() if conf < 0.7]
+        if low_confidence:
+            aggregation_notes += f" Низкая уверенность: {', '.join(low_confidence)}."
+    if final_unmapped_speakers:
+        aggregation_notes += f" Не сопоставлены: {', '.join(final_unmapped_speakers)}."
+    
+    logger.debug(f"Aggregation notes (fallback): {aggregation_notes}")
     
     merged = {}
     
@@ -2709,8 +2824,22 @@ async def generate_protocol_chain_of_thought(
                 synthesized_content = final_protocol.get('synthesized_content', final_protocol)
                 final_speaker_mapping = final_protocol.get('final_speaker_mapping', {})
                 
+                # Извлекаем детальную информацию
+                final_confidence_scores = final_protocol.get('final_confidence_scores', {})
+                final_unmapped_speakers = final_protocol.get('final_unmapped_speakers', [])
+                aggregation_notes = final_protocol.get('aggregation_notes', '')
+                
                 if final_speaker_mapping:
                     logger.info(f"Итоговый speaker_mapping: {final_speaker_mapping}")
+                
+                if final_confidence_scores:
+                    logger.info(f"Confidence scores: {final_confidence_scores}")
+                
+                if final_unmapped_speakers:
+                    logger.warning(f"Unmapped speakers: {final_unmapped_speakers}")
+                
+                if aggregation_notes:
+                    logger.debug(f"Aggregation notes: {aggregation_notes}")
                 
                 # Финальная проверка результата
                 if not isinstance(synthesized_content, dict):
@@ -2744,8 +2873,22 @@ async def generate_protocol_chain_of_thought(
                         synthesized_content = final_protocol.get('synthesized_content', final_protocol)
                         final_speaker_mapping = final_protocol.get('final_speaker_mapping', {})
                         
+                        # Извлекаем детальную информацию
+                        final_confidence_scores = final_protocol.get('final_confidence_scores', {})
+                        final_unmapped_speakers = final_protocol.get('final_unmapped_speakers', [])
+                        aggregation_notes = final_protocol.get('aggregation_notes', '')
+                        
                         if final_speaker_mapping:
                             logger.info(f"Итоговый speaker_mapping (из текста): {final_speaker_mapping}")
+                        
+                        if final_confidence_scores:
+                            logger.info(f"Confidence scores (из текста): {final_confidence_scores}")
+                        
+                        if final_unmapped_speakers:
+                            logger.warning(f"Unmapped speakers (из текста): {final_unmapped_speakers}")
+                        
+                        if aggregation_notes:
+                            logger.debug(f"Aggregation notes (из текста): {aggregation_notes}")
                         
                         # Финальная проверка результата
                         if not isinstance(synthesized_content, dict):

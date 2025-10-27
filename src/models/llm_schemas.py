@@ -26,6 +26,10 @@ class ProtocolSchema(BaseModel):
     action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
     next_meeting: Optional[str] = Field(default=None, description="Информация о следующей встрече")
     additional_notes: Optional[str] = Field(default=None, description="Дополнительные заметки")
+    detected_speaker_mapping: Optional[Dict[str, str]] = Field(default=None, description="Автоопределенное сопоставление SPEAKER_N с именами участников")
+    speaker_confidence_scores: Optional[Dict[str, float]] = Field(default=None, description="Уверенность в сопоставлении для каждого спикера")
+    unmapped_speakers: Optional[List[str]] = Field(default=None, description="Спикеры которых не удалось сопоставить")
+    mapping_notes: Optional[str] = Field(default=None, description="Заметки по автоопределению участников")
     
     class Config:
         extra = "forbid"
@@ -36,6 +40,10 @@ class TwoStageExtractionSchema(BaseModel):
     extracted_data: Dict[str, str] = Field(default_factory=dict, description="Извлеченные данные из транскрипции (ключ=переменная шаблона, значение=строка)")
     confidence_score: float = Field(default=0.0, description="Уровень уверенности в извлечении (0.0-1.0)")
     extraction_notes: str = Field(default="", description="Заметки по извлечению")
+    detected_speaker_mapping: Optional[Dict[str, str]] = Field(default=None, description="Автоопределенное сопоставление SPEAKER_N с именами участников")
+    speaker_confidence_scores: Optional[Dict[str, float]] = Field(default=None, description="Уверенность в сопоставлении для каждого спикера")
+    unmapped_speakers: Optional[List[str]] = Field(default=None, description="Спикеры которых не удалось сопоставить")
+    mapping_notes: Optional[str] = Field(default=None, description="Заметки по автоопределению участников")
     
     class Config:
         extra = "forbid"
@@ -55,6 +63,9 @@ class SegmentSchema(BaseModel):
     """Схема для обработки одного сегмента транскрипции"""
     segment_data: Dict[str, str] = Field(default_factory=dict, description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
     speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Сопоставление SPEAKER_N с именами участников")
+    confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Уверенность в сопоставлении для каждого спикера (0.0-1.0)")
+    unmapped_speakers: List[str] = Field(default_factory=list, description="Список SPEAKER_N которых не удалось сопоставить")
+    mapping_notes: str = Field(default="", description="Заметки по процессу сопоставления")
     segment_confidence: float = Field(default=0.0, description="Уверенность в обработке сегмента (0.0-1.0)")
     
     class Config:
@@ -65,6 +76,9 @@ class SynthesisSchema(BaseModel):
     """Схема для синтеза в chain-of-thought подходе"""
     synthesized_content: Dict[str, str] = Field(default_factory=dict, description="Синтезированный контент (ключ=переменная шаблона, значение=строка)")
     final_speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Итоговый маппинг SPEAKER_N → имена участников")
+    final_confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Итоговая уверенность для каждого спикера (0.0-1.0)")
+    final_unmapped_speakers: List[str] = Field(default_factory=list, description="Итоговый список несопоставленных спикеров")
+    aggregation_notes: str = Field(default="", description="Заметки по агрегации маппингов из сегментов")
     synthesis_quality: float = Field(default=0.0, description="Качество синтеза (0.0-1.0)")
     synthesis_notes: str = Field(default="", description="Заметки по синтезу")
     
