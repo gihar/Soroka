@@ -347,6 +347,9 @@ class SpeakerMappingService:
             else:
                 transcript_preview = self._get_transcript_preview(transcription_text)
         
+        # Формируем секцию о спикерах отдельно (избегаем обратный слэш в f-string выражении)
+        speakers_section = f"ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:{speakers_str}\n\n" if speakers_str else ""
+        
         prompt = f"""Ты — эксперт по анализу встреч и диалогов. Твоя задача — сопоставить говорящих (Спикер 1, Спикер 2, и т.д.) с реальными участниками встречи.
 
 УЧАСТНИКИ С РОЛЕВЫМ КОНТЕКСТОМ:
@@ -384,7 +387,7 @@ class SpeakerMappingService:
 ⚡ Проанализируй ВЕСЬ список участников и примени эту логику!
 ⚡ В результате используй имя в формате 'Имя Фамилия' (БЕЗ отчества) из списка!
 
-{f"ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:{speakers_str}" + "\n\n" if speakers_str else ""}ФРАГМЕНТЫ ТРАНСКРИПЦИИ ДЛЯ АНАЛИЗА:
+{speakers_section}ФРАГМЕНТЫ ТРАНСКРИПЦИИ ДЛЯ АНАЛИЗА:
 {transcript_preview}
 
 ЗАДАЧА:
