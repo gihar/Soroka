@@ -284,9 +284,13 @@ class TranscriptionPreprocessor:
             cleaned_formatted = self.group_speaker_turns(temp_formatted)
         
         stats['cleaned_length'] = len(cleaned_text)
-        stats['reduction_percent'] = round(
-            (stats['original_length'] - stats['cleaned_length']) / stats['original_length'] * 100, 2
-        )
+        if stats['original_length'] == 0:
+            logger.warning("Получена пустая транскрипция, метрики сокращения не рассчитываются")
+            stats['reduction_percent'] = 0.0
+        else:
+            stats['reduction_percent'] = round(
+                (stats['original_length'] - stats['cleaned_length']) / stats['original_length'] * 100, 2
+            )
         
         logger.info(
             f"Предобработка завершена: удалено {stats['fillers_removed']} заполнителей, "
@@ -317,4 +321,3 @@ def get_preprocessor(language: str = "ru") -> TranscriptionPreprocessor:
     if language not in _preprocessor_cache:
         _preprocessor_cache[language] = TranscriptionPreprocessor(language)
     return _preprocessor_cache[language]
-
