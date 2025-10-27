@@ -17,15 +17,15 @@ class ProtocolSchema(BaseModel):
     "Каждое значение — строка (UTF-8), БЕЗ вложенных объектов или массивов"
     """
     meeting_title: str = Field(description="Название встречи")
-    meeting_date: Optional[str] = Field(None, description="Дата встречи")
-    meeting_time: Optional[str] = Field(None, description="Время встречи")
+    meeting_date: Optional[str] = Field(default=None, description="Дата встречи")
+    meeting_time: Optional[str] = Field(default=None, description="Время встречи")
     participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
     agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
     key_points: str = Field(description="Ключевые моменты (пункты списком через \\n)")
     decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
     action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
-    next_meeting: Optional[str] = Field(None, description="Информация о следующей встрече")
-    additional_notes: Optional[str] = Field(None, description="Дополнительные заметки")
+    next_meeting: Optional[str] = Field(default=None, description="Информация о следующей встрече")
+    additional_notes: Optional[str] = Field(default=None, description="Дополнительные заметки")
     
     class Config:
         extra = "forbid"
@@ -34,8 +34,8 @@ class ProtocolSchema(BaseModel):
 class TwoStageExtractionSchema(BaseModel):
     """Схема для первого этапа двухэтапной генерации (извлечение)"""
     extracted_data: Dict[str, str] = Field(description="Извлеченные данные из транскрипции (ключ=переменная шаблона, значение=строка)")
-    confidence_score: Optional[float] = Field(None, description="Уровень уверенности в извлечении (0.0-1.0)")
-    extraction_notes: Optional[str] = Field(None, description="Заметки по извлечению")
+    confidence_score: Optional[float] = Field(default=None, description="Уровень уверенности в извлечении (0.0-1.0)")
+    extraction_notes: Optional[str] = Field(default=None, description="Заметки по извлечению")
     
     class Config:
         extra = "forbid"
@@ -44,8 +44,8 @@ class TwoStageExtractionSchema(BaseModel):
 class TwoStageReflectionSchema(BaseModel):
     """Схема для второго этапа двухэтапной генерации (рефлексия)"""
     refined_data: Dict[str, str] = Field(description="Уточненные данные после рефлексии (ключ=переменная шаблона, значение=строка)")
-    reflection_notes: Optional[str] = Field(None, description="Заметки по рефлексии")
-    quality_score: Optional[float] = Field(None, description="Оценка качества результата (0.0-1.0)")
+    reflection_notes: Optional[str] = Field(default=None, description="Заметки по рефлексии")
+    quality_score: Optional[float] = Field(default=None, description="Оценка качества результата (0.0-1.0)")
     
     class Config:
         extra = "forbid"
@@ -54,8 +54,8 @@ class TwoStageReflectionSchema(BaseModel):
 class SegmentSchema(BaseModel):
     """Схема для обработки одного сегмента транскрипции"""
     segment_data: Dict[str, str] = Field(description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
-    speaker_id: Optional[str] = Field(None, description="ID спикера")
-    segment_confidence: Optional[float] = Field(None, description="Уверенность в обработке сегмента (0.0-1.0)")
+    speaker_id: Optional[str] = Field(default=None, description="ID спикера")
+    segment_confidence: Optional[float] = Field(default=None, description="Уверенность в обработке сегмента (0.0-1.0)")
     
     class Config:
         extra = "forbid"
@@ -64,8 +64,8 @@ class SegmentSchema(BaseModel):
 class SynthesisSchema(BaseModel):
     """Схема для синтеза в chain-of-thought подходе"""
     synthesized_content: Dict[str, str] = Field(description="Синтезированный контент (ключ=переменная шаблона, значение=строка)")
-    synthesis_quality: Optional[float] = Field(None, description="Качество синтеза (0.0-1.0)")
-    synthesis_notes: Optional[str] = Field(None, description="Заметки по синтезу")
+    synthesis_quality: Optional[float] = Field(default=None, description="Качество синтеза (0.0-1.0)")
+    synthesis_notes: Optional[str] = Field(default=None, description="Заметки по синтезу")
     
     class Config:
         extra = "forbid"
@@ -76,7 +76,7 @@ class SpeakerMappingSchema(BaseModel):
     speaker_mappings: Dict[str, str] = Field(description="Сопоставление speaker_id -> participant_name")
     confidence_scores: Dict[str, float] = Field(description="Уверенность в сопоставлении для каждого спикера")
     unmapped_speakers: List[str] = Field(description="Спикеры, которые не удалось сопоставить")
-    mapping_notes: Optional[str] = Field(None, description="Заметки по сопоставлению")
+    mapping_notes: Optional[str] = Field(default=None, description="Заметки по сопоставлению")
 
 
 # Промежуточные модели для extraction (без поля id, которое генерируется в коде)
@@ -84,12 +84,12 @@ class TopicExtraction(BaseModel):
     """Тема обсуждения для extraction (без id)"""
     title: str = Field(..., description="Название темы")
     description: str = Field(default="", description="Описание темы")
-    start_time: Optional[float] = Field(None, description="Начало обсуждения (секунды)")
-    end_time: Optional[float] = Field(None, description="Конец обсуждения (секунды)")
-    duration: Optional[float] = Field(None, description="Длительность обсуждения")
+    start_time: Optional[float] = Field(default=None, description="Начало обсуждения (секунды)")
+    end_time: Optional[float] = Field(default=None, description="Конец обсуждения (секунды)")
+    duration: Optional[float] = Field(default=None, description="Длительность обсуждения")
     participants: List[str] = Field(default_factory=list, description="ID участников обсуждения")
     key_points: List[str] = Field(default_factory=list, description="Ключевые моменты")
-    sentiment: Optional[str] = Field(None, description="Общий тон обсуждения")
+    sentiment: Optional[str] = Field(default=None, description="Общий тон обсуждения")
     
     class Config:
         extra = "forbid"
@@ -102,7 +102,7 @@ class DecisionExtraction(BaseModel):
     decision_makers: List[str] = Field(default_factory=list, description="ID спикеров, принявших решение")
     mentioned_speakers: List[str] = Field(default_factory=list, description="Упомянутые спикеры")
     priority: Optional[str] = Field("medium", description="Важность решения: high/medium/low")
-    timestamp: Optional[float] = Field(None, description="Временная метка в секундах")
+    timestamp: Optional[float] = Field(default=None, description="Временная метка в секундах")
     
     class Config:
         extra = "forbid"
@@ -111,12 +111,12 @@ class DecisionExtraction(BaseModel):
 class ActionItemExtraction(BaseModel):
     """Задача для extraction (без id)"""
     description: str = Field(..., description="Описание задачи")
-    assignee: Optional[str] = Field(None, description="ID ответственного спикера")
-    assignee_name: Optional[str] = Field(None, description="Имя ответственного (если извлечено)")
-    deadline: Optional[str] = Field(None, description="Срок выполнения")
+    assignee: Optional[str] = Field(default=None, description="ID ответственного спикера")
+    assignee_name: Optional[str] = Field(default=None, description="Имя ответственного (если извлечено)")
+    deadline: Optional[str] = Field(default=None, description="Срок выполнения")
     priority: Optional[str] = Field("medium", description="Приоритет: critical/high/medium/low")
     context: str = Field(default="", description="Контекст задачи")
-    timestamp: Optional[float] = Field(None, description="Временная метка в секундах")
+    timestamp: Optional[float] = Field(default=None, description="Временная метка в секундах")
     
     class Config:
         extra = "forbid"
@@ -125,7 +125,7 @@ class ActionItemExtraction(BaseModel):
 class TopicsExtractionSchema(BaseModel):
     """Схема для извлечения тем обсуждения"""
     topics: List[TopicExtraction] = Field(description="Список извлеченных тем")
-    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении тем (0.0-1.0)")
+    extraction_confidence: Optional[float] = Field(default=None, description="Уверенность в извлечении тем (0.0-1.0)")
     
     class Config:
         extra = "forbid"
@@ -134,7 +134,7 @@ class TopicsExtractionSchema(BaseModel):
 class DecisionsExtractionSchema(BaseModel):
     """Схема для извлечения решений"""
     decisions: List[DecisionExtraction] = Field(description="Список извлеченных решений")
-    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении решений (0.0-1.0)")
+    extraction_confidence: Optional[float] = Field(default=None, description="Уверенность в извлечении решений (0.0-1.0)")
     
     class Config:
         extra = "forbid"
@@ -143,7 +143,7 @@ class DecisionsExtractionSchema(BaseModel):
 class ActionItemsExtractionSchema(BaseModel):
     """Схема для извлечения задач и поручений"""
     action_items: List[ActionItemExtraction] = Field(description="Список извлеченных задач")
-    extraction_confidence: Optional[float] = Field(None, description="Уверенность в извлечении задач (0.0-1.0)")
+    extraction_confidence: Optional[float] = Field(default=None, description="Уверенность в извлечении задач (0.0-1.0)")
     
     class Config:
         extra = "forbid"
