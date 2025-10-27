@@ -32,6 +32,31 @@ def escape_markdown_v2(text: str) -> str:
     return result
 
 
+def escape_markdown(text: str) -> str:
+    """
+    Экранировать специальные символы для старого режима Markdown (parse_mode="Markdown")
+    
+    В старом Markdown нужно экранировать только: * _ ` [
+    
+    Args:
+        text: Текст для экранирования
+        
+    Returns:
+        Экранированный текст
+    """
+    if not text:
+        return text
+    
+    # Символы для старого Markdown режима
+    escape_chars = ['*', '_', '`', '[']
+    
+    result = str(text)
+    for char in escape_chars:
+        result = result.replace(char, f'\\{char}')
+    
+    return result
+
+
 async def send_long_message(bot: Bot, chat_id: int, text: str, 
                           parse_mode: Optional[str] = "Markdown", 
                           max_length: int = 4096) -> None:

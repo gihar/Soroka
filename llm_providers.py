@@ -1085,11 +1085,27 @@ def _build_extraction_prompt(
   "decisions": "- Решение 1\\n- Решение 2"
 }}
 
-ФОРМАТ ВЫВОДА:
-Валидный JSON-объект с ключами из списка полей выше.
-Каждое значение - строка (UTF-8).
+КРИТИЧЕСКИ ВАЖНО — СТРУКТУРА ОТВЕТА:
+Твой ответ должен быть JSON с ТРЕМЯ полями:
+{{
+  "extracted_data": {{
+    "поле1": "значение1",
+    "поле2": "значение2",
+    ...все поля из списка выше...
+  }},
+  "confidence_score": 0.85,
+  "extraction_notes": "краткие заметки о процессе извлечения"
+}}
 
-Выведи ТОЛЬКО JSON, без дополнительных комментариев."""
+ГДЕ:
+- extracted_data: объект с извлеченными данными (ключи = поля из списка выше)
+- confidence_score: твоя уверенность в результате (число от 0.0 до 1.0)
+- extraction_notes: краткие заметки о сложностях или особенностях
+
+ВАЖНО: Поле extracted_data ОБЯЗАТЕЛЬНО должно содержать ВСЕ ключи из списка полей!
+Если информация не найдена - пиши "Не указано", но ключ должен присутствовать!
+
+Выведи ТОЛЬКО JSON в указанном формате, без дополнительных комментариев."""
 
     return prompt
 
@@ -1169,9 +1185,40 @@ def _build_reflection_prompt(
 - Если видишь роль в скобках у ответственного - УБЕРИ её (оставь только имя)
 - НЕ добавляй информацию, которой НЕТ в транскрипции
 
-ФОРМАТ ВЫВОДА:
-Валидный JSON-объект с теми же ключами, но улучшенными значениями.
-Выведи ТОЛЬКО JSON, без комментариев."""
+КРИТИЧЕСКИ ВАЖНО — СТРУКТУРА ОТВЕТА:
+Твой ответ ОБЯЗАТЕЛЬНО должен быть JSON с ТРЕМЯ полями:
+{{
+  "refined_data": {{
+    "поле1": "улучшенное значение1",
+    "поле2": "улучшенное значение2",
+    ...ВСЕ ключи из extracted_data выше...
+  }},
+  "reflection_notes": "что было улучшено, какие проблемы исправлены",
+  "quality_score": 0.9
+}}
+
+ГДЕ:
+- refined_data: объект с ТЕМИ ЖЕ ключами, что в extracted_data, но с улучшенными значениями
+- reflection_notes: описание внесенных улучшений и исправлений
+- quality_score: итоговая оценка качества результата (число от 0.0 до 1.0)
+
+ВАЖНО:
+1. refined_data ОБЯЗАТЕЛЬНО должен содержать ВСЕ ключи из extracted_data!
+2. Если изменений не требуется - скопируй значение из extracted_data
+3. quality_score должен быть > 0 (обычно 0.7-0.95 для качественного результата)
+
+ПРИМЕР:
+{{
+  "refined_data": {{
+    "date": "27 октября 2024",
+    "participants": "Марина Сидорова\\nАлексей Иванов\\nОксана Петрова",
+    "decisions": "- Включить функциональность 27 октября\\n- Провести вебинар для магазинов"
+  }},
+  "reflection_notes": "Заменены метки SPEAKER на реальные имена, добавлено второе решение",
+  "quality_score": 0.88
+}}
+
+Выведи ТОЛЬКО JSON в указанном формате, без комментариев."""
 
     return prompt
 
@@ -1334,10 +1381,62 @@ async def generate_protocol_two_stage(
         
         logger.info(f"Этап 1 завершен, извлечено {len(extracted_data)} полей")
         
+        # ДИАГНОСТИКА: проверка reasoning tokens (признак проблемы если > 20000)
+        if hasattr(response1, 'usage') and hasattr(response1.usage, 'completion_tokens_details'):
+            details = response1.usage.completion_tokens_details
+            if details and hasattr(details, 'reasoning_tokens') and details.reasoning_tokens:
+                reasoning_tokens = details.reasoning_tokens
+                if reasoning_tokens > 20000:
+                    logger.warning(
+                        f"⚠️ Этап 1: модель использовала {reasoning_tokens} reasoning tokens "
+                        f"(> 20000). Это может указывать на проблему с промптом или задачей."
+                    )
+        
+        # ВАЛИДАЦИЯ результата этапа 1
+        extracted_content = extracted_data.get('extracted_data', {})
+        confidence_score = extracted_data.get('confidence_score', 0.0)
+        extraction_notes = extracted_data.get('extraction_notes', '')
+        
+        # Подсчет заполненных полей (не пустых и не "Не указано")
+        filled_fields = 0
+        empty_fields = []
+        total_fields = len(template_variables)
+        
+        for field_name in template_variables.keys():
+            field_value = extracted_content.get(field_name, '')
+            if field_value and field_value.strip() and field_value.strip() not in ['Не указано', 'не указано']:
+                filled_fields += 1
+            else:
+                empty_fields.append(field_name)
+        
+        fill_percentage = (filled_fields / total_fields * 100) if total_fields > 0 else 0
+        
+        logger.info(
+            f"Этап 1: заполнено {filled_fields}/{total_fields} полей ({fill_percentage:.1f}%), "
+            f"confidence={confidence_score:.2f}"
+        )
+        
+        if empty_fields:
+            logger.debug(f"Этап 1: пустые поля: {', '.join(empty_fields)}")
+        
+        # FALLBACK: если результат слишком пустой, используем одноэтапный режим
+        if not extracted_content or fill_percentage < 30:
+            logger.warning(
+                f"⚠️ Этап 1 вернул недостаточно данных (заполнено {fill_percentage:.1f}%). "
+                f"Переключаемся на одноэтапный режим генерации."
+            )
+            logger.debug(f"extracted_data: {extracted_content}")
+            logger.debug(f"extraction_notes: {extraction_notes}")
+            
+            # Возвращаемся к стандартному подходу
+            return await manager.generate_protocol(
+                provider_name, transcription, template_variables, diarization_data, **kwargs
+            )
+        
         # ЭТАП 2: Рефлексия и улучшение
         logger.info("Этап 2: Рефлексия и улучшение")
         reflection_prompt = _build_reflection_prompt(
-            extracted_data, transcription, template_variables, diarization_analysis
+            extracted_content, transcription, template_variables, diarization_analysis
         )
         
         # DEBUG логирование запроса этапа 2
@@ -1401,11 +1500,23 @@ async def generate_protocol_two_stage(
         # Логирование полученного ответа
         logger.info(f"Этап 2: получен ответ длиной {len(content2) if content2 else 0} символов, finish_reason={finish_reason}")
         
+        # ДИАГНОСТИКА: проверка reasoning tokens для этапа 2
+        if hasattr(response2, 'usage') and hasattr(response2.usage, 'completion_tokens_details'):
+            details = response2.usage.completion_tokens_details
+            if details and hasattr(details, 'reasoning_tokens') and details.reasoning_tokens:
+                reasoning_tokens = details.reasoning_tokens
+                logger.debug(f"Этап 2: использовано {reasoning_tokens} reasoning tokens")
+                if reasoning_tokens > 20000:
+                    logger.warning(
+                        f"⚠️ Этап 2: модель использовала {reasoning_tokens} reasoning tokens "
+                        f"(> 20000). Это может указывать на проблему."
+                    )
+        
         # Проверка на пустой ответ
         if not content2 or not content2.strip():
             logger.warning(f"Этап 2: получен пустой ответ от API. Используем результат этапа 1")
             logger.debug(f"Response details: finish_reason={finish_reason}, model={selected_model}")
-            return extracted_data
+            return extracted_content
         
         try:
             improved_data = json.loads(content2)
@@ -1424,13 +1535,47 @@ async def generate_protocol_two_stage(
                     logger.info("JSON успешно извлечен из текста")
                 except json.JSONDecodeError as e2:
                     logger.error(f"Не удалось извлечь JSON: {e2}. Возвращаем результат этапа 1")
-                    return extracted_data
+                    return extracted_content
             else:
                 logger.error("JSON не найден в ответе. Возвращаем результат этапа 1")
-                return extracted_data
+                return extracted_content
         
-        logger.info(f"Этап 2 завершен успешно")
-        return improved_data
+        # ВАЛИДАЦИЯ результата этапа 2
+        refined_data = improved_data.get('refined_data', {})
+        quality_score = improved_data.get('quality_score', 0.0)
+        reflection_notes = improved_data.get('reflection_notes', '')
+        
+        # Подсчет заполненных полей в refined_data
+        refined_filled = 0
+        refined_empty = []
+        for field_name in template_variables.keys():
+            field_value = refined_data.get(field_name, '')
+            if field_value and field_value.strip() and field_value.strip() not in ['Не указано', 'не указано']:
+                refined_filled += 1
+            else:
+                refined_empty.append(field_name)
+        
+        refined_percentage = (refined_filled / total_fields * 100) if total_fields > 0 else 0
+        
+        logger.info(
+            f"Этап 2: заполнено {refined_filled}/{total_fields} полей ({refined_percentage:.1f}%), "
+            f"quality_score={quality_score:.2f}"
+        )
+        
+        if refined_empty:
+            logger.debug(f"Этап 2: пустые поля: {', '.join(refined_empty)}")
+        
+        # Проверяем, что refined_data не хуже чем extracted_content
+        if not refined_data or refined_percentage < fill_percentage * 0.8:
+            logger.warning(
+                f"⚠️ Этап 2 ухудшил результат (было {fill_percentage:.1f}%, стало {refined_percentage:.1f}%). "
+                f"Используем результат этапа 1."
+            )
+            logger.debug(f"reflection_notes: {reflection_notes}")
+            return extracted_content
+        
+        logger.info(f"Этап 2 завершен успешно (улучшение: +{refined_percentage - fill_percentage:.1f}%)")
+        return refined_data
     
     else:
         # Для других провайдеров используем стандартный подход

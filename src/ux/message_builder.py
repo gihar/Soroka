@@ -5,7 +5,7 @@
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
-from src.utils.message_utils import escape_markdown_v2
+from src.utils.message_utils import escape_markdown
 
 
 @dataclass
@@ -180,13 +180,13 @@ class MessageBuilder:
         
         if result.get("template_used"):
             template_name = result["template_used"].get("name", "Неизвестный")
-            template_name = escape_markdown_v2(template_name)
+            template_name = escape_markdown(template_name)
             message += f"📝 Шаблон: {template_name}\n"
         
         # Показываем человекочитаемое имя модели, если доступно
         if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
             ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
-            ai_name = escape_markdown_v2(ai_name)
+            ai_name = escape_markdown(ai_name)
             message += f"🤖 ИИ: {ai_name}\n"
         
         # Информация о транскрипции (с ограничением длины)
@@ -215,8 +215,8 @@ class MessageBuilder:
             # Сортируем по speaker_id для предсказуемого порядка
             sorted_mapping = sorted(speaker_mapping.items())
             for speaker_id, participant_name in sorted_mapping:
-                speaker_id_escaped = escape_markdown_v2(speaker_id)
-                participant_name_escaped = escape_markdown_v2(participant_name)
+                speaker_id_escaped = escape_markdown(speaker_id)
+                participant_name_escaped = escape_markdown(participant_name)
                 message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
         elif result.get("transcription_result", {}).get("diarization"):
             # Если нет сопоставления, показываем информацию о количестве спикеров
@@ -242,12 +242,12 @@ class MessageBuilder:
             
             if result.get("template_used"):
                 template_name = result["template_used"].get("name", "Неизвестный")
-                template_name = escape_markdown_v2(template_name)
+                template_name = escape_markdown(template_name)
                 message += f"📝 Шаблон: {template_name}\n"
             
             if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
                 ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
-                ai_name = escape_markdown_v2(ai_name)
+                ai_name = escape_markdown(ai_name)
                 message += f"🤖 ИИ: {ai_name}\n"
             
             if result.get("transcription_result", {}).get("transcription"):
@@ -270,8 +270,8 @@ class MessageBuilder:
                 message += "\n👥 **Участники:**\n"
                 sorted_mapping = sorted(speaker_mapping.items())
                 for speaker_id, participant_name in sorted_mapping:
-                    speaker_id_escaped = escape_markdown_v2(speaker_id)
-                    participant_name_escaped = escape_markdown_v2(participant_name)
+                    speaker_id_escaped = escape_markdown(speaker_id)
+                    participant_name_escaped = escape_markdown(participant_name)
                     message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
             elif result.get("transcription_result", {}).get("diarization"):
                 diarization = result["transcription_result"]["diarization"]
