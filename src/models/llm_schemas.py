@@ -54,7 +54,7 @@ class TwoStageReflectionSchema(BaseModel):
 class SegmentSchema(BaseModel):
     """Схема для обработки одного сегмента транскрипции"""
     segment_data: Dict[str, str] = Field(default_factory=dict, description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
-    speaker_id: str = Field(default="", description="ID спикера")
+    speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Сопоставление SPEAKER_N с именами участников")
     segment_confidence: float = Field(default=0.0, description="Уверенность в обработке сегмента (0.0-1.0)")
     
     class Config:
@@ -64,6 +64,7 @@ class SegmentSchema(BaseModel):
 class SynthesisSchema(BaseModel):
     """Схема для синтеза в chain-of-thought подходе"""
     synthesized_content: Dict[str, str] = Field(default_factory=dict, description="Синтезированный контент (ключ=переменная шаблона, значение=строка)")
+    final_speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Итоговый маппинг SPEAKER_N → имена участников")
     synthesis_quality: float = Field(default=0.0, description="Качество синтеза (0.0-1.0)")
     synthesis_notes: str = Field(default="", description="Заметки по синтезу")
     

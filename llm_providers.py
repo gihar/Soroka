@@ -1679,23 +1679,29 @@ def _build_segment_analysis_prompt(
         participants_info += "   • Упоминания: 'Как сказал Иван...', 'Нужно уточнить у Марии'\n\n"
         participants_info += "2️⃣ ФОРМАТ ИМЕН:\n"
         participants_info += "   • Предпочтительно: 'Имя Фамилия' (БЕЗ отчества)\n"
-        participants_info += "   • Если известно только имя: 'Иван'\n"
-        participants_info += "   • Если известна только фамилия: 'Петров'\n"
         participants_info += "   • Преобразуй уменьшительные: Света→Светлана, Леша→Алексей, Володя→Владимир\n\n"
-        participants_info += "3️⃣ СОПОСТАВЛЕНИЕ СО СПИКЕРАМИ:\n"
-        participants_info += "   • Сопоставь каждую метку (SPEAKER_1, SPEAKER_2...) с именем если возможно\n"
-        participants_info += "   • Если имя определить НЕВОЗМОЖНО - оставь метку спикера как есть\n"
-        participants_info += "   • Пример результата: 'Иван Петров\\nСПЕАКЕR_2\\nСветлана Короткова\\nСПЕАКЕR_4'\n\n"
+        participants_info += "3️⃣ КРИТИЧЕСКИ ВАЖНО - ВОЗВРАТ МАППИНГА:\n"
+        participants_info += "   • НЕ заменяй SPEAKER_N на имена в полях segment_data!\n"
+        participants_info += "   • Вместо этого верни отдельное поле speaker_mapping\n"
+        participants_info += "   • Формат: {\"SPEAKER_1\": \"Имя Фамилия\", \"SPEAKER_2\": \"Имя Фамилия\"}\n"
+        participants_info += "   • Если имя для SPEAKER_N не найдено - НЕ включай его в маппинг\n\n"
         participants_info += "4️⃣ СТРОГИЕ ЗАПРЕТЫ:\n"
         participants_info += "   ❌ НЕ придумывай имена, которых НЕТ в транскрипции\n"
-        participants_info += "   ❌ НЕ используй 'Участник 1', 'Коллега', 'Человек А', 'Неизвестный'\n"
-        participants_info += "   ❌ НЕ дублируй: если Света = SPEAKER_1, не добавляй Светлану отдельно\n"
-        participants_info += "   ❌ НЕ заменяй SPEAKER_N на описания типа 'Руководитель встречи'\n\n"
-        participants_info += "💡 ПОДСКАЗКИ:\n"
-        participants_info += "   • Начало встречи - часто там представляются\n"
-        participants_info += "   • Обращения по имени - самый надежный признак\n"
-        participants_info += "   • Контекст: 'наш тимлид Алексей', 'менеджер Мария'\n"
-        participants_info += "   • Уверенности нет? → Оставь SPEAKER_N\n\n"
+        participants_info += "   ❌ НЕ используй 'Участник 1', 'Коллега', 'Человек А'\n"
+        participants_info += "   ❌ НЕ дублируй: если Света = SPEAKER_1, добавь только один раз\n\n"
+        participants_info += "💡 ПРИМЕР ОТВЕТА:\n"
+        participants_info += "{\n"
+        participants_info += "  \"segment_data\": {\n"
+        participants_info += "    \"participants\": \"SPEAKER_1\\nSPEAKER_2\\nSPEAKER_3\",\n"
+        participants_info += "    \"decisions\": \"- SPEAKER_1 предложил использовать новый подход\"\n"
+        participants_info += "  },\n"
+        participants_info += "  \"speaker_mapping\": {\n"
+        participants_info += "    \"SPEAKER_1\": \"Иван Петров\",\n"
+        participants_info += "    \"SPEAKER_2\": \"Мария Сидорова\"\n"
+        participants_info += "  },\n"
+        participants_info += "  \"segment_confidence\": 0.85\n"
+        participants_info += "}\n\n"
+        participants_info += "Обрати внимание: SPEAKER_3 не включен в speaker_mapping, так как имя не найдено.\n\n"
     
     prompt = f"""CHAIN-OF-THOUGHT: АНАЛИЗ СЕГМЕНТА {segment_id + 1} ИЗ {total_segments}
 
@@ -1730,8 +1736,10 @@ def _build_segment_analysis_prompt(
 - Для списков используй формат: "- пункт1\\n- пункт2"
 
 ФОРМАТ ВЫВОДА:
-JSON-объект с ключами из списка категорий выше.
-Каждое значение - строка.
+JSON-объект с тремя полями:
+- segment_data: объект с ключами из списка категорий (значения - строки)
+- speaker_mapping: объект с маппингом SPEAKER_N → имена (только найденные)
+- segment_confidence: число от 0.0 до 1.0
 
 Выведи ТОЛЬКО JSON, без комментариев."""
 
@@ -1754,6 +1762,18 @@ def _build_synthesis_prompt(
         segments_summary += f"\n--- СЕГМЕНТ {i + 1} ---\n"
         segments_summary += json.dumps(result, ensure_ascii=False, indent=2)
         segments_summary += "\n"
+    
+    # Собираем speaker_mapping из всех сегментов
+    all_speaker_mappings = []
+    for i, result in enumerate(segment_results):
+        if 'speaker_mapping' in result and result['speaker_mapping']:
+            all_speaker_mappings.append(f"Сегмент {i+1}: {json.dumps(result['speaker_mapping'], ensure_ascii=False)}")
+    
+    speaker_mappings_context = ""
+    if all_speaker_mappings:
+        speaker_mappings_context = "\n\nМАППИНГИ УЧАСТНИКОВ ИЗ СЕГМЕНТОВ:\n"
+        speaker_mappings_context += "\n".join(all_speaker_mappings)
+        speaker_mappings_context += "\n"
     
     # Добавляем анализ диаризации если есть
     diarization_context = ""
@@ -1780,6 +1800,7 @@ def _build_synthesis_prompt(
 
 РЕЗУЛЬТАТЫ АНАЛИЗА СЕГМЕНТОВ:
 {segments_summary}
+{speaker_mappings_context}
 {diarization_context}
 {participants_context}
 
@@ -1794,6 +1815,13 @@ def _build_synthesis_prompt(
 4. СВЯЗНОСТЬ: Создай связное повествование, а не список фрагментов
 5. ПОЛНОТА: Включи всю важную информацию из сегментов
 6. КОНТЕКСТ: Используй информацию о спикерах для уточнения ответственных
+7. ОБЪЕДИНЕНИЕ SPEAKER_MAPPING:
+   - Собери все speaker_mapping из сегментов
+   - Создай единый final_speaker_mapping, разрешив конфликты:
+     * Если несколько сегментов дают разные имена для одного SPEAKER_N - выбери наиболее полное/детальное
+     * Приоритет: "Имя Фамилия" > "Имя" > первое упоминание
+   - Используй final_speaker_mapping для замены SPEAKER_N на имена в финальном протоколе
+   - Если для SPEAKER_N нет маппинга - оставь SPEAKER_N как есть
 
 СПЕЦИАЛЬНЫЕ ПРАВИЛА:
 - Если информация из разных сегментов конфликтует - используй более детальную
@@ -1846,7 +1874,12 @@ def _build_synthesis_prompt(
 }}
 
 ФОРМАТ ВЫВОДА:
-JSON-объект с теми же ключами, но с объединенной и улучшенной информацией.
+JSON-объект с четырьмя полями:
+- synthesized_content: объект с ключами из template_variables (значения - строки с заменой SPEAKER_N на имена)
+- final_speaker_mapping: объект с итоговым маппингом SPEAKER_N → имена
+- synthesis_quality: число от 0.0 до 1.0
+- synthesis_notes: строка с заметками
+
 Выведи ТОЛЬКО JSON, без комментариев."""
 
     return prompt
@@ -1861,7 +1894,7 @@ async def _process_single_segment(
     system_prompt: str,
     template_variables: Dict[str, str],
     extra_headers: Dict[str, str],
-    retry_manager: RetryManager,
+    retry_manager: Optional[RetryManager],
     speaker_mapping: Optional[Dict[str, str]] = None,
     participants: Optional[List[Dict[str, str]]] = None,
     attempt_number: int = 1
@@ -1878,7 +1911,7 @@ async def _process_single_segment(
         system_prompt: Системный промпт
         template_variables: Переменные шаблона
         extra_headers: Дополнительные HTTP заголовки
-        retry_manager: Менеджер для повторных попыток
+        retry_manager: Менеджер для повторных попыток (опционально, может быть None)
         speaker_mapping: Сопоставление спикеров с участниками
         participants: Список участников встречи
         attempt_number: Номер попытки (для адаптивной температуры)
@@ -1940,9 +1973,13 @@ async def _process_single_segment(
             extra_headers=extra_headers
         )
     
-    # Выполняем запрос с retry логикой
+    # Выполняем запрос с retry логикой (если retry_manager предоставлен)
     try:
-        response = await retry_manager.execute_with_retry(_call_openai_api)
+        if retry_manager:
+            response = await retry_manager.execute_with_retry(_call_openai_api)
+        else:
+            # Прямой вызов без retry (retry реализован на уровне выше)
+            response = await _call_openai_api()
     except openai.APIStatusError as e:
         # Проверяем на ошибку 402 - недостаточно кредитов
         if e.status_code == 402:
@@ -2009,12 +2046,30 @@ async def _process_single_segment(
     # Проверяем, что результат содержит все необходимые ключи
     if not segment_result:
         logger.error(f"Сегмент {segment_idx + 1}: Получен пустой результат, создаем заглушку")
-        segment_result = {key: "Ошибка обработки сегмента" for key in template_variables.keys()}
+        segment_result = {
+            'segment_data': {key: "Ошибка обработки сегмента" for key in template_variables.keys()},
+            'speaker_mapping': {},
+            'segment_confidence': 0.0
+        }
     else:
-        # Убеждаемся, что все ключи присутствуют
-        for key in template_variables.keys():
-            if key not in segment_result:
-                segment_result[key] = "Не указано"
+        # Проверяем наличие основных полей
+        if 'segment_data' not in segment_result:
+            # Если старый формат (без segment_data), преобразуем
+            segment_data = {key: segment_result.get(key, "Не указано") for key in template_variables.keys()}
+            segment_result = {
+                'segment_data': segment_data,
+                'speaker_mapping': segment_result.get('speaker_mapping', {}),
+                'segment_confidence': segment_result.get('segment_confidence', 0.0)
+            }
+        else:
+            # Убеждаемся, что все ключи присутствуют в segment_data
+            for key in template_variables.keys():
+                if key not in segment_result['segment_data']:
+                    segment_result['segment_data'][key] = "Не указано"
+        
+        # Логируем speaker_mapping если есть
+        if segment_result.get('speaker_mapping'):
+            logger.debug(f"Сегмент {segment_idx + 1}: найден speaker_mapping: {segment_result['speaker_mapping']}")
     
     logger.info(f"Сегмент {segment_idx + 1} обработан успешно")
     
@@ -2189,7 +2244,12 @@ def _extract_partial_data_from_text(
     extracted_count = sum(1 for v in result.values() if v != "Не указано")
     logger.info(f"Извлечено частичных данных: {extracted_count}/{len(template_variables)} полей")
     
-    return result
+    # Возвращаем в новом формате с segment_data
+    return {
+        'segment_data': result,
+        'speaker_mapping': {},
+        'segment_confidence': 0.5  # Средняя уверенность для fallback
+    }
 
 
 def _merge_segment_results_fallback(
@@ -2209,16 +2269,32 @@ def _merge_segment_results_fallback(
     """
     logger.warning("Используется fallback-стратегия объединения результатов сегментов")
     
+    # Собираем speaker_mapping из всех сегментов
+    combined_speaker_mapping = {}
+    for segment in segment_results:
+        if 'speaker_mapping' in segment and segment['speaker_mapping']:
+            for speaker_id, name in segment['speaker_mapping'].items():
+                if speaker_id not in combined_speaker_mapping:
+                    combined_speaker_mapping[speaker_id] = name
+                elif len(name) > len(combined_speaker_mapping[speaker_id]):
+                    # Приоритет более полному варианту
+                    combined_speaker_mapping[speaker_id] = name
+    
+    if combined_speaker_mapping:
+        logger.info(f"Объединенный speaker_mapping: {combined_speaker_mapping}")
+    
     merged = {}
     
     for key in template_variables.keys():
         # Собираем все значения для данного ключа из всех сегментов
         values = []
         for segment in segment_results:
-            if key in segment and segment[key]:
-                value = segment[key].strip()
+            # Извлекаем данные из segment_data
+            segment_data = segment.get('segment_data', segment)  # Поддержка старого формата
+            if key in segment_data and segment_data[key]:
+                value = segment_data[key].strip()
                 # Пропускаем пустые значения и ошибки
-                if value and value != "Не указано" and value != "Нет данных" and "Ошибка" not in value:
+                if value and value != "Не указано" and value != "Нет данных" and "Ошибка" not in value and value != "Нет в этом сегменте":
                     values.append(value)
         
         # Объединяем значения
@@ -2242,6 +2318,14 @@ def _merge_segment_results_fallback(
             merged[key] = "\n".join(unique_values) if unique_values else "Не указано"
         else:
             merged[key] = "Не указано"
+    
+    # Заменяем SPEAKER_N на имена из маппинга
+    if combined_speaker_mapping:
+        for key, value in merged.items():
+            if isinstance(value, str):
+                for speaker_id, name in combined_speaker_mapping.items():
+                    value = value.replace(speaker_id, name)
+                merged[key] = value
     
     return merged
 
@@ -2384,6 +2468,18 @@ async def generate_protocol_chain_of_thought(
         
         logger.info(f"Начинаем обработку результатов {len(results)} сегментов")
         
+        # Собираем speaker_mapping из сегментов для логирования
+        segment_mappings = []
+        for i, result in enumerate(results):
+            if not isinstance(result, Exception):
+                segment_id, data = result
+                if 'speaker_mapping' in data and data['speaker_mapping']:
+                    segment_mappings.append(f"Сегмент {segment_id+1}: {data['speaker_mapping']}")
+        
+        if segment_mappings:
+            logger.info(f"Найдены speaker_mapping в {len(segment_mappings)} сегментах")
+            logger.debug(f"Speaker mappings:\n" + "\n".join(segment_mappings))
+        
         # Сортируем результаты по индексу сегмента для сохранения порядка
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -2396,14 +2492,19 @@ async def generate_protocol_chain_of_thought(
                 logger.error(f"Критическая ошибка при обработке сегмента {i+1}: {result}")
                 
                 # Добавляем заглушку с детальным логированием
-                error_result = {key: "Ошибка обработки сегмента" for key in template_variables.keys()}
+                error_result = {
+                    'segment_data': {key: "Ошибка обработки сегмента" for key in template_variables.keys()},
+                    'speaker_mapping': {},
+                    'segment_confidence': 0.0
+                }
                 segment_results.append(error_result)
                 
             else:
                 segment_id, data = result
                 
                 # Проверяем качество результата
-                valid_fields = sum(1 for v in data.values() if v and v not in ["Не указано", "Ошибка обработки сегмента"])
+                segment_data = data.get('segment_data', data)  # Поддержка старого формата
+                valid_fields = sum(1 for v in segment_data.values() if v and v not in ["Не указано", "Ошибка обработки сегмента", "Нет в этом сегменте"])
                 total_fields = len(template_variables)
                 
                 if valid_fields == total_fields:
@@ -2518,17 +2619,24 @@ async def generate_protocol_chain_of_thought(
                 final_protocol = json.loads(content_synthesis)
                 logger.info("Chain-of-Thought генерация завершена успешно (прямой парсинг)")
                 
+                # Извлекаем synthesized_content и final_speaker_mapping
+                synthesized_content = final_protocol.get('synthesized_content', final_protocol)
+                final_speaker_mapping = final_protocol.get('final_speaker_mapping', {})
+                
+                if final_speaker_mapping:
+                    logger.info(f"Итоговый speaker_mapping: {final_speaker_mapping}")
+                
                 # Финальная проверка результата
-                if not isinstance(final_protocol, dict):
+                if not isinstance(synthesized_content, dict):
                     logger.warning("Результат синтеза не является словарем, используем fallback")
                     return _merge_segment_results_fallback(segment_results, template_variables)
                 
                 # Проверяем, что все ключи присутствуют
                 for key in template_variables.keys():
-                    if key not in final_protocol:
-                        final_protocol[key] = "Не указано"
+                    if key not in synthesized_content:
+                        synthesized_content[key] = "Не указано"
                 
-                return final_protocol
+                return synthesized_content
                 
             except json.JSONDecodeError as e:
                 logger.warning(f"Ошибка прямого парсинга JSON на этапе синтеза: {e}")
@@ -2546,17 +2654,24 @@ async def generate_protocol_chain_of_thought(
                         final_protocol = json.loads(json_str)
                         logger.info("Chain-of-Thought генерация завершена успешно (извлечение из текста)")
                         
+                        # Извлекаем synthesized_content и final_speaker_mapping
+                        synthesized_content = final_protocol.get('synthesized_content', final_protocol)
+                        final_speaker_mapping = final_protocol.get('final_speaker_mapping', {})
+                        
+                        if final_speaker_mapping:
+                            logger.info(f"Итоговый speaker_mapping (из текста): {final_speaker_mapping}")
+                        
                         # Финальная проверка результата
-                        if not isinstance(final_protocol, dict):
+                        if not isinstance(synthesized_content, dict):
                             logger.warning("Извлеченный результат не является словарем, используем fallback")
                             return _merge_segment_results_fallback(segment_results, template_variables)
                         
                         # Проверяем, что все ключи присутствуют
                         for key in template_variables.keys():
-                            if key not in final_protocol:
-                                final_protocol[key] = "Не указано"
+                            if key not in synthesized_content:
+                                synthesized_content[key] = "Не указано"
                         
-                        return final_protocol
+                        return synthesized_content
                         
                     except json.JSONDecodeError as e2:
                         logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
