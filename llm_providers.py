@@ -1718,11 +1718,11 @@ def _build_segment_analysis_prompt(
         participants_info += "   Анализ: SPEAKER_1 обращается к SPEAKER_2 и передает слово\n"
         participants_info += "   Действие: Недостаточно данных для имени, жди дополнительных упоминаний\n\n"
         
-        participants_info += "ПРИМЕР 2 - Подтверждение с обращением:\n"
-        participants_info += "   SPEAKER_2: \"Викулин и Марат Аббасламов просили внимательно посмотреть...\"\n"
-        participants_info += "   SPEAKER_1: \"Все верно Марат это просил, но это детали...\"\n"
-        participants_info += "   Анализ: SPEAKER_1 обращается \"Марат\" подтверждая его слова\n"
-        participants_info += "   Действие: SPEAKER_2 = Марат Аббасламов (высокая уверенность)\n\n"
+        participants_info += "ПРИМЕР 2 - Обращение по имени в ответе:\n"
+        participants_info += "   SPEAKER_1: \"...то есть там всегда должно быть что-то заполнено, чтобы люди осознавали\"\n"
+        participants_info += "   SPEAKER_2: \"что конкретно они делают. Лёш, я просто хочу сказать...\"\n"
+        participants_info += "   Анализ: SPEAKER_2 обращается к SPEAKER_1 по имени \"Лёш\" (Алексей)\n"
+        participants_info += "   Действие: SPEAKER_1 = Алексей (высокая уверенность)\n\n"
         
         participants_info += "ПРИМЕР 3 - Упоминание коллег (ложный след):\n"
         participants_info += "   SPEAKER_1: \"вот мы со Светой Коротковой концептуально проектировали...\"\n"
