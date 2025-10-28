@@ -66,6 +66,8 @@ class ProgressTracker:
         # Экспоненциальная задержка после flood control
         self._post_flood_interval = 2.5  # Начальное значение
         self._is_recovering_from_flood = False
+        # Флаг аварийного завершения, чтобы остановить обновления
+        self._has_error = False
     
     def _get_adaptive_interval(self) -> float:
         """Получить адаптивный интервал обновления"""
@@ -109,6 +111,9 @@ class ProgressTracker:
         # Завершаем предыдущий этап
         if self.current_stage:
             await self.complete_stage(self.current_stage)
+
+        # Сбрасываем флаг ошибки при переходе на новый этап
+        self._has_error = False
         
         stage = self.stages[stage_id]
         stage.is_active = True
@@ -189,6 +194,11 @@ class ProgressTracker:
             # Проверяем, что сообщение существует
             if self.message is None:
                 logger.warning("Попытка обновить прогресс без сообщения")
+                return
+
+            # При ошибке блокируем дальнейшие обновления, пока не потребуется финальное сообщение
+            if self._has_error and not final:
+                logger.debug(f"⏭️ Обновление пропущено: трекер в состоянии ошибки (msg_id={message_id})")
                 return
             
             # Проверяем flood control ПЕРЕД любыми попытками обновления
@@ -316,7 +326,7 @@ class ProgressTracker:
     async def _auto_update(self):
         """Автоматическое обновление дисплея с учётом flood control"""
         try:
-            while self.current_stage:
+            while self.current_stage and not self._has_error:
                 # Проверяем flood control перед каждым циклом
                 is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(self.chat_id)
                 
@@ -351,6 +361,20 @@ class ProgressTracker:
     
     async def error(self, stage_id: str, error_message: str):
         """Отметить ошибку на этапе"""
+        self._has_error = True
+
+        # Снимаем активность с текущего этапа
+        stage = self.stages.get(stage_id)
+        if stage:
+            stage.is_active = False
+
+        # Устанавливаем корректный текущий этап для отображения
+        if self.current_stage:
+            self.current_stage = None
+
+        # Сбрасываем последний текст, чтобы обеспечить обновление сообщения
+        self._last_text = ""
+
         if self.update_task:
             task = self.update_task
             self.update_task = None
@@ -362,7 +386,6 @@ class ProgressTracker:
             except Exception as e:
                 logger.error(f"Ошибка при отмене автообновления: {e}")
         
-        stage = self.stages.get(stage_id)
         stage_name = stage.name if stage else stage_id
         
         # Экранируем специальные символы Markdown для безопасного отображения
@@ -380,6 +403,8 @@ class ProgressTracker:
                 logger.warning("Попытка отобразить ошибку без сообщения")
                 return
             await safe_edit_text(self.message, text, parse_mode="Markdown")
+            self._last_text = text
+            self._last_edit_at = datetime.now()
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
     
