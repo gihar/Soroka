@@ -198,34 +198,64 @@ class TemplateService:
                 "content": """# Протокол встречи
 
 ## Основная информация
-**Дата:** {{ date }}
-**Время:** {{ time }}
-**Участники:** {{ participants }}
+{% if date %}**Дата:** {{ date }}
+{% endif %}{% if time %}**Время:** {{ time }}
+{% endif %}**Участники:** {{ participants }}
+
+{% if agenda %}
+## Повестка дня
+{{ agenda }}
+{% endif %}
+
+{% if discussion %}
+## Обсуждение
+{{ discussion }}
+{% endif %}
 
 {% if speakers_summary %}
 ## Анализ участников
 {{ speakers_summary }}
 {% endif %}
 
-## Повестка дня
-{{ agenda }}
-
-## Обсуждение
-{{ discussion }}
-
 {% if speaker_contributions %}
 ## Вклад участников
 {{ speaker_contributions }}
 {% endif %}
 
+{% if decisions %}
 ## Принятые решения
 {{ decisions }}
+{% endif %}
 
+{% if tasks %}
 ## Задачи и ответственные
 {{ tasks }}
+{% endif %}
 
+{% if action_items %}
+## Действия к выполнению
+{{ action_items }}
+{% endif %}
+
+{% if next_steps %}
 ## Следующие шаги
 {{ next_steps }}
+{% endif %}
+
+{% if deadlines %}
+## Сроки
+{{ deadlines }}
+{% endif %}
+
+{% if key_points %}
+## Ключевые моменты
+{{ key_points }}
+{% endif %}
+
+{% if issues %}
+## Проблемы и вопросы
+{{ issues }}
+{% endif %}
 
 ---
 *Протокол составлен автоматически*""",
@@ -241,18 +271,29 @@ class TemplateService:
 
 **Участники:** {{ participants }}
 
+{% if key_points %}
 ## Ключевые моменты
 {{ key_points }}
+{% endif %}
 
+{% if decisions %}
 ## Принятые решения
 {{ decisions }}
+{% endif %}
 
+{% if action_items %}
 ## Дальнейшие действия
 {{ action_items }}
+{% endif %}
 
 {% if dialogue_analysis %}
 ## Анализ диалога
 {{ dialogue_analysis }}
+{% endif %}
+
+{% if next_steps %}
+## Следующие шаги
+{{ next_steps }}
 {% endif %}""",
                 "is_default": True
             },
@@ -272,20 +313,45 @@ class TemplateService:
 {{ speaker_contributions }}
 {% endif %}
 
+{% if agenda %}
+## Повестка дня
+{{ agenda }}
+{% endif %}
+
+{% if discussion %}
+## Обсуждение
+{{ discussion }}
+{% endif %}
+
+{% if technical_issues %}
 ## Рассмотренные вопросы
 {{ technical_issues }}
+{% endif %}
 
+{% if architecture_decisions %}
 ## Архитектурные решения
 {{ architecture_decisions }}
+{% endif %}
 
+{% if technical_tasks %}
 ## Технические задачи
 {{ technical_tasks }}
+{% endif %}
 
+{% if decisions %}
+## Принятые решения
+{{ decisions }}
+{% endif %}
+
+{% if risks_and_blockers %}
 ## Риски и блокеры
 {{ risks_and_blockers }}
+{% endif %}
 
+{% if next_sprint_plans %}
 ## Планы на следующий спринт
 {{ next_sprint_plans }}
+{% endif %}
 
 {% if dialogue_analysis %}
 ## Анализ технической дискуссии
@@ -302,42 +368,180 @@ class TemplateService:
                 "content": """# Протокол встречи с анализом участников
 
 ## Основная информация
-**Дата:** {{ date }}
-**Время:** {{ time }}
-**Участники:** {{ participants }}
+{% if date %}**Дата:** {{ date }}
+{% endif %}{% if time %}**Время:** {{ time }}
+{% endif %}**Участники:** {{ participants }}
 
+{% if speakers_summary %}
 ## Краткая характеристика участников
 {{ speakers_summary }}
+{% endif %}
 
+{% if agenda %}
 ## Повестка дня
 {{ agenda }}
+{% endif %}
 
+{% if discussion %}
 ## Ход обсуждения
 {{ discussion }}
+{% endif %}
 
+{% if dialogue_analysis %}
 ## Анализ диалога и взаимодействия
 {{ dialogue_analysis }}
+{% endif %}
 
+{% if speaker_contributions %}
 ## Вклад каждого участника
 {{ speaker_contributions }}
+{% endif %}
 
+{% if decisions %}
 ## Принятые решения
 {{ decisions }}
+{% endif %}
 
+{% if tasks %}
 ## Распределение задач и ответственности
 {{ tasks }}
+{% endif %}
 
-## Ключевые моменты и инсайты
-{{ key_points }}
-
+{% if action_items %}
 ## Действия к выполнению
 {{ action_items }}
+{% endif %}
 
+{% if key_points %}
+## Ключевые моменты и инсайты
+{{ key_points }}
+{% endif %}
+
+{% if next_steps %}
 ## Следующие шаги
 {{ next_steps }}
+{% endif %}
+
+{% if deadlines %}
+## Сроки
+{{ deadlines }}
+{% endif %}
 
 ---
 *Протокол создан автоматически*""",
                 "is_default": True
-            }
+            },
+            {
+                "name": "Детальный протокол",
+                "description": "Полный детальный протокол встречи с таблицами плана действий и участников, по аналогии с детальным саммари",
+                "category": "general",
+                "tags": ["detailed", "comprehensive"],
+                "keywords": ["детальный", "подробный", "comprehensive", "полный"],
+                "content": """# Детальный протокол встречи
+
+{% if date or time or participants %}
+## 📋 Основная информация
+{% if date %}**Дата:** {{ date }}
+{% endif %}{% if time %}**Время:** {{ time }}
+{% endif %}{% if participants %}**Участники:** {{ participants }}
+{% endif %}
+{% endif %}
+
+{% if agenda %}
+## 🎯 Цель и контекст встречи
+{{ agenda }}
+{% endif %}
+
+{% if discussion %}
+## 📊 Ключевые темы и обсуждения
+{{ discussion }}
+{% endif %}
+
+{% if decisions %}
+## ✅ Принятые решения
+{{ decisions }}
+{% endif %}
+
+{% if action_items or tasks %}
+## 📋 Детальный план действий
+
+{% if action_items %}
+{{ action_items }}
+{% endif %}
+
+{% if tasks %}
+{{ tasks }}
+{% endif %}
+
+{% if deadlines %}
+**Сроки выполнения:**
+{{ deadlines }}
+{% endif %}
+{% endif %}
+
+{% if risks_and_blockers %}
+## ⚠️ Риски и блокеры
+{{ risks_and_blockers }}
+{% endif %}
+
+{% if issues %}
+## ⚠️ Выявленные проблемы и вопросы
+{{ issues }}
+{% endif %}
+
+{% if next_steps %}
+## 🔄 Следующие шаги и контрольные точки
+{{ next_steps }}
+{% endif %}
+
+{% if speakers_summary or speaker_contributions %}
+## 👥 Участники и роли
+{% if speakers_summary %}
+{{ speakers_summary }}
+{% endif %}
+
+{% if speaker_contributions %}
+{{ speaker_contributions }}
+{% endif %}
+{% endif %}
+
+{% if key_points %}
+## ⭐ Ключевые моменты и инсайты
+{{ key_points }}
+{% endif %}
+
+{% if technical_issues %}
+## 🔧 Технические вопросы
+{{ technical_issues }}
+{% endif %}
+
+{% if architecture_decisions %}
+## 🏗️ Архитектурные решения
+{{ architecture_decisions }}
+{% endif %}
+
+{% if technical_tasks %}
+## ⚙️ Технические задачи
+{{ technical_tasks }}
+{% endif %}
+
+{% if next_sprint_plans %}
+## 📅 Планы на следующий спринт
+{{ next_sprint_plans }}
+{% endif %}
+
+{% if dialogue_analysis %}
+## 🗣️ Анализ диалога и взаимодействия
+{{ dialogue_analysis }}
+{% endif %}
+
+{% if questions %}
+## ❓ Открытые вопросы
+{{ questions }}
+{% endif %}
+
+---
+*Протокол составлен автоматически*""",
+                "is_default": True
+            },
         ]
