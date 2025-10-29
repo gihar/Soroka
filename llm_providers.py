@@ -1857,7 +1857,10 @@ def _build_synthesis_prompt(
     transcription: str,
     template_variables: Dict[str, str],
     diarization_analysis: Optional[Dict[str, Any]] = None,
-    participants: Optional[List[Dict[str, str]]] = None
+    participants: Optional[List[Dict[str, str]]] = None,
+    meeting_topic: Optional[str] = None,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None
 ) -> str:
     """
     Промпт для синтеза финального протокола из результатов сегментов
@@ -1900,6 +1903,22 @@ def _build_synthesis_prompt(
         participants_context += participants_service.format_participants_for_llm(participants)
         participants_context += "\n"
     
+    # Добавляем информацию о встрече
+    meeting_info = ""
+    if meeting_topic or meeting_date or meeting_time:
+        meeting_info = "\n\n" + "═" * 63 + "\n"
+        meeting_info += "ИНФОРМАЦИЯ О ВСТРЕЧЕ\n"
+        meeting_info += "═" * 63 + "\n\n"
+        
+        if meeting_topic:
+            meeting_info += f"📋 Тема: {meeting_topic}\n"
+        if meeting_date:
+            meeting_info += f"📅 Дата: {meeting_date}\n"
+        if meeting_time:
+            meeting_info += f"🕐 Время: {meeting_time}\n"
+        meeting_info += "\n"
+        meeting_info += "⚠️ ВАЖНО: Используй эти данные в заголовке финального протокола!\n\n"
+    
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     
     prompt = f"""CHAIN-OF-THOUGHT: СИНТЕЗ ФИНАЛЬНОГО ПРОТОКОЛА
@@ -1909,6 +1928,7 @@ def _build_synthesis_prompt(
 {speaker_mappings_context}
 {diarization_context}
 {participants_context}
+{meeting_info}
 
 ЗАДАЧА:
 Объедини информацию из всех сегментов в единый связный протокол для категорий:
@@ -2567,6 +2587,9 @@ async def generate_protocol_chain_of_thought(
     # Извлекаем параметры из kwargs
     speaker_mapping = kwargs.get('speaker_mapping')
     participants = kwargs.get('participants')
+    meeting_topic = kwargs.get('meeting_topic')
+    meeting_date = kwargs.get('meeting_date')
+    meeting_time = kwargs.get('meeting_time')
     
     # Используем системный промпт (с учетом классификации)
     system_prompt = _build_system_prompt(transcription, diarization_analysis)
@@ -2738,13 +2761,15 @@ async def generate_protocol_chain_of_thought(
         logger.info("Этап 2: Синтез финального протокола из сегментов")
         
         try:
-            participants = kwargs.get('participants')
             synthesis_prompt = _build_synthesis_prompt(
                 segment_results=segment_results,
                 transcription=transcription,
                 template_variables=template_variables,
                 diarization_analysis=diarization_analysis,
-                participants=participants
+                participants=participants,
+                meeting_topic=meeting_topic,
+                meeting_date=meeting_date,
+                meeting_time=meeting_time
             )
             
             # DEBUG логирование запроса синтеза
