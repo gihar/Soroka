@@ -353,6 +353,15 @@ class TaskQueueManager:
                 logger.error(f"Не удалось отправить рекомендации пользователю: {send_error}")
             
             # НЕ пробрасываем исключение - обрабатываем локально
+        
+        finally:
+            # КРИТИЧЕСКИ ВАЖНО: всегда завершаем трекер, даже если была ошибка
+            if progress_tracker:
+                try:
+                    logger.debug(f"Принудительное завершение трекера для задачи {task.task_id}")
+                    await progress_tracker.complete_all()
+                except Exception as e:
+                    logger.error(f"Ошибка при завершении трекера: {e}")
     
     async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None):
         """Отправить результат обработки пользователю"""
@@ -390,34 +399,30 @@ class TaskQueueManager:
             # Формируем сообщение с результатом
             result_message = MessageBuilder.processing_complete_message(result_dict)
             
-            # Пытаемся отправить с Markdown, при ошибке - без форматирования
+            # Упрощенная логика отправки: одна попытка с Markdown, при неудаче - простое уведомление
             try:
                 sent_message = await safe_send_message(
                     bot, task.chat_id,
                     text=result_message,
                     parse_mode="Markdown"
                 )
+                # Если не удалось отправить (возможно flood control), отправляем простое уведомление
                 if not sent_message:
-                    logger.warning("Ошибка отправки с Markdown (возможен flood control)")
-                    # Пробуем отправить без Markdown
-                    sent_message = await safe_send_message(
+                    logger.warning("Не удалось отправить результат (возможен flood control)")
+                    await safe_send_message(
                         bot, task.chat_id,
-                        text=result_message
+                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
                     )
-                    if not sent_message:
-                        logger.error("Ошибка отправки без Markdown (возможен flood control)")
-                        # Отправляем простое уведомление
-                        await safe_send_message(
-                            bot, task.chat_id,
-                            text="✅ Протокол успешно создан! Файл отправляется ниже..."
-                        )
             except Exception as e:
-                logger.error(f"Критическая ошибка при отправке результата: {e}")
-                # Отправляем простое уведомление
-                await safe_send_message(
-                    bot, task.chat_id,
-                    text="✅ Протокол успешно создан! Файл отправляется ниже..."
-                )
+                logger.error(f"Ошибка при отправке результата: {e}")
+                # Fallback на простое уведомление
+                try:
+                    await safe_send_message(
+                        bot, task.chat_id,
+                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
+                    )
+                except Exception:
+                    pass  # Если даже простое уведомление не отправилось, пропускаем
             
             # Отправляем протокол
             if not result.protocol_text:

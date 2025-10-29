@@ -68,6 +68,8 @@ class ProgressTracker:
         self._is_recovering_from_flood = False
         # Флаг аварийного завершения, чтобы остановить обновления
         self._has_error = False
+        # Максимальное время жизни трекера (защита от "зависших" трекеров)
+        self._max_lifetime_seconds = 1800  # 30 минут
     
     def _get_adaptive_interval(self) -> float:
         """Получить адаптивный интервал обновления"""
@@ -327,6 +329,16 @@ class ProgressTracker:
         """Автоматическое обновление дисплея с учётом flood control"""
         try:
             while self.current_stage and not self._has_error:
+                # Проверяем таймаут времени жизни трекера
+                elapsed = (datetime.now() - self.start_time).total_seconds()
+                if elapsed > self._max_lifetime_seconds:
+                    logger.warning(
+                        f"⚠️ Трекер превысил максимальное время жизни "
+                        f"({self._max_lifetime_seconds}с / {self._max_lifetime_seconds // 60}мин). "
+                        f"Принудительное завершение."
+                    )
+                    break
+                
                 # Проверяем flood control перед каждым циклом
                 is_blocked, remaining = await telegram_rate_limiter.flood_control.is_blocked(self.chat_id)
                 
@@ -352,8 +364,8 @@ class ProgressTracker:
                 
                 if self.current_stage:  # Проверяем еще раз после сна
                     # Сдвиг спиннера и редактирование производятся внутри update_display
-                    # Форсируем редактирование, чтобы анимация крутилась даже при частых апдейтах прогресса
-                    await self.update_display(force=True)
+                    # НЕ форсируем редактирование - соблюдаем троттлинг для избежания flood control
+                    await self.update_display()
         except asyncio.CancelledError:
             logger.debug("Автообновление прогресса отменено")
         except Exception as e:
@@ -361,7 +373,20 @@ class ProgressTracker:
     
     async def error(self, stage_id: str, error_message: str):
         """Отметить ошибку на этапе"""
+        # НЕМЕДЛЕННО устанавливаем флаг ошибки и останавливаем автообновление
         self._has_error = True
+        
+        # КРИТИЧЕСКИ ВАЖНО: отменяем автообновление в первую очередь
+        if self.update_task:
+            task = self.update_task
+            self.update_task = None
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Ошибка при отмене автообновления: {e}")
 
         # Снимаем активность с текущего этапа
         stage = self.stages.get(stage_id)
@@ -374,17 +399,6 @@ class ProgressTracker:
 
         # Сбрасываем последний текст, чтобы обеспечить обновление сообщения
         self._last_text = ""
-
-        if self.update_task:
-            task = self.update_task
-            self.update_task = None
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Ошибка при отмене автообновления: {e}")
         
         stage_name = stage.name if stage else stage_id
         
