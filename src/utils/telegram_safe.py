@@ -107,9 +107,6 @@ async def safe_edit_text(
                 f"Не удалось отредактировать сообщение "
                 f"(msg_id={message_id}, chat_id={chat_id})"
             )
-        else:
-            logger.debug(f"Сообщение успешно отредактировано (msg_id={message_id})")
-        
         return result
     
     except TelegramBadRequest as e:

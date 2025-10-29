@@ -254,7 +254,6 @@ class ProgressTracker:
                         logger.debug(f"⏭️ Троттлинг: слишком частое обновление (msg_id={message_id})")
                         return
 
-                    logger.debug(f"📝 Обновление прогресса (msg_id={message_id}, попыток={self._total_updates_attempted})")
                     await safe_edit_text(self.message, text, parse_mode="Markdown")
                     self._last_text = text
                     self._last_edit_at = now
