@@ -166,20 +166,18 @@ class TemplateService:
             library = TemplateLibrary()
             all_templates = self._get_default_templates() + library.get_all_templates()
             
-            # Если уже есть достаточно шаблонов, пропускаем
-            if len(existing_templates) >= len(all_templates):
-                logger.info(f"Шаблоны уже инициализированы ({len(existing_templates)} шаблонов)")
-                return
-            
-            # Создаем только отсутствующие шаблоны
+            # Создаем только отсутствующие шаблоны по имени
             existing_names = {t.name for t in existing_templates}
             templates_to_create = [t for t in all_templates if t["name"] not in existing_names]
             
-            for template_data in templates_to_create:
-                template_create = TemplateCreate(**template_data)
-                await self.create_template(template_create)
+            if templates_to_create:
+                for template_data in templates_to_create:
+                    template_create = TemplateCreate(**template_data)
+                    await self.create_template(template_create)
+                logger.info(f"Инициализировано {len(templates_to_create)} новых шаблонов")
+            else:
+                logger.info(f"Все шаблоны уже инициализированы ({len(existing_templates)} шаблонов)")
             
-            logger.info(f"Инициализировано {len(templates_to_create)} новых шаблонов")
             logger.info(f"Всего шаблонов в системе: {len(existing_templates) + len(templates_to_create)}")
             
         except Exception as e:
