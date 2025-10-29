@@ -81,3 +81,5 @@ coverage.xml
 docs/*.tmp
 docs/*.temp
 docs/*.bak
+
+transcription_analyzer.py
