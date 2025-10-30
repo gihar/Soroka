@@ -14,77 +14,71 @@ from src.utils.message_utils import escape_markdown_v2
 def extract_speaker_quotes(
     diarization_data: Dict[str, Any],
     speaker_id: str,
-    num_quotes: int = 3
-) -> List[str]:
+    speakers_text: Optional[Dict[str, str]] = None
+) -> Optional[str]:
     """
-    Извлечь репрезентативные цитаты спикера из диаризации
+    Извлечь первые 200 символов предобработанного текста спикера
     
     Args:
-        diarization_data: Данные диаризации с сегментами
+        diarization_data: Данные диаризации с сегментами (fallback если нет speakers_text)
         speaker_id: ID спикера (например, "SPEAKER_1")
-        num_quotes: Количество цитат для извлечения
+        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         
     Returns:
-        Список цитат (максимум num_quotes штук)
+        Строка с первыми 200 символами или None если текст не найден
     """
+    # Приоритет: используем предобработанный текст если доступен
+    if speakers_text and speaker_id in speakers_text:
+        text = speakers_text[speaker_id].strip()
+        if text:
+            if len(text) > 200:
+                return text[:200] + '...'
+            return text
+        return None
+    
+    # Fallback: собираем из сегментов если speakers_text недоступен
     segments = diarization_data.get('segments', [])
     speaker_segments = [s for s in segments if s.get('speaker') == speaker_id]
     
     if not speaker_segments:
-        return []
+        return None
     
-    if len(speaker_segments) <= num_quotes:
-        # Если сегментов мало, берем все
-        quotes = []
-        for seg in speaker_segments:
-            text = seg.get('text', '').strip()
-            if text:
-                # Обрезаем до 150 символов
-                if len(text) > 150:
-                    quotes.append(text[:150] + '...')
-                else:
-                    quotes.append(text)
-        return quotes
+    # Собираем текст последовательно из первых сегментов до 200 символов
+    collected_text = []
+    total_length = 0
     
-    # Распределяем цитаты по всей длине: начало, середина, конец
-    total = len(speaker_segments)
-    indices = []
+    for seg in speaker_segments:
+        text = seg.get('text', '').strip()
+        if not text:
+            continue
+        
+        text_length = len(text)
+        if total_length + text_length <= 200:
+            collected_text.append(text)
+            total_length += text_length + 1  # +1 для пробела
+        else:
+            # Добавляем часть текста чтобы набрать 200 символов
+            remaining = 200 - total_length
+            if remaining > 0:
+                collected_text.append(text[:remaining])
+            break
     
-    if num_quotes >= 3:
-        indices = [0, total // 2, total - 1]
-        # Добавляем промежуточные точки, если нужно больше 3
-        if num_quotes > 3:
-            step = total // (num_quotes - 1)
-            for i in range(1, num_quotes - 1):
-                idx = step * i
-                if idx not in indices and idx < total:
-                    indices.append(idx)
-    else:
-        # Для 1-2 цитат просто равномерно распределяем
-        step = total // num_quotes
-        indices = [i * step for i in range(num_quotes)]
+    if not collected_text:
+        return None
     
-    # Убираем дубликаты и сортируем
-    indices = sorted(set(indices))
+    result = ' '.join(collected_text)
+    if len(result) > 200:
+        return result[:200] + '...'
     
-    quotes = []
-    for idx in indices[:num_quotes]:
-        if idx < total:
-            text = speaker_segments[idx].get('text', '').strip()
-            if text:
-                if len(text) > 150:
-                    quotes.append(text[:150] + '...')
-                else:
-                    quotes.append(text)
-    
-    return quotes
+    return result
 
 
 def format_mapping_message(
     speaker_mapping: Dict[str, str],
     diarization_data: Dict[str, Any],
     participants: List[Dict[str, str]],
-    unmapped_speakers: Optional[List[str]] = None
+    unmapped_speakers: Optional[List[str]] = None,
+    speakers_text: Optional[Dict[str, str]] = None
 ) -> str:
     """
     Форматировать сообщение с информацией о сопоставлении спикеров
@@ -94,6 +88,7 @@ def format_mapping_message(
         diarization_data: Данные диаризации
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
+        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         
     Returns:
         Отформатированный текст сообщения в MarkdownV2
@@ -120,7 +115,6 @@ def format_mapping_message(
         unmapped_set = set(all_speakers) - mapped_speakers
     
     # Экранируем статический текст
-    quotes_label = escape_markdown_v2("Цитаты:")
     not_defined_text = escape_markdown_v2("Не определен")
     
     # Импортируем сервис для преобразования имен
@@ -138,29 +132,25 @@ def format_mapping_message(
             escaped_participant_name = escape_markdown_v2(short_name)
             lines.append(f"*{escaped_speaker_id}* → {escaped_participant_name} ✓")
             
-            # Извлекаем цитаты
-            quotes = extract_speaker_quotes(diarization_data, speaker_id, num_quotes=3)
-            if quotes:
-                lines.append(quotes_label + ":")
-                for quote in quotes:
-                    # Экранируем цитату для MarkdownV2
-                    escaped_quote = escape_markdown_v2(quote)
-                    # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
-                    lines.append(f"  • \\\"{escaped_quote}\\\"")
+            # Извлекаем цитату (первые 200 символов)
+            quote = extract_speaker_quotes(diarization_data, speaker_id, speakers_text=speakers_text)
+            if quote:
+                # Экранируем цитату для MarkdownV2
+                escaped_quote = escape_markdown_v2(quote)
+                # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
+                lines.append(f"  \\\"{escaped_quote}\\\"")
             lines.append("")
         else:
             # Не сопоставлен - экранируем текст
             lines.append(f"*{escaped_speaker_id}* → {not_defined_text} ❓")
             
-            # Извлекаем цитаты для несопоставленного
-            quotes = extract_speaker_quotes(diarization_data, speaker_id, num_quotes=2)
-            if quotes:
-                lines.append(quotes_label + ":")
-                for quote in quotes:
-                    # Экранируем цитату для MarkdownV2
-                    escaped_quote = escape_markdown_v2(quote)
-                    # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
-                    lines.append(f"  • \\\"{escaped_quote}\\\"")
+            # Извлекаем цитату для несопоставленного
+            quote = extract_speaker_quotes(diarization_data, speaker_id, speakers_text=speakers_text)
+            if quote:
+                # Экранируем цитату для MarkdownV2
+                escaped_quote = escape_markdown_v2(quote)
+                # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
+                lines.append(f"  \\\"{escaped_quote}\\\"")
             lines.append("")
     
     # Экранируем разделитель (дефисы нужно экранировать в MarkdownV2)
@@ -328,7 +318,8 @@ async def show_mapping_confirmation(
     speaker_mapping: Dict[str, str],
     diarization_data: Dict[str, Any],
     participants: List[Dict[str, str]],
-    unmapped_speakers: Optional[List[str]] = None
+    unmapped_speakers: Optional[List[str]] = None,
+    speakers_text: Optional[Dict[str, str]] = None
 ) -> Optional[Message]:
     """
     Показать UI для подтверждения сопоставления спикеров
@@ -341,6 +332,7 @@ async def show_mapping_confirmation(
         diarization_data: Данные диаризации
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
+        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         
     Returns:
         Отправленное сообщение или None при ошибке
@@ -351,7 +343,8 @@ async def show_mapping_confirmation(
             speaker_mapping,
             diarization_data,
             participants,
-            unmapped_speakers
+            unmapped_speakers,
+            speakers_text=speakers_text
         )
         
         # Создаем клавиатуру
@@ -447,7 +440,8 @@ async def update_mapping_message(
     participants: List[Dict[str, str]],
     user_id: int,
     current_editing_speaker: Optional[str] = None,
-    unmapped_speakers: Optional[List[str]] = None
+    unmapped_speakers: Optional[List[str]] = None,
+    speakers_text: Optional[Dict[str, str]] = None
 ) -> bool:
     """
     Обновить сообщение с сопоставлением
@@ -460,6 +454,7 @@ async def update_mapping_message(
         user_id: ID пользователя
         current_editing_speaker: ID спикера, для которого показываем выбор
         unmapped_speakers: Список несопоставленных спикеров
+        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         
     Returns:
         True если успешно, False при ошибке
@@ -471,7 +466,8 @@ async def update_mapping_message(
             speaker_mapping,
             diarization_data,
             participants,
-            unmapped_speakers
+            unmapped_speakers,
+            speakers_text=speakers_text
         )
         
         keyboard = create_mapping_keyboard(

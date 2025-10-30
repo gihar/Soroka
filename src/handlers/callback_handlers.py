@@ -1469,6 +1469,10 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             diarization_data = state_data.get('diarization_data', {})
             participants = state_data.get('participants_list', [])
             
+            # Извлекаем speakers_text из кеша если доступен
+            transcription_result = state_data.get('transcription_result', {})
+            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
+            
             # Обновляем сообщение, показывая выбор участников для этого спикера
             from src.ux.speaker_mapping_ui import update_mapping_message
             await update_mapping_message(
@@ -1477,7 +1481,8 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 diarization_data,
                 participants,
                 user_id_from_callback,
-                current_editing_speaker=speaker_id
+                current_editing_speaker=speaker_id,
+                speakers_text=speakers_text
             )
             
             await callback.answer()
@@ -1565,6 +1570,10 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             # Обновляем состояние в кеше
             await mapping_state_cache.update_mapping(user_id_from_callback, speaker_mapping)
             
+            # Извлекаем speakers_text из кеша если доступен
+            transcription_result = state_data.get('transcription_result', {})
+            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
+            
             # Обновляем сообщение (возвращаемся к основному виду)
             from src.ux.speaker_mapping_ui import update_mapping_message
             await update_mapping_message(
@@ -1573,7 +1582,8 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 diarization_data,
                 participants,
                 user_id_from_callback,
-                current_editing_speaker=None
+                current_editing_speaker=None,
+                speakers_text=speakers_text
             )
             
         except Exception as e:
@@ -1617,6 +1627,10 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             diarization_data = state_data.get('diarization_data', {})
             participants = state_data.get('participants_list', [])
             
+            # Извлекаем speakers_text из кеша если доступен
+            transcription_result = state_data.get('transcription_result', {})
+            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
+            
             # Возвращаемся к основному виду
             from src.ux.speaker_mapping_ui import update_mapping_message
             await update_mapping_message(
@@ -1625,7 +1639,8 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 diarization_data,
                 participants,
                 user_id_from_callback,
-                current_editing_speaker=None
+                current_editing_speaker=None,
+                speakers_text=speakers_text
             )
             
             await callback.answer()
