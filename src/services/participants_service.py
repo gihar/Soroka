@@ -299,9 +299,40 @@ class ParticipantsService:
         
         return "\n".join(lines)
     
+    def _is_patronymic(self, word: str) -> bool:
+        """
+        Проверяет, является ли слово отчеством по характерным окончаниям
+        
+        Args:
+            word: Слово для проверки
+            
+        Returns:
+            True если слово похоже на отчество
+        """
+        patronymic_endings = ('вич', 'ович', 'евич', 'ич', 'вна', 'овна', 'евна', 'ична')
+        return any(word.lower().endswith(ending) for ending in patronymic_endings)
+    
+    def _is_likely_surname(self, word: str) -> bool:
+        """
+        Проверяет, похоже ли слово на фамилию по типичным окончаниям
+        
+        Args:
+            word: Слово для проверки
+            
+        Returns:
+            True если слово похоже на фамилию
+        """
+        surname_endings = ('ов', 'ова', 'ев', 'ева', 'ин', 'ина', 'ский', 'ская', 
+                          'ко', 'енко', 'ук', 'юк', 'ец', 'иц', 'ич')
+        return any(word.lower().endswith(ending) for ending in surname_endings)
+    
     def convert_full_name_to_short(self, full_name: str) -> str:
         """
         Преобразует полное ФИО в формат "Имя Фамилия" без отчества
+        
+        Поддерживает оба формата:
+        - "Имя Отчество Фамилия" (например "Степан Евгеньевич Носов")
+        - "Фамилия Имя Отчество" (например "Носов Степан Евгеньевич")
         
         Args:
             full_name: Полное имя (например "Тимченко Алексей Александрович" или "Алексей Тимченко")
@@ -312,16 +343,51 @@ class ParticipantsService:
         parts = full_name.strip().split()
         
         if len(parts) == 3:
-            # Формат: Фамилия Имя Отчество → Имя Фамилия
+            # Ищем отчество среди трех слов
+            patronymic_idx = None
+            for i, part in enumerate(parts):
+                if self._is_patronymic(part):
+                    patronymic_idx = i
+                    break
+            
+            if patronymic_idx is not None:
+                # Удаляем отчество, остаются имя и фамилия
+                remaining = [p for i, p in enumerate(parts) if i != patronymic_idx]
+                
+                # Определяем порядок по позиции отчества
+                if len(remaining) == 2:
+                    # Если отчество в середине (позиция 1), формат точно "Имя Отчество Фамилия"
+                    if patronymic_idx == 1:
+                        return f"{remaining[0]} {remaining[1]}"
+                    # Если отчество в начале (позиция 0), формат "Отчество Имя Фамилия" или "Отчество Фамилия Имя"
+                    # Такое встречается редко, но на всякий случай проверим
+                    elif patronymic_idx == 0:
+                        # Проверяем фамильные окончания для определения порядка
+                        if self._is_likely_surname(remaining[1]):
+                            # Вероятно формат "Отчество Фамилия Имя"
+                            return f"{remaining[1]} {remaining[0]}"
+                        else:
+                            # Вероятно формат "Отчество Имя Фамилия"
+                            return f"{remaining[0]} {remaining[1]}"
+                    # Если отчество в конце (позиция 2), формат "Имя Фамилия Отчество" или "Фамилия Имя Отчество"
+                    else:  # patronymic_idx == 2
+                        # Проверяем фамильные окончания для определения порядка
+                        if self._is_likely_surname(remaining[0]):
+                            # Фамилия Имя → Имя Фамилия
+                            return f"{remaining[1]} {remaining[0]}"
+                        else:
+                            # Уже Имя Фамилия
+                            return f"{remaining[0]} {remaining[1]}"
+            
+            # Если отчество не найдено, применяем старую логику
+            # Предполагаем формат: Фамилия Имя Отчество → Имя Фамилия
             return f"{parts[1]} {parts[0]}"
         elif len(parts) == 2:
             # Формат: либо "Имя Фамилия", либо "Фамилия Имя"
-            # Определяем по заглавной букве и типичным паттернам
-            # Если первое слово заканчивается на -ов/-ова/-ин/-ина/-ский/-ская - это фамилия
+            # Определяем по типичным паттернам окончаний фамилий
             first_word = parts[0]
-            surname_endings = ('ов', 'ова', 'ев', 'ева', 'ин', 'ина', 'ский', 'ская', 'ко', 'енко', 'ук')
             
-            if any(first_word.lower().endswith(ending) for ending in surname_endings):
+            if self._is_likely_surname(first_word):
                 # Фамилия Имя → Имя Фамилия
                 return f"{parts[1]} {parts[0]}"
             else:
