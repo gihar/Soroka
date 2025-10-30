@@ -316,6 +316,13 @@ class TaskQueueManager:
             processing_service = OptimizedProcessingService()
             result = await processing_service.process_file(task.request, progress_tracker)
             
+            # Проверяем, была ли обработка приостановлена для подтверждения сопоставления
+            if result is None:
+                logger.info(f"Обработка задачи {task.task_id} приостановлена - ожидаю подтверждения от пользователя")
+                # Не завершаем задачу и не отправляем результат - это будет сделано после подтверждения
+                # Задача останется в статусе PROCESSING или будет обновлена соответствующим образом
+                return
+            
             # Отправляем результат пользователю
             await self._send_result_to_user(self.bot, task, result, progress_tracker)
             

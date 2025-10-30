@@ -460,6 +460,66 @@ class SpeakerMappingService:
         
         return prompt
     
+    def _extract_json_from_text(self, text: str) -> Optional[str]:
+        """
+        Извлечь JSON из текста, даже если есть дополнительный текст или markdown разметка
+        
+        Args:
+            text: Текст, который может содержать JSON
+            
+        Returns:
+            Извлеченный JSON строку или None если не удалось найти
+        """
+        if not text:
+            return None
+        
+        text = text.strip()
+        
+        # Попытка 1: Попытаться найти JSON в markdown блоке ```json ... ```
+        import re
+        # Ищем markdown блок с JSON, используя более сложный подход для вложенных структур
+        json_block_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text, re.DOTALL)
+        if json_block_match:
+            json_candidate = json_block_match.group(1)
+            # Проверяем, что это действительно валидный JSON с правильной вложенностью
+            if json_candidate.count('{') == json_candidate.count('}'):
+                return json_candidate
+            # Если не совпадает, используем альтернативный метод поиска
+        
+        # Попытка 2: Найти первый { и последний }
+        first_brace = text.find('{')
+        if first_brace == -1:
+            return None
+        
+        # Находим последнюю закрывающую скобку, учитывая вложенность
+        brace_count = 0
+        last_brace = -1
+        for i in range(first_brace, len(text)):
+            if text[i] == '{':
+                brace_count += 1
+            elif text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    last_brace = i
+                    break
+        
+        if last_brace == -1:
+            # JSON не закрыт полностью - попробуем найти последнюю }
+            last_brace = text.rfind('}')
+            if last_brace > first_brace:
+                # Попробуем извлечь и добавить недостающие закрывающие скобки
+                partial_json = text[first_brace:last_brace + 1]
+                # Подсчитаем открывающие и закрывающие скобки
+                open_count = partial_json.count('{')
+                close_count = partial_json.count('}')
+                missing_closes = open_count - close_count
+                if missing_closes > 0:
+                    partial_json += '}' * missing_closes
+                return partial_json
+            return None
+        
+        return text[first_brace:last_brace + 1]
+    
     async def _call_llm_for_mapping(
         self,
         prompt: str,
@@ -532,20 +592,52 @@ class SpeakerMappingService:
                     logger.debug(f"Raw content:\n{content}")
                     logger.debug("=" * 80)
                 
-                # Парсим JSON
+                # Парсим JSON с улучшенной обработкой ошибок
+                result = None
+                
                 try:
+                    # Прямой парсинг
                     result = json.loads(content)
-                    
-                    # Краткое резюме результата (если включено логирование)
-                    if settings.llm_debug_log:
-                        mapped_count = len(result.get('speaker_mappings', {}))
-                        logger.info(f"LLM сопоставил {mapped_count} спикеров")
-                    
-                    return result
                 except json.JSONDecodeError as e:
-                    logger.error(f"Ошибка парсинга JSON ответа от LLM: {e}")
-                    logger.error(f"Проблемный content: {content}")
-                    return {}
+                    logger.warning(f"Прямой парсинг JSON не удался: {e}. Попытка извлечь JSON из текста...")
+                    
+                    # Попытка извлечь JSON из текста
+                    extracted_json = self._extract_json_from_text(content)
+                    if extracted_json:
+                        try:
+                            result = json.loads(extracted_json)
+                            logger.info("JSON успешно извлечен из текста")
+                        except json.JSONDecodeError as e2:
+                            logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
+                            logger.error(f"Извлеченный JSON (первые 500 символов): {extracted_json[:500]}")
+                            logger.error(f"Полный content (первые 1000 символов): {content[:1000]}")
+                            if len(content) > 1000:
+                                logger.error(f"... (всего {len(content)} символов)")
+                    
+                    if result is None:
+                        # Если все попытки не удались, логируем детальную информацию
+                        logger.error(f"Не удалось распарсить JSON ответа от LLM")
+                        logger.error(f"Ошибка: {e}")
+                        logger.error(f"Длина content: {len(content)} символов")
+                        logger.error(f"Первые 500 символов content: {content[:500]}")
+                        logger.error(f"Последние 500 символов content: {content[-500:]}")
+                        
+                        # Попробуем найти примерную позицию ошибки
+                        if hasattr(e, 'pos') and e.pos is not None:
+                            error_pos = e.pos
+                            start = max(0, error_pos - 100)
+                            end = min(len(content), error_pos + 100)
+                            logger.error(f"Контекст вокруг ошибки (позиция {error_pos}):")
+                            logger.error(f"  ...{content[start:end]}...")
+                        
+                        return {}
+                
+                # Краткое резюме результата (если включено логирование)
+                if settings.llm_debug_log:
+                    mapped_count = len(result.get('speaker_mappings', {}))
+                    logger.info(f"LLM сопоставил {mapped_count} спикеров")
+                
+                return result
             
             else:
                 # Для других провайдеров используем стандартный метод

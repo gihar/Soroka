@@ -151,6 +151,12 @@ class OptimizedProcessingService(BaseProcessingService):
             # Шаг 5: Если кэша нет, выполняем оптимизированную обработку
             result = await self._process_file_optimized(request, processing_metrics, progress_tracker, temp_file_path)
             
+            # Проверяем, была ли обработка приостановлена для подтверждения сопоставления
+            if result is None:
+                logger.info("⏸️ Обработка приостановлена - ожидаю подтверждения от пользователя")
+                # Не сохраняем в кеш и не завершаем метрики - это будет сделано после подтверждения
+                return None
+            
             # Шаг 6: Кэшируем результат
             await performance_cache.set(
                 cache_key, result, 
@@ -324,9 +330,6 @@ class OptimizedProcessingService(BaseProcessingService):
                         llm_provider=request.llm_provider
                     )
                     
-                    # Сохраняем mapping в request для дальнейшего использования
-                    request.speaker_mapping = speaker_mapping
-                    
                     logger.info(f"✅ СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров сопоставлено")
                     if speaker_mapping:
                         logger.info("Результаты сопоставления:")
@@ -334,6 +337,93 @@ class OptimizedProcessingService(BaseProcessingService):
                             logger.info(f"  {speaker_id} → {name}")
                     else:
                         logger.warning("⚠️ Speaker mapping вернул пустой результат - протокол будет генерироваться без сопоставления спикеров")
+                    
+                    # Проверяем, нужно ли показывать UI подтверждения
+                    if settings.enable_speaker_mapping_confirmation:
+                        logger.info("🔄 UI подтверждения сопоставления включен - сохраняю состояние и показываю интерфейс")
+                        
+                        # Сохраняем состояние в кеш
+                        from src.services.mapping_state_cache import mapping_state_cache
+                        await mapping_state_cache.save_state(request.user_id, {
+                            'speaker_mapping': speaker_mapping,
+                            'diarization_data': transcription_result.diarization,
+                            'participants_list': request.participants_list,
+                            'request_data': request.model_dump() if hasattr(request, 'model_dump') else request.dict(),
+                            'transcription_result': {
+                                'transcription': transcription_result.transcription,
+                                'formatted_transcript': transcription_result.formatted_transcript,
+                                'speakers_text': transcription_result.speakers_text,
+                                'speakers_summary': transcription_result.speakers_summary
+                            },
+                            'temp_file_path': temp_file_path,
+                            'processing_metrics': {
+                                'total_duration': processing_metrics.total_duration if hasattr(processing_metrics, 'total_duration') else 0
+                            }
+                        })
+                        
+                        # Показываем UI подтверждения
+                        if progress_tracker:
+                            from src.ux.speaker_mapping_ui import show_mapping_confirmation
+                            
+                            # Получаем список несопоставленных спикеров
+                            all_speakers = transcription_result.diarization.get('speakers', [])
+                            if not all_speakers:
+                                segments = transcription_result.diarization.get('segments', [])
+                                all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
+                            mapped_speakers = set(speaker_mapping.keys())
+                            unmapped_speakers = [s for s in all_speakers if s not in mapped_speakers]
+                            
+                            # Пытаемся показать UI подтверждения
+                            confirmation_message = await show_mapping_confirmation(
+                                bot=progress_tracker.bot,
+                                chat_id=progress_tracker.chat_id,
+                                user_id=request.user_id,
+                                speaker_mapping=speaker_mapping,
+                                diarization_data=transcription_result.diarization,
+                                participants=request.participants_list,
+                                unmapped_speakers=unmapped_speakers if unmapped_speakers else None
+                            )
+                            
+                            # Проверяем, удалось ли отправить UI
+                            if confirmation_message is None:
+                                # UI не был отправлен - продолжаем обработку без паузы
+                                logger.warning(
+                                    f"⚠️ Не удалось отправить UI подтверждения сопоставления для пользователя {request.user_id}. "
+                                    "Продолжаю обработку без паузы на подтверждение."
+                                )
+                                
+                                # Отправляем уведомление пользователю
+                                try:
+                                    from src.utils.telegram_safe import safe_send_message
+                                    await safe_send_message(
+                                        bot=progress_tracker.bot,
+                                        chat_id=progress_tracker.chat_id,
+                                        text=(
+                                            "⚠️ Не удалось отправить интерфейс подтверждения сопоставления.\n\n"
+                                            "Продолжаю генерацию протокола с автоматическим сопоставлением спикеров."
+                                        ),
+                                        parse_mode=None
+                                    )
+                                except Exception as notify_error:
+                                    logger.error(f"Не удалось отправить уведомление об ошибке UI: {notify_error}")
+                                
+                                # Очищаем кеш состояния, так как обработка продолжается без паузы
+                                from src.services.mapping_state_cache import mapping_state_cache
+                                await mapping_state_cache.clear_state(request.user_id)
+                                
+                                # Продолжаем обработку без паузы - сохраняем mapping в request
+                                request.speaker_mapping = speaker_mapping
+                            else:
+                                # UI успешно отправлен - приостанавливаем обработку
+                                logger.info("⏸️ Обработка приостановлена - ожидаю подтверждения от пользователя")
+                                
+                                # Возвращаем None как индикатор паузы (обработка продолжится после подтверждения)
+                                return None
+                        else:
+                            logger.warning("⚠️ UI подтверждения включен, но progress_tracker отсутствует - продолжаю без паузы")
+                    
+                    # Сохраняем mapping в request для дальнейшего использования (если UI не включен)
+                    request.speaker_mapping = speaker_mapping
                     
                     # ЗАКОММЕНТИРОВАНО: Промежуточное уведомление больше не отправляется
                     # Информация о сопоставлении будет показана в финальном сообщении с протоколом
@@ -448,6 +538,189 @@ class OptimizedProcessingService(BaseProcessingService):
                 llm_provider_used=request.llm_provider,
                 llm_model_used=llm_model_display_name,
                 processing_duration=processing_metrics.total_duration
+            )
+    
+    async def continue_processing_after_mapping_confirmation(
+        self,
+        user_id: int,
+        confirmed_mapping: Dict[str, str],
+        bot: Any,
+        chat_id: int
+    ) -> ProcessingResult:
+        """
+        Продолжить обработку после подтверждения сопоставления спикеров
+        
+        Args:
+            user_id: ID пользователя
+            confirmed_mapping: Подтвержденное сопоставление спикеров
+            bot: Экземпляр бота для отправки сообщений
+            chat_id: ID чата
+            
+        Returns:
+            ProcessingResult с готовым протоколом
+        """
+        from src.services.mapping_state_cache import mapping_state_cache
+        from src.models.processing import ProcessingRequest, TranscriptionResult
+        from src.ux.progress_tracker import ProgressFactory
+        
+        try:
+            logger.info(f"🔄 Продолжение обработки для пользователя {user_id} после подтверждения сопоставления")
+            
+            # Загружаем сохраненное состояние
+            state_data = await mapping_state_cache.load_state(user_id)
+            
+            if not state_data:
+                raise ProcessingError(
+                    "Состояние обработки не найдено или истекло",
+                    "unknown",
+                    "state_expired"
+                )
+            
+            # Восстанавливаем данные из состояния
+            request_data = state_data.get('request_data', {})
+            transcription_data = state_data.get('transcription_result', {})
+            diarization_data = state_data.get('diarization_data', {})
+            temp_file_path = state_data.get('temp_file_path')
+            
+            # Восстанавливаем ProcessingRequest
+            request = ProcessingRequest(**request_data)
+            request.speaker_mapping = confirmed_mapping
+            
+            # Восстанавливаем TranscriptionResult
+            transcription_result = TranscriptionResult(
+                transcription=transcription_data.get('transcription', ''),
+                diarization=diarization_data,
+                speakers_text=transcription_data.get('speakers_text', {}),
+                formatted_transcript=transcription_data.get('formatted_transcript', ''),
+                speakers_summary=transcription_data.get('speakers_summary', '')
+            )
+            
+            # Создаем новый progress tracker для продолжения
+            progress_tracker = await ProgressFactory.create_file_processing_tracker(
+                bot=bot,
+                chat_id=chat_id
+            )
+            
+            # Создаем метрики (восстанавливаем частично)
+            processing_metrics = type('Metrics', (), {
+                'total_duration': state_data.get('processing_metrics', {}).get('total_duration', 0)
+            })()
+            
+            # Продолжаем с этапа выбора шаблона (если еще не выбран)
+            if not request.template_id:
+                template = await self._suggest_template_if_needed(
+                    request, transcription_result, progress_tracker
+                )
+                if not template:
+                    raise ProcessingError(
+                        "Не удалось выбрать шаблон",
+                        request.file_name,
+                        "template_selection"
+                    )
+                request.template_id = template.id
+            else:
+                template = await self.template_service.get_template_by_id(request.template_id)
+                if not template:
+                    raise ProcessingError(
+                        f"Шаблон с ID {request.template_id} не найден",
+                        request.file_name,
+                        "template_not_found"
+                    )
+            
+            # Этап 3: Анализ и генерация
+            if progress_tracker:
+                await progress_tracker.start_stage("analysis")
+            
+            llm_result = await self._optimized_llm_generation(
+                transcription_result, template, request, processing_metrics
+            )
+            
+            # Форматирование
+            with PerformanceTimer("formatting", metrics_collector):
+                processing_metrics.formatting_duration = 0.1
+                
+                protocol_text = self._format_protocol(
+                    template, llm_result, transcription_result
+                )
+                
+                # Применяем замену спикеров на реальные имена
+                if confirmed_mapping:
+                    from src.utils.text_processing import replace_speakers_in_text
+                    protocol_text = replace_speakers_in_text(protocol_text, confirmed_mapping)
+                    logger.info(f"Применена замена спикеров на имена участников (подтвержденное сопоставление)")
+            
+            # Очистка временного файла в фоне (только для внешних файлов)
+            if request.is_external_file and temp_file_path:
+                asyncio.create_task(self._cleanup_temp_file(temp_file_path))
+            
+            # Определяем название модели для результата
+            user = await self.user_service.get_user_by_telegram_id(user_id)
+            openai_model_key = None
+            if request.llm_provider == 'openai' and user:
+                openai_model_key = getattr(user, 'preferred_openai_model_key', None)
+            llm_model_display_name = self._get_model_display_name(request.llm_provider, openai_model_key)
+            
+            # Создаем результат
+            result = ProcessingResult(
+                transcription_result=transcription_result,
+                protocol_text=protocol_text,
+                template_used=template.model_dump() if hasattr(template, 'model_dump') else template.__dict__,
+                llm_provider_used=request.llm_provider,
+                llm_model_used=llm_model_display_name,
+                processing_duration=processing_metrics.total_duration
+            )
+            
+            # Отправляем результат пользователю (используем тот же подход, что и в task_queue_manager)
+            from src.services.task_queue_manager import TaskQueueManager
+            from src.models.task_queue import QueuedTask, TaskPriority
+            from datetime import datetime
+            from uuid import uuid4
+            
+            task_queue_manager = TaskQueueManager()
+            
+            # Создаем фиктивный QueuedTask для отправки результата
+            # (нам нужна только структура для _send_result_to_user)
+            fake_task = QueuedTask(
+                task_id=uuid4(),
+                request=request,
+                user_id=user_id,
+                chat_id=chat_id,
+                priority=TaskPriority.NORMAL,
+                created_at=datetime.now()
+            )
+            
+            await task_queue_manager._send_result_to_user(
+                bot=bot,
+                task=fake_task,
+                result=result,
+                progress_tracker=progress_tracker
+            )
+            
+            # Сохраняем историю обработки
+            await self._save_processing_history(request, result)
+            
+            logger.info(f"✅ Обработка успешно завершена для пользователя {user_id}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при продолжении обработки для пользователя {user_id}: {e}", exc_info=True)
+            
+            # Очищаем состояние при ошибке
+            await mapping_state_cache.clear_state(user_id)
+            
+            # Отправляем сообщение об ошибке
+            await safe_send_message(
+                bot=bot,
+                chat_id=chat_id,
+                text=f"❌ Произошла ошибка при продолжении обработки:\n\n{str(e)}\n\n"
+                     f"Пожалуйста, попробуйте начать обработку заново."
+            )
+            
+            raise ProcessingError(
+                f"Ошибка продолжения обработки: {str(e)}",
+                "unknown",
+                "continuation_error"
             )
     
     async def _suggest_template_if_needed(

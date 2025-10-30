@@ -19,3 +19,8 @@ class SpeakerMappingEdit(StatesGroup):
     confirm_changes = State()  # Подтверждение изменений
 
 
+class SpeakerMappingStates(StatesGroup):
+    """Состояния для подтверждения сопоставления спикеров"""
+    waiting_confirmation = State()  # Ожидание подтверждения сопоставления
+
+

@@ -133,6 +133,7 @@ class Settings(BaseSettings):
     max_participants: int = Field(20, description="Максимальное количество участников в списке")
     llm_debug_log: bool = Field(False, description="Выводить в DEBUG лог все запросы и ответы LLM (генерация протоколов и сопоставление спикеров)")
     full_text_matching: bool = Field(False, description="Использовать полный текст транскрипции для сопоставления участников (увеличивает расход токенов)")
+    enable_speaker_mapping_confirmation: bool = Field(False, description="Показывать UI для подтверждения сопоставления спикеров перед генерацией протокола")
     
     # Настройки очереди задач
     max_concurrent_tasks: Optional[int] = Field(None, description="Максимальное количество одновременно обрабатываемых задач (по умолчанию рассчитывается по CPU/RAM)")

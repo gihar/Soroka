@@ -484,10 +484,27 @@ class MeetingStructureBuilder:
             # Выбираем соответствующую схему в зависимости от типа извлечения
             schema = get_schema_by_type(extraction_type)
             
+            # Определяем модель для логирования
+            model = settings.structure_extraction_model or settings.openai_model
+            
+            # Логирование запроса (если включено)
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug(f"=== LLM STRUCTURE EXTRACTION REQUEST ({extraction_type.upper()}) ===")
+                logger.debug("=" * 80)
+                logger.debug(f"Extraction type: {extraction_type}")
+                logger.debug(f"Model: {model}")
+                logger.debug(f"Schema type: {extraction_type}")
+                logger.debug("-" * 80)
+                logger.debug(f"System prompt:\n{system_prompt}")
+                logger.debug("-" * 80)
+                logger.debug(f"User prompt:\n{prompt}")
+                logger.debug("=" * 80)
+            
             async def _call_openai():
                 return await asyncio.to_thread(
                     provider.client.chat.completions.create,
-                    model=settings.structure_extraction_model or settings.openai_model,
+                    model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
@@ -500,7 +517,21 @@ class MeetingStructureBuilder:
             response = await _call_openai()
             content = response.choices[0].message.content
             
+            # Логирование ответа (если включено)
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug(f"=== LLM STRUCTURE EXTRACTION RESPONSE ({extraction_type.upper()}) ===")
+                logger.debug("=" * 80)
+                logger.debug(f"Raw content:\n{content}")
+                logger.debug("=" * 80)
+            
             result = json.loads(content)
+            
+            # Логирование распарсенного результата (если включено)
+            if settings.llm_debug_log:
+                logger.debug(f"Parsed result keys: {list(result.keys())}")
+                logger.debug(f"Result summary: {extraction_type}={len(result.get(extraction_type, []))}")
+            
             return result
             
         except Exception as e:
