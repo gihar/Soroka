@@ -392,6 +392,24 @@ async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
         logger.error(f"Ошибка в мониторинге позиции задачи {task_id}: {e}")
 
 
+def _fix_markdown_tags(text: str) -> str:
+    """Исправить незакрытые Markdown-теги в тексте"""
+    # Подсчитываем количество открытых/закрытых тегов
+    bold_count = text.count('**')
+    italic_count = text.count('_')
+    code_count = text.count('`')
+    
+    # Закрываем незакрытые теги
+    if bold_count % 2 != 0:
+        text = text + '**'
+    if italic_count % 2 != 0:
+        text = text + '_'
+    if code_count % 2 != 0:
+        text = text + '`'
+    
+    return text
+
+
 async def _send_long_protocol(message: Message, protocol_text: str):
     """Отправить длинный протокол частями"""
     try:
@@ -436,6 +454,9 @@ async def _send_long_protocol(message: Message, protocol_text: str):
                 else:
                     # Остальные части с номером
                     part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
+                
+                # Исправляем незакрытые Markdown-теги
+                part_text = _fix_markdown_tags(part_text)
                 
                 logger.debug(f"Отправляем часть {i+1}/{len(parts)} длиной {len(part_text)} символов")
                 await message.answer(part_text, parse_mode="Markdown")

@@ -2034,6 +2034,24 @@ async def _cancel_task_callback(callback: CallbackQuery, state: FSMContext):
 # Теперь обработка происходит через очередь задач
 
 
+def _fix_markdown_tags(text: str) -> str:
+    """Исправить незакрытые Markdown-теги в тексте"""
+    # Подсчитываем количество открытых/закрытых тегов
+    bold_count = text.count('**')
+    italic_count = text.count('_')
+    code_count = text.count('`')
+    
+    # Закрываем незакрытые теги
+    if bold_count % 2 != 0:
+        text = text + '**'
+    if italic_count % 2 != 0:
+        text = text + '_'
+    if code_count % 2 != 0:
+        text = text + '`'
+    
+    return text
+
+
 async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 4096):
     """Отправить длинное сообщение по частям"""
     # Учитываем заголовок при расчете максимальной длины части
@@ -2071,6 +2089,9 @@ async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 409
         try:
             header = f"📄 **Протокол встречи** (часть {i+1}/{len(parts)})\n\n"
             full_message = header + part
+            
+            # Исправляем незакрытые Markdown-теги
+            full_message = _fix_markdown_tags(full_message)
             
             # Проверяем, что сообщение не превышает лимит
             if len(full_message) > max_length:

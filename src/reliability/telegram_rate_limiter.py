@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from collections import deque
 from loguru import logger
 
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 from aiogram.types import Message
 
 
@@ -262,6 +262,41 @@ class TelegramRateLimiter:
                         f"Flood control: {retry_after}с. "
                         f"Сообщение не отправлено."
                     )
+                    return None
+            
+            except TelegramBadRequest as e:
+                # Ошибки парсинга Markdown - повторяем без parse_mode
+                if "can't parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+                    logger.warning(f"Ошибка парсинга Markdown: {e}. Повторяем без форматирования.")
+                    # Удаляем parse_mode из kwargs и повторяем попытку
+                    kwargs_no_parse = kwargs.copy()
+                    kwargs_no_parse.pop('parse_mode', None)
+                    try:
+                        # Отправляем сообщение без parse_mode
+                        if hasattr(send_func, '__self__') and hasattr(send_func.__self__, 'send_message'):
+                            # Это bot.send_message - chat_id должен быть первым позиционным аргументом
+                            if chat_id is not None:
+                                result = await send_func(chat_id, *args, **kwargs_no_parse)
+                            else:
+                                result = await send_func(*args, **kwargs_no_parse)
+                        else:
+                            # Для других функций (message.answer, message.edit_text) используем стандартный подход
+                            result = await send_func(*args, **kwargs_no_parse)
+                        
+                        # Регистрируем успешную отправку
+                        await self.register_sent_message()
+                        return result
+                    except Exception as e2:
+                        logger.error(f"Ошибка даже без parse_mode: {e2}")
+                        if attempt < max_retries:
+                            await asyncio.sleep(0.5 * (attempt + 1))
+                            continue
+                        return None
+                else:
+                    logger.error(f"Ошибка Telegram API: {e}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                        continue
                     return None
             
             except Exception as e:
