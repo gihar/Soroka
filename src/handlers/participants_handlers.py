@@ -101,6 +101,12 @@ def setup_participants_handlers() -> Router:
             await callback.answer()
             await state.set_state(ParticipantsInput.waiting_for_participants)
 
+            # Создаем клавиатуру с кнопками навигации
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_participants")]
+            ])
+
             await callback.message.answer(
                 "🔍 **Автоматическое извлечение информации о встрече**\n\n"
                 "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
@@ -113,8 +119,8 @@ def setup_participants_handlers() -> Router:
                 "Кому: Мария Иванова; Алексей Смирнов\n"
                 "Тема: Обсуждение проекта\n"
                 "Когда: 22 октября 2025 г. 15:00-16:00\n"
-                "```\n\n"
-                "Или отправьте /cancel для отмены.",
+                "```",
+                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
 
@@ -227,17 +233,12 @@ def setup_participants_handlers() -> Router:
             # Очищаем участников из состояния
             await state.update_data(participants_list=None)
             
-            # Переходим к выбору LLM
-            from src.handlers.message_handlers import _show_llm_selection_for_file
-            from src.services.enhanced_llm_service import EnhancedLLMService
-            from src.services.optimized_processing_service import OptimizedProcessingService
+            # Переходим к выбору шаблона (шаг 2)
+            from src.handlers.message_handlers import _show_template_selection_step2
+            from src.services.template_service import TemplateService
 
-            llm_service = EnhancedLLMService()
-            processing_service = OptimizedProcessingService()
-
-            await _show_llm_selection_for_file(
-                callback.message, state, llm_service, processing_service
-            )
+            template_service = TemplateService()
+            await _show_template_selection_step2(callback.message, template_service, state)
             
         except Exception as e:
             logger.error(f"Ошибка при пропуске участников: {e}")
@@ -460,8 +461,8 @@ def setup_participants_handlers() -> Router:
 
             await callback.answer("✅ Информация о встрече подтверждена")
 
-            # Возвращаемся к выбору шаблона
-            from src.handlers.message_handlers import _show_template_selection
+            # Переходим к выбору шаблона (шаг 2)
+            from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
             await callback.message.answer(
@@ -470,7 +471,7 @@ def setup_participants_handlers() -> Router:
             )
 
             template_service = TemplateService()
-            await _show_template_selection(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
@@ -503,8 +504,8 @@ def setup_participants_handlers() -> Router:
 
             await callback.answer("✅ Информация сохранена и будет использована")
 
-            # Возвращаемся к выбору шаблона
-            from src.handlers.message_handlers import _show_template_selection
+            # Переходим к выбору шаблона (шаг 2)
+            from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
             await callback.message.answer(
@@ -513,7 +514,7 @@ def setup_participants_handlers() -> Router:
             )
 
             template_service = TemplateService()
-            await _show_template_selection(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении информации о встрече: {e}")
@@ -530,8 +531,8 @@ def setup_participants_handlers() -> Router:
 
             await callback.answer("✅ Список участников подтвержден")
 
-            # Возвращаемся к выбору шаблона
-            from src.handlers.message_handlers import _show_template_selection
+            # Переходим к выбору шаблона (шаг 2)
+            from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
             await callback.message.answer(
@@ -540,7 +541,7 @@ def setup_participants_handlers() -> Router:
             )
 
             template_service = TemplateService()
-            await _show_template_selection(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
@@ -567,8 +568,8 @@ def setup_participants_handlers() -> Router:
 
             await callback.answer("✅ Список сохранен и будет использован")
 
-            # Возвращаемся к выбору шаблона
-            from src.handlers.message_handlers import _show_template_selection
+            # Переходим к выбору шаблона (шаг 2)
+            from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
             await callback.message.answer(
@@ -577,7 +578,7 @@ def setup_participants_handlers() -> Router:
             )
 
             template_service = TemplateService()
-            await _show_template_selection(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении участников: {e}")
