@@ -135,6 +135,11 @@ def setup_participants_handlers() -> Router:
             await callback.answer()
             await state.set_state(ParticipantsInput.waiting_for_participants)
 
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")]
+            ])
+
             await callback.message.answer(
                 "📝 **Введите список участников**\n\n"
                 "Отправьте список участников текстом (один участник на строку).\n\n"
@@ -144,6 +149,7 @@ def setup_participants_handlers() -> Router:
                 "• `Алексей Смирнов (тестировщик)`\n"
                 "• `Ольга Сидорова`\n\n"
                 "Или отправьте /cancel для отмены.",
+                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
 
@@ -157,6 +163,11 @@ def setup_participants_handlers() -> Router:
         try:
             await callback.answer()
             await state.set_state(ParticipantsInput.waiting_for_participants)
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")]
+            ])
             
             await callback.message.answer(
                 "📎 **Загрузите файл с участниками**\n\n"
@@ -173,6 +184,7 @@ def setup_participants_handlers() -> Router:
                 "Мария Иванова,\n"
                 "```\n\n"
                 "Или отправьте /cancel для отмены.",
+                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
             
@@ -331,8 +343,10 @@ def setup_participants_handlers() -> Router:
                         InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_meeting_info"),
                         InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_meeting_info")
                     ],
-                    [InlineKeyboardButton(text="✏️ Исправить", callback_data="input_new_participants")],
-                    [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_participants")]
+                    [
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
+                        InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")
+                    ]
                 ])
 
                 await message.answer(
@@ -355,8 +369,10 @@ def setup_participants_handlers() -> Router:
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
-                    [InlineKeyboardButton(text="✏️ Исправить", callback_data="input_new_participants")],
-                    [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_participants")]
+                    [
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
+                        InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")
+                    ]
                 ])
 
                 await message.answer(
@@ -424,8 +440,10 @@ def setup_participants_handlers() -> Router:
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
-                    [InlineKeyboardButton(text="✏️ Исправить", callback_data="upload_participants_file")],
-                    [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_participants")]
+                    [
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="upload_participants_file"),
+                        InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")
+                    ]
                 ])
                 
                 await message.answer(
