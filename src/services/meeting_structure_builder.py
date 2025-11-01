@@ -3,6 +3,7 @@
 """
 
 import json
+import re
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 from loguru import logger
@@ -525,7 +526,35 @@ class MeetingStructureBuilder:
                 logger.debug(f"Raw content:\n{content}")
                 logger.debug("=" * 80)
             
-            result = json.loads(content)
+            # Улучшенный парсинг JSON с обработкой ошибок
+            result = None
+            try:
+                # Предварительная очистка content
+                content_cleaned = content.strip()
+                
+                # Прямой парсинг
+                result = json.loads(content_cleaned)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Прямой парсинг JSON не удался для {extraction_type}: {e}")
+                
+                # Попытка извлечь JSON из текста (если LLM обернул его в текст)
+                extracted_json = self._extract_json_from_response(content)
+                if extracted_json:
+                    try:
+                        result = json.loads(extracted_json)
+                        logger.info(f"JSON для {extraction_type} успешно извлечен из текста")
+                    except json.JSONDecodeError as e2:
+                        logger.error(f"Ошибка парсинга извлеченного JSON для {extraction_type}: {e2}")
+                        self._log_json_error_details(content, e2, extraction_type)
+                
+                if result is None:
+                    logger.error(f"Не удалось распарсить JSON ответ от LLM для {extraction_type}")
+                    self._log_json_error_details(content, e, extraction_type)
+                    return {}
+            
+            if not result:
+                logger.warning(f"Пустой результат парсинга для {extraction_type}")
+                return {}
             
             # Логирование распарсенного результата (если включено)
             if settings.llm_debug_log:
@@ -537,6 +566,40 @@ class MeetingStructureBuilder:
         except Exception as e:
             logger.error(f"Ошибка вызова LLM для извлечения {extraction_type}: {e}")
             return {}
+    
+    def _extract_json_from_response(self, text: str) -> Optional[str]:
+        """Извлечь JSON из текста ответа (если LLM обернул JSON в markdown или текст)"""
+        if not text:
+            return None
+        
+        # Ищем JSON в markdown кодовых блоках
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            return json_match.group(1)
+        
+        # Ищем JSON объект напрямую (от первой { до последней })
+        # Используем жадный поиск от первой { до последней }
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if json_match:
+            return json_match.group(0)
+        
+        return None
+    
+    def _log_json_error_details(self, content: str, error: json.JSONDecodeError, extraction_type: str):
+        """Детальное логирование ошибок парсинга JSON"""
+        logger.error(f"=== JSON PARSE ERROR DETAILS ({extraction_type}) ===")
+        logger.error(f"Ошибка: {error}")
+        logger.error(f"Длина content: {len(content)} символов")
+        logger.error(f"Первые 500 символов: {content[:500]}")
+        logger.error(f"Последние 500 символов: {content[-500:]}")
+        
+        # Логируем контекст вокруг ошибки
+        if hasattr(error, 'pos') and error.pos is not None:
+            error_pos = error.pos
+            start = max(0, error_pos - 200)
+            end = min(len(content), error_pos + 200)
+            logger.error(f"Контекст вокруг ошибки (позиция {error_pos}):")
+            logger.error(f"{content[start:end]}")
     
     def _link_entities(
         self,
