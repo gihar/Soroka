@@ -967,6 +967,21 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в quick_smart_selection_callback: {e}")
             await _safe_callback_answer(callback, "❌ Произошла ошибка при выборе умного шаблона")
     
+    @router.callback_query(F.data == "back_to_participants")
+    async def back_to_participants_callback(callback: CallbackQuery, state: FSMContext):
+        """Возврат к выбору участников (шаг 1)"""
+        try:
+            await _safe_callback_answer(callback)
+            
+            # Возвращаемся к выбору участников
+            from src.handlers.message_handlers import _show_participants_selection
+            
+            await _show_participants_selection(callback.message, state)
+            
+        except Exception as e:
+            logger.error(f"Ошибка в back_to_participants_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка при возврате")
+    
     @router.callback_query(F.data == "use_saved_default")
     async def use_saved_default_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик использования сохранённого шаблона по умолчанию"""

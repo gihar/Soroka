@@ -276,6 +276,13 @@ class ParticipantsService:
         
         return True, None
     
+    def _escape_markdown(self, text: str) -> str:
+        """Экранирование специальных символов Markdown"""
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+
     def format_participants_for_display(self, participants: List[Dict[str, str]]) -> str:
         """
         Форматирование списка участников для отображения пользователю
@@ -292,10 +299,12 @@ class ParticipantsService:
             name = participant["name"]
             role = participant.get("role", "")
             
+            escaped_name = self._escape_markdown(name)
             if role:
-                lines.append(f"{i}. {name} — {role}")
+                escaped_role = self._escape_markdown(role)
+                lines.append(f"{i}. {escaped_name} — {escaped_role}")
             else:
-                lines.append(f"{i}. {name}")
+                lines.append(f"{i}. {escaped_name}")
         
         return "\n".join(lines)
     

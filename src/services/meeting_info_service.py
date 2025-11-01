@@ -17,7 +17,7 @@ class MeetingInfoService:
         # Паттерны для различных форматов
         self.patterns = {
             'email_from': r'От:\s*(.+?)(?:\n|$)',
-            'email_to': r'(?:Кому|Копия):\s*(.+?)(?:\n|$)',
+            'email_to': r'(?:Кому|Копия|To):\s*(.+?)(?:\n|$)',
             'email_subject': r'(?:Тема|Subject):\s*(.+?)(?:\n|$)',
             'email_when': r'(?:Когда|When):\s*(.+?)(?:\n|$)',
 
@@ -108,7 +108,7 @@ class MeetingInfoService:
                 ))
 
         # Извлекаем из поля "Кому"
-        to_match = self._find_pattern(text, 'email_to')
+        to_match = self._find_pattern(text, 'email_to') or self._find_pattern(text, 'participants_to')
         if to_match:
             names = self._extract_names_from_list(to_match)
             for name in names:
@@ -260,6 +260,13 @@ class MeetingInfoService:
 
         return None
 
+    def _escape_markdown(self, text: str) -> str:
+        """Экранирование специальных символов Markdown"""
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+
     def _extract_name_from_email_line(self, line: str) -> List[str]:
         """Извлечь все имена из строки (может содержать несколько ФИО через запятую)
         
@@ -285,11 +292,18 @@ class MeetingInfoService:
         return []
 
     def _extract_names_from_list(self, text: str) -> List[str]:
-        """Извлечь имена из списка через точку с запятой"""
+        """Извлечь имена из списка через точку с запятой или запятую"""
         names = []
 
-        # Разделяем по точке с запятой
-        parts = re.split(r';\s*', text)
+        # Определяем разделитель: сначала проверяем точку с запятой, затем запятую
+        if ';' in text:
+            # Разделяем по точке с запятой
+            parts = re.split(r';\s*', text)
+        else:
+            # Разделяем по запятым, учитывая что они находятся вне угловых скобок
+            # Простой подход: разделяем по запятым и пробелам после них
+            # Это работает, так как email-адреса в угловых скобках, а запятая разделителя всегда после закрывающей скобки
+            parts = re.split(r',\s*', text)
 
         for part in parts:
             part = part.strip()
@@ -376,7 +390,8 @@ class MeetingInfoService:
         lines = []
 
         # Тема
-        lines.append(f"📋 **Тема:** {meeting_info.topic}")
+        escaped_topic = self._escape_markdown(meeting_info.topic)
+        lines.append(f"📋 **Тема:** {escaped_topic}")
 
         # Время
         if meeting_info.start_time:
@@ -393,8 +408,10 @@ class MeetingInfoService:
 
             for i, participant in enumerate(meeting_info.participants, 1):
                 marker = "👑" if participant.is_organizer else "•"
-                role_info = f", {participant.role}" if participant.role else ""
-                lines.append(f"  {marker} {participant.name}{role_info}")
+                escaped_name = self._escape_markdown(participant.name)
+                escaped_role = self._escape_markdown(participant.role) if participant.role else ""
+                role_text = f", {escaped_role}" if escaped_role else ""
+                lines.append(f"  {marker} {escaped_name}{role_text}")
 
         return "\n".join(lines)
 

@@ -81,8 +81,8 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
             logger.info(f"Файл сохранен в состояние: file_id={file_obj.file_id}, file_name={file_name}")
             
-            # Показываем шаблоны для выбора
-            await _show_template_selection(message, template_service, state)
+            # Показываем выбор участников (шаг 1)
+            await _show_participants_selection(message, state)
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
@@ -127,7 +127,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 await safe_answer(message, "❌ Не удалось найти корректную ссылку в сообщении.")
                 return
             
-            # Обрабатываем URL
+            # Обрабатываем URL (template_service не нужен на этом этапе)
             await _process_url(message, url, state, template_service)
             
         except Exception as e:
@@ -520,8 +520,41 @@ def _extract_file_info(message: Message) -> tuple:
     return file_obj, file_name, content_type
 
 
-async def _show_template_selection(message: Message, template_service: TemplateService, state: FSMContext = None):
-    """Показать выбор шаблонов"""
+async def _show_participants_selection(message: Message, state: FSMContext = None):
+    """Показать выбор участников (шаг 1)"""
+    try:
+        keyboard_buttons = []
+        
+        # Кнопка 1: Указать участников встречи
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="👥 Указать участников встречи",
+            callback_data="add_participants"
+        )])
+        
+        # Кнопка 2: Пропустить
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="⏭ Пропустить",
+            callback_data="skip_participants"
+        )])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await message.answer(
+            "👥 **Укажите участников встречи:**\n\n"
+            "Вы можете указать список участников для более точного протокола. "
+            "ИИ автоматически сопоставит говорящих с участниками.\n\n"
+            "Если участники не нужны, вы можете пропустить этот шаг.",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при показе выбора участников: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке меню.")
+
+
+async def _show_template_selection_step2(message: Message, template_service: TemplateService, state: FSMContext = None):
+    """Показать выбор шаблонов (шаг 2)"""
     try:
         # Проверяем, есть ли у пользователя шаблон по умолчанию
         from services import UserService
@@ -565,10 +598,10 @@ async def _show_template_selection(message: Message, template_service: TemplateS
             callback_data="select_template_once"
         )])
         
-        # Кнопка 4: Добавить участников встречи
+        # Кнопка 4: Назад (вернуться к выбору участников)
         keyboard_buttons.append([InlineKeyboardButton(
-            text="👥 Указать участников встречи",
-            callback_data="add_participants"
+            text="⬅️ Назад",
+            callback_data="back_to_participants"
         )])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
@@ -577,8 +610,7 @@ async def _show_template_selection(message: Message, template_service: TemplateS
             "📝 **Выберите способ создания протокола:**\n\n"
             "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
             "📋 **По шаблону** - использовать сохранённый шаблон\n"
-            "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки\n"
-            "👥 **Указать участников** - добавить список для замены 'Спикер N' на имена",
+            "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
@@ -659,8 +691,8 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     f"✅ Файл успешно скачан: {original_filename}"
                 )
                 
-                # Показываем шаблоны для выбора
-                await _show_template_selection(message, template_service, state)
+                # Показываем выбор участников (шаг 1)
+                await _show_participants_selection(message, state)
                 
             except FileSizeError as e:
                 from ux.message_builder import MessageBuilder
