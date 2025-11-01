@@ -744,7 +744,18 @@ def _build_user_prompt(
     participants: Optional[List[Dict[str, str]]] = None,
     meeting_structure = None,  # MeetingStructure, но избегаем circular import
 ) -> str:
-    """Формирует пользовательский промпт с контекстом и требованиями к формату."""
+    """
+    Формирует пользовательский промпт с контекстом и требованиями к формату.
+    
+    ВАЖНО: Используется formatted_transcript из diarization_data, который:
+    - Сохраняет последовательность чередования спикеров
+    - Группирует только последовательные реплики одного спикера
+    - Позволяет LLM понять динамику диалога
+    - Экономит токены по сравнению с дублированием исходной транскрипции
+    
+    Исходная транскрипция не включается по умолчанию, но может быть добавлена
+    через settings.include_raw_transcription_in_prompts для отладки проблем с диаризацией.
+    """
     # Блок контекста (с учётом диаризации)
     if diarization_data and diarization_data.get("formatted_transcript"):
         transcription_text = (
@@ -753,9 +764,16 @@ def _build_user_prompt(
             "Дополнительная информация:\n"
             f"- Количество говорящих: {diarization_data.get('total_speakers', 'неизвестно')}\n"
             f"- Список говорящих: {', '.join(diarization_data.get('speakers', []))}\n\n"
-            "Исходная транскрипция (для справки):\n"
-            f"{transcription}\n"
         )
+        
+        # Опционально добавляем исходную транскрипцию для отладки
+        if settings.include_raw_transcription_in_prompts:
+            transcription_text += (
+                "\n═════════════════════════════════════════════════\n"
+                "ИСХОДНАЯ ТРАНСКРИПЦИЯ (ДЛЯ ОТЛАДКИ):\n"
+                "═════════════════════════════════════════════════\n\n"
+                f"{transcription}\n\n"
+            )
     else:
         transcription_text = (
             "Транскрипция:\n"

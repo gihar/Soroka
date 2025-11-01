@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     speaker_mapping_confidence_threshold: float = Field(0.7, description="Порог уверенности для сопоставления спикеров (0.0-1.0)")
     max_participants: int = Field(20, description="Максимальное количество участников в списке")
     llm_debug_log: bool = Field(False, description="Выводить в DEBUG лог все запросы и ответы LLM (генерация протоколов и сопоставление спикеров)")
+    include_raw_transcription_in_prompts: bool = Field(False, description="Включать исходную транскрипцию в промпты вместе с форматированной (для отладки проблем с диаризацией, увеличивает расход токенов)")
     full_text_matching: bool = Field(False, description="Использовать полный текст транскрипции для сопоставления участников (увеличивает расход токенов)")
     enable_speaker_mapping_confirmation: bool = Field(False, description="Показывать UI для подтверждения сопоставления спикеров перед генерацией протокола")
     

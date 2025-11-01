@@ -14,6 +14,7 @@ from config import settings
 
 from src.models.processing import TranscriptionResult
 from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, DeepgramAPIError
+from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
 # Используем прямой HTTP API вместо SDK для избежания проблем с Pydantic валидацией
 DEEPGRAM_AVAILABLE = True
@@ -164,7 +165,16 @@ class DeepgramService:
             raise CloudTranscriptionError(str(e), file_path, "deepgram")
     
     def _process_transcript_result(self, response_data: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
-        """Обработать результат транскрипции от Deepgram (работа с сырым JSON)"""
+        """
+        Обработать результат транскрипции от Deepgram (работа с сырым JSON)
+        
+        ВАЖНО: При создании formatted_transcript сохраняется последовательность реплик.
+        Группируются только последовательные utterances одного спикера, чтобы LLM
+        мог понять динамику диалога и чередование участников.
+        
+        Формат: SPEAKER_1: текст\n\nSPEAKER_2: текст\n\nSPEAKER_1: текст
+        (не: SPEAKER_1: весь текст\n\nSPEAKER_2: весь текст)
+        """
         
         # Извлекаем основной текст
         transcription_text = ""
@@ -216,13 +226,9 @@ class DeepgramService:
                 
                 speakers_list = list(speaker_labels.values())
                 
-                # Создаем форматированную транскрипцию
-                formatted_lines = []
-                for speaker in speakers_list:
-                    speaker_text = speakers_text.get(speaker, "").strip()
-                    if speaker_text:
-                        formatted_lines.append(f"{speaker}: {speaker_text}")
-                formatted_transcript = "\n\n".join(formatted_lines)
+                # Создаем форматированную транскрипцию с сохранением последовательности реплик
+                # Используем утилиту, которая группирует только последовательные реплики одного спикера
+                formatted_transcript = format_transcript_with_speaker_sequence(segments)
                 
                 # Создаем сводку о говорящих
                 speakers_summary = f"Общее количество говорящих: {len(speakers_list)}\n\n"
