@@ -1721,7 +1721,35 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             await mapping_state_cache.clear_state(user_id_from_callback)
             
         except Exception as e:
-            logger.error(f"Ошибка в speaker_mapping_confirm_callback: {e}", exc_info=True)
+            # Расширенное логирование ошибки
+            logger.error(f"❌ Ошибка в speaker_mapping_confirm_callback")
+            logger.error(f"Тип ошибки: {type(e).__name__}")
+            logger.error(f"Детали: {e}")
+            
+            # Логируем контекст callback
+            try:
+                if 'user_id_from_callback' in locals():
+                    logger.error(f"Контекст callback:")
+                    logger.error(f"  - User ID: {user_id_from_callback}")
+                    logger.error(f"  - Chat ID: {callback.message.chat.id}")
+                    logger.error(f"  - Callback data: {callback.data}")
+                    
+                    # Пытаемся загрузить состояние для дополнительного контекста
+                    try:
+                        from src.services.mapping_state_cache import mapping_state_cache
+                        state_data = await mapping_state_cache.load_state(user_id_from_callback)
+                        if state_data:
+                            request_data = state_data.get('request_data', {})
+                            logger.error(f"  - LLM провайдер: {request_data.get('llm_provider', 'unknown')}")
+                            logger.error(f"  - Файл: {request_data.get('file_name', 'unknown')}")
+                    except Exception as state_error:
+                        logger.warning(f"Не удалось получить дополнительный контекст: {state_error}")
+            except Exception as log_error:
+                logger.warning(f"Ошибка при логировании контекста: {log_error}")
+            
+            # Полный traceback
+            logger.error("Полный traceback:", exc_info=True)
+            
             await safe_edit_text(
                 callback.message,
                 "❌ Произошла ошибка при продолжении обработки.\n\n"

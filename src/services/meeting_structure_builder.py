@@ -16,6 +16,7 @@ from src.models.meeting_structure import (
 )
 from config import settings
 from src.models.llm_schemas import get_schema_by_type
+from llm_providers import safe_json_parse
 
 
 class MeetingStructureBuilder:
@@ -613,32 +614,13 @@ class MeetingStructureBuilder:
                 logger.debug(f"Raw content:\n{content}")
                 logger.debug("=" * 80)
             
-            # Улучшенный парсинг JSON с обработкой ошибок
-            result = None
+            # Улучшенный парсинг JSON с использованием safe_json_parse
             try:
-                # Предварительная очистка content
-                content_cleaned = content.strip()
-                
-                # Прямой парсинг
-                result = json.loads(content_cleaned)
-            except json.JSONDecodeError as e:
-                logger.error(f"Прямой парсинг JSON не удался для {extraction_type}: {e}")
-                logger.error(f"Полный ответ ({len(content)} символов): {content}")
-                
-                # Попытка извлечь JSON из текста (если LLM обернул его в текст)
-                extracted_json = self._extract_json_from_response(content)
-                if extracted_json:
-                    try:
-                        result = json.loads(extracted_json)
-                        logger.info(f"JSON для {extraction_type} успешно извлечен из текста")
-                    except json.JSONDecodeError as e2:
-                        logger.error(f"Ошибка парсинга извлеченного JSON для {extraction_type}: {e2}")
-                        self._log_json_error_details(content, e2, extraction_type)
-                
-                if result is None:
-                    logger.error(f"Не удалось распарсить JSON ответ от LLM для {extraction_type}")
-                    self._log_json_error_details(content, e, extraction_type)
-                    return {}
+                result = safe_json_parse(content, context=f"MeetingStructureBuilder extraction ({extraction_type})")
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.error(f"❌ Не удалось распарсить JSON ответ от LLM для {extraction_type}: {e}")
+                self._log_json_error_details(content, e, extraction_type)
+                return {}
             
             if not result:
                 logger.warning(f"Пустой результат парсинга для {extraction_type}")

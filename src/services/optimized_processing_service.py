@@ -727,7 +727,26 @@ class OptimizedProcessingService(BaseProcessingService):
         except json.JSONDecodeError as e:
             # Некритичная ошибка парсинга JSON - НЕ очищаем состояние
             error_msg = f"Ошибка парсинга JSON: {str(e)}"
-            logger.error(f"⚠️ Некритичная ошибка для пользователя {user_id}: {error_msg}", exc_info=True)
+            
+            # Расширенное логирование с контекстом
+            logger.error(f"⚠️ Некритичная ошибка парсинга JSON для пользователя {user_id}")
+            logger.error(f"Детали ошибки: {error_msg}")
+            
+            # Логируем контекст из состояния если доступен
+            try:
+                state_data = await mapping_state_cache.load_state(user_id)
+                if state_data:
+                    request_data = state_data.get('request_data', {})
+                    logger.error(f"Контекст обработки:")
+                    logger.error(f"  - LLM провайдер: {request_data.get('llm_provider', 'unknown')}")
+                    logger.error(f"  - Шаблон ID: {request_data.get('template_id', 'unknown')}")
+                    logger.error(f"  - Файл: {request_data.get('file_name', 'unknown')}")
+                    logger.error(f"  - Участники: {len(request_data.get('participants_list', []))} чел.")
+            except Exception as log_error:
+                logger.warning(f"Не удалось получить контекст из состояния: {log_error}")
+            
+            # Логируем полный traceback
+            logger.error("Полный traceback:", exc_info=True)
             
             # НЕ очищаем состояние - пользователь может повторить попытку
             

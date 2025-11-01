@@ -7,7 +7,7 @@ import asyncio
 from typing import Any, Dict, List, Optional, Set
 from loguru import logger
 
-from llm_providers import llm_manager
+from llm_providers import llm_manager, safe_json_parse
 from config import settings
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
@@ -350,7 +350,7 @@ class SpeakerMappingService:
         # Формируем секцию о спикерах отдельно (избегаем обратный слэш в f-string выражении)
         speakers_section = f"ИНФОРМАЦИЯ О СПИКЕРАХ ИЗ ДИАРИЗАЦИИ:{speakers_str}\n\n" if speakers_str else ""
         
-        prompt = f"""Ты — эксперт по анализу встреч и диалогов. Твоя задача — сопоставить говорящих (Спикер 1, Спикер 2, и т.д.) с реальными участниками встречи.
+        prompt = f"""Ты — эксперт по анализу встреч и диалогов. Твоя задача — сопоставить говорящих (SPEAKER_1, SPEAKER_2, и т.д.) с реальными участниками встречи.
 
 УЧАСТНИКИ С РОЛЕВЫМ КОНТЕКСТОМ:
 {participants_str}
@@ -592,45 +592,12 @@ class SpeakerMappingService:
                     logger.debug(f"Raw content:\n{content}")
                     logger.debug("=" * 80)
                 
-                # Парсим JSON с улучшенной обработкой ошибок
-                result = None
-                
+                # Парсим JSON с использованием safe_json_parse
                 try:
-                    # Прямой парсинг
-                    result = json.loads(content)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Прямой парсинг JSON не удался: {e}. Попытка извлечь JSON из текста...")
-                    
-                    # Попытка извлечь JSON из текста
-                    extracted_json = self._extract_json_from_text(content)
-                    if extracted_json:
-                        try:
-                            result = json.loads(extracted_json)
-                            logger.info("JSON успешно извлечен из текста")
-                        except json.JSONDecodeError as e2:
-                            logger.error(f"Ошибка парсинга извлеченного JSON: {e2}")
-                            logger.error(f"Извлеченный JSON (первые 500 символов): {extracted_json[:500]}")
-                            logger.error(f"Полный content (первые 1000 символов): {content[:1000]}")
-                            if len(content) > 1000:
-                                logger.error(f"... (всего {len(content)} символов)")
-                    
-                    if result is None:
-                        # Если все попытки не удались, логируем детальную информацию
-                        logger.error(f"Не удалось распарсить JSON ответа от LLM")
-                        logger.error(f"Ошибка: {e}")
-                        logger.error(f"Длина content: {len(content)} символов")
-                        logger.error(f"Первые 500 символов content: {content[:500]}")
-                        logger.error(f"Последние 500 символов content: {content[-500:]}")
-                        
-                        # Попробуем найти примерную позицию ошибки
-                        if hasattr(e, 'pos') and e.pos is not None:
-                            error_pos = e.pos
-                            start = max(0, error_pos - 100)
-                            end = min(len(content), error_pos + 100)
-                            logger.error(f"Контекст вокруг ошибки (позиция {error_pos}):")
-                            logger.error(f"  ...{content[start:end]}...")
-                        
-                        return {}
+                    result = safe_json_parse(content, context="SpeakerMappingService LLM response")
+                except (ValueError, json.JSONDecodeError) as e:
+                    logger.error(f"❌ Не удалось распарсить JSON ответа от LLM для маппинга спикеров: {e}")
+                    return {}
                 
                 # Краткое резюме результата (если включено логирование)
                 if settings.llm_debug_log:
