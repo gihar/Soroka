@@ -707,25 +707,111 @@ class OptimizedProcessingService(BaseProcessingService):
             
             return result
             
-        except Exception as e:
-            logger.error(f"❌ Ошибка при продолжении обработки для пользователя {user_id}: {e}", exc_info=True)
+        except ProcessingError as e:
+            # Критичная ошибка обработки (состояние истекло, шаблон не найден и т.д.)
+            logger.error(f"❌ Критичная ошибка обработки для пользователя {user_id}: {e}", exc_info=True)
             
-            # Очищаем состояние при ошибке
+            # Очищаем состояние при критичной ошибке
             await mapping_state_cache.clear_state(user_id)
             
             # Отправляем сообщение об ошибке
             await safe_send_message(
                 bot=bot,
                 chat_id=chat_id,
-                text=f"❌ Произошла ошибка при продолжении обработки:\n\n{str(e)}\n\n"
-                     f"Пожалуйста, попробуйте начать обработку заново."
+                text=f"❌ Произошла критичная ошибка:\n\n{str(e)}\n\n"
+                     f"Пожалуйста, начните обработку заново."
+            )
+            
+            raise
+            
+        except json.JSONDecodeError as e:
+            # Некритичная ошибка парсинга JSON - НЕ очищаем состояние
+            error_msg = f"Ошибка парсинга JSON: {str(e)}"
+            logger.error(f"⚠️ Некритичная ошибка для пользователя {user_id}: {error_msg}", exc_info=True)
+            
+            # НЕ очищаем состояние - пользователь может повторить попытку
+            
+            # Отправляем сообщение с предложением повторить
+            await safe_send_message(
+                bot=bot,
+                chat_id=chat_id,
+                text=f"⚠️ Произошла временная ошибка при обработке:\n\n{error_msg}\n\n"
+                     f"Это может быть связано с проблемами API. "
+                     f"Ваше состояние сохранено - вы можете повторить попытку через кнопку подтверждения."
             )
             
             raise ProcessingError(
-                f"Ошибка продолжения обработки: {str(e)}",
+                f"Ошибка парсинга ответа: {str(e)}",
                 "unknown",
-                "continuation_error"
+                "json_parse_error"
             )
+            
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            # Timeout - НЕ очищаем состояние
+            error_msg = "Превышено время ожидания ответа от сервиса"
+            logger.error(f"⚠️ Timeout для пользователя {user_id}: {e}", exc_info=True)
+            
+            # НЕ очищаем состояние - пользователь может повторить попытку
+            
+            await safe_send_message(
+                bot=bot,
+                chat_id=chat_id,
+                text=f"⚠️ {error_msg}\n\n"
+                     f"Ваше состояние сохранено - попробуйте повторить через минуту."
+            )
+            
+            raise ProcessingError(
+                error_msg,
+                "unknown",
+                "timeout_error"
+            )
+            
+        except Exception as e:
+            # Неизвестная ошибка - определяем, критична ли она
+            error_type = type(e).__name__
+            error_msg = str(e).lower()
+            
+            # Проверяем признаки некритичных ошибок API
+            is_api_error = any(pattern in error_msg for pattern in [
+                'rate limit', 'quota', 'service unavailable', 
+                'connection', 'timeout', 'network'
+            ])
+            
+            if is_api_error:
+                # Некритичная API ошибка - НЕ очищаем состояние
+                logger.error(f"⚠️ API ошибка для пользователя {user_id} ({error_type}): {e}", exc_info=True)
+                
+                await safe_send_message(
+                    bot=bot,
+                    chat_id=chat_id,
+                    text=f"⚠️ Временная проблема с API:\n\n{str(e)}\n\n"
+                         f"Ваше состояние сохранено - попробуйте повторить через несколько минут."
+                )
+                
+                raise ProcessingError(
+                    f"API ошибка: {str(e)}",
+                    "unknown",
+                    "api_error"
+                )
+            else:
+                # Неизвестная критичная ошибка - очищаем состояние
+                logger.error(f"❌ Неожиданная ошибка для пользователя {user_id} ({error_type}): {e}", exc_info=True)
+                
+                # Очищаем состояние при неизвестной ошибке
+                await mapping_state_cache.clear_state(user_id)
+                
+                await safe_send_message(
+                    bot=bot,
+                    chat_id=chat_id,
+                    text=f"❌ Произошла непредвиденная ошибка:\n\n{error_type}: {str(e)}\n\n"
+                         f"Пожалуйста, начните обработку заново."
+                )
+                
+                raise ProcessingError(
+                    f"Неожиданная ошибка: {str(e)}",
+                    "unknown",
+                    "unexpected_error"
+                )
     
     async def _suggest_template_if_needed(
         self,
@@ -958,9 +1044,15 @@ class OptimizedProcessingService(BaseProcessingService):
                     if diarization_analysis:
                         meeting_type = diarization_analysis.get('meeting_type', 'general')
                     
+                    # Выбираем транскрипцию: форматированную если есть диаризация, иначе исходную
+                    transcription_for_structure = transcription_result.transcription
+                    if diarization_data_raw and diarization_data_raw.get('formatted_transcript'):
+                        transcription_for_structure = diarization_data_raw['formatted_transcript']
+                        logger.info("Используем форматированную транскрипцию для построения структуры")
+                    
                     # Строим структуру
                     meeting_structure = await structure_builder.build_from_transcription(
-                        transcription=transcription_result.transcription,
+                        transcription=transcription_for_structure,
                         diarization_analysis=diarization_analysis,
                         meeting_type=meeting_type,
                         language=request.language
@@ -986,10 +1078,33 @@ class OptimizedProcessingService(BaseProcessingService):
                         structure_cache_key = f"structure:{transcription_hash}"
                         await performance_cache.set(structure_cache_key, meeting_structure.to_dict(), cache_type="meeting_structure")
                     
-                except Exception as e:
-                    logger.error(f"Ошибка построения структуры встречи: {e}", exc_info=True)
-                    # Продолжаем без структуры
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        f"❌ Ошибка парсинга JSON при построении структуры встречи: {e}",
+                        exc_info=True
+                    )
+                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
                     meeting_structure = None
+                    # Записываем информацию об ошибке в метрики
+                    processing_metrics.structure_building_duration = time.time() - structure_start_time
+                    processing_metrics.topics_extracted = 0
+                    processing_metrics.decisions_extracted = 0
+                    processing_metrics.actions_extracted = 0
+                    processing_metrics.structure_validation_passed = False
+                except Exception as e:
+                    error_type = type(e).__name__
+                    logger.error(
+                        f"❌ Неожиданная ошибка при построении структуры встречи ({error_type}): {e}",
+                        exc_info=True
+                    )
+                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
+                    meeting_structure = None
+                    # Записываем информацию об ошибке в метрики
+                    processing_metrics.structure_building_duration = time.time() - structure_start_time
+                    processing_metrics.topics_extracted = 0
+                    processing_metrics.decisions_extracted = 0
+                    processing_metrics.actions_extracted = 0
+                    processing_metrics.structure_validation_passed = False
             
             # Выбираем метод генерации: Chain-of-Thought > Двухэтапный > Стандартный
             # Проверяем необходимость Chain-of-Thought для длинных встреч

@@ -39,15 +39,50 @@ class MeetingStructureBuilder:
         Построить структуру встречи из транскрипции
         
         Args:
-            transcription: Текст транскрипции
+            transcription: Текст транскрипции. Рекомендуется передавать форматированную
+                          транскрипцию с разметкой спикеров (formatted_transcript)
+                          для лучшего понимания контекста "кто что сказал"
             diarization_analysis: Результат анализа диаризации
             meeting_type: Тип встречи
             language: Язык
             
         Returns:
             MeetingStructure
+            
+        Note:
+            Если передана форматированная транскрипция с метками спикеров
+            (SPEAKER_1: текст\n\nSPEAKER_2: текст), LLM сможет лучше определить:
+            - Инициаторов решений
+            - Ответственных за задачи
+            - Участников обсуждения каждой темы
         """
         logger.info("Начало построения структуры встречи")
+        
+        # Проверка размера транскрипции
+        MAX_TRANSCRIPTION_LENGTH = 400000  # ~100k токенов (1 токен ≈ 4 символа)
+        transcription_length = len(transcription)
+        
+        if transcription_length > MAX_TRANSCRIPTION_LENGTH:
+            logger.warning(
+                f"⚠️ Транскрипция слишком большая для структурирования: "
+                f"{transcription_length} символов (максимум {MAX_TRANSCRIPTION_LENGTH})"
+            )
+            logger.info("Пропускаем структурирование и возвращаем базовую структуру")
+            
+            # Возвращаем минимальную структуру без LLM обработки
+            metadata = self._build_metadata(
+                transcription, diarization_analysis, meeting_type, language
+            )
+            
+            return MeetingStructure(
+                metadata=metadata,
+                speakers={},
+                topics=[],
+                decisions=[],
+                action_items=[]
+            )
+        
+        logger.info(f"Размер транскрипции: {transcription_length} символов (в пределах лимита)")
         
         # 1. Построение метаданных
         metadata = self._build_metadata(
@@ -337,17 +372,27 @@ class MeetingStructureBuilder:
     ) -> str:
         """Построить промпт для извлечения тем"""
         
+        has_speaker_labels = "SPEAKER_" in transcription or "Спикер" in transcription
+        speaker_note = ""
+        if has_speaker_labels:
+            speaker_note = """
+ПРИМЕЧАНИЕ: Транскрипция содержит метки спикеров (SPEAKER_1, SPEAKER_2 и т.д.).
+Используй эти метки для определения участников обсуждения каждой темы.
+"""
+        
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все обсуждаемые темы.
 
 ТРАНСКРИПЦИЯ:
 {transcription}
+
+{speaker_note}
 
 ЗАДАЧА:
 Извлеки все темы, которые обсуждались на встрече. Для каждой темы определи:
 1. Название темы (краткое и точное)
 2. Описание (что конкретно обсуждалось)
 3. Ключевые моменты обсуждения (главные идеи)
-4. Участники обсуждения (если известны ID спикеров)
+4. Участники обсуждения (используй ID спикеров из транскрипции: SPEAKER_1, SPEAKER_2 и т.д.)
 
 ФОРМАТ ОТВЕТА:
 Верни JSON в формате:
@@ -357,7 +402,7 @@ class MeetingStructureBuilder:
             "title": "Название темы",
             "description": "Описание",
             "key_points": ["Пункт 1", "Пункт 2"],
-            "participants": ["Спикер 1", "Спикер 2"],
+            "participants": ["SPEAKER_1", "SPEAKER_2"],
             "sentiment": "positive/neutral/negative"
         }}
     ]
@@ -375,6 +420,14 @@ class MeetingStructureBuilder:
         """Построить промпт для извлечения решений"""
         
         speakers_info = ", ".join(speakers.keys()) if speakers else "не указаны"
+        has_speaker_labels = "SPEAKER_" in transcription or "Спикер" in transcription
+        
+        speaker_note = ""
+        if has_speaker_labels:
+            speaker_note = """
+ПРИМЕЧАНИЕ: Транскрипция содержит метки спикеров. Используй их для точного
+определения того, КТО принял каждое решение, основываясь на контексте диалога.
+"""
         
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все принятые решения.
 
@@ -384,11 +437,13 @@ class MeetingStructureBuilder:
 УЧАСТНИКИ:
 {speakers_info}
 
+{speaker_note}
+
 ЗАДАЧА:
 Извлеки все решения, которые были приняты на встрече. Для каждого решения определи:
 1. Текст решения (что именно решили)
 2. Контекст (почему это решение было принято)
-3. Кто принял решение (ID спикеров из списка участников)
+3. Кто принял решение (ID спикеров: SPEAKER_1, SPEAKER_2 и т.д.)
 4. Приоритет: high/medium/low
 
 ФОРМАТ ОТВЕТА:
@@ -398,8 +453,8 @@ class MeetingStructureBuilder:
         {{
             "text": "Текст решения",
             "context": "Контекст",
-            "decision_makers": ["Спикер 1"],
-            "mentioned_speakers": ["Спикер 2"],
+            "decision_makers": ["SPEAKER_1"],
+            "mentioned_speakers": ["SPEAKER_2"],
             "priority": "high"
         }}
     ]
@@ -417,6 +472,15 @@ class MeetingStructureBuilder:
         """Построить промпт для извлечения задач"""
         
         speakers_info = ", ".join(speakers.keys()) if speakers else "не указаны"
+        has_speaker_labels = "SPEAKER_" in transcription or "Спикер" in transcription
+        
+        speaker_note = ""
+        if has_speaker_labels:
+            speaker_note = """
+ПРИМЕЧАНИЕ: Транскрипция содержит метки спикеров. Используй их для точного
+определения того, КОМУ назначена каждая задача, основываясь на контексте диалога.
+Ответственный - это тот, кто взял задачу на себя или кому её поручили.
+"""
         
         prompt = f"""Проанализируй транскрипцию встречи и извлеки все задачи и поручения.
 
@@ -426,10 +490,12 @@ class MeetingStructureBuilder:
 УЧАСТНИКИ:
 {speakers_info}
 
+{speaker_note}
+
 ЗАДАЧА:
 Извлеки все задачи, поручения и действия, которые нужно выполнить. Для каждой задачи определи:
 1. Описание задачи (что нужно сделать)
-2. Ответственный (ID спикера из списка участников или имя)
+2. Ответственный (ID спикера: SPEAKER_1, SPEAKER_2 и т.д.)
 3. Срок выполнения (если упомянут)
 4. Приоритет: critical/high/medium/low
 5. Контекст задачи
@@ -440,8 +506,8 @@ class MeetingStructureBuilder:
     "action_items": [
         {{
             "description": "Описание задачи",
-            "assignee": "Спикер 1",
-            "assignee_name": "Иван",
+            "assignee": "SPEAKER_1",
+            "assignee_name": null,
             "deadline": "до конца недели",
             "priority": "high",
             "context": "В рамках проекта X"
@@ -518,6 +584,27 @@ class MeetingStructureBuilder:
             response = await _call_openai()
             content = response.choices[0].message.content
             
+            # Валидация ответа перед парсингом
+            if content is None:
+                logger.error(f"Получен None в качестве ответа от LLM для {extraction_type}")
+                return {}
+            
+            if not content or len(content.strip()) == 0:
+                logger.error(f"Получен пустой ответ от LLM для {extraction_type}")
+                return {}
+            
+            # Проверка на HTML (признак ошибки API)
+            if content.strip().startswith('<!DOCTYPE') or content.strip().startswith('<html'):
+                logger.error(f"Получен HTML вместо JSON для {extraction_type}")
+                logger.error(f"Первые 500 символов ответа: {content[:500]}")
+                return {}
+            
+            # Проверка на текстовые сообщения об ошибках
+            if any(error_pattern in content.lower() for error_pattern in ['error', 'rate limit', 'invalid request', 'service unavailable']):
+                if not content.strip().startswith('{'):
+                    logger.error(f"Получено сообщение об ошибке вместо JSON для {extraction_type}: {content[:200]}")
+                    return {}
+            
             # Логирование ответа (если включено)
             if settings.llm_debug_log:
                 logger.debug("=" * 80)
@@ -535,7 +622,8 @@ class MeetingStructureBuilder:
                 # Прямой парсинг
                 result = json.loads(content_cleaned)
             except json.JSONDecodeError as e:
-                logger.warning(f"Прямой парсинг JSON не удался для {extraction_type}: {e}")
+                logger.error(f"Прямой парсинг JSON не удался для {extraction_type}: {e}")
+                logger.error(f"Полный ответ ({len(content)} символов): {content}")
                 
                 # Попытка извлечь JSON из текста (если LLM обернул его в текст)
                 extracted_json = self._extract_json_from_response(content)
