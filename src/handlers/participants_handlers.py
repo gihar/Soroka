@@ -14,85 +14,81 @@ from src.services.user_service import UserService
 from src.exceptions.file import FileError
 
 
+async def show_participants_menu(message: Message, user_service: UserService):
+    """Helper-функция для показа детального меню добавления участников"""
+    try:
+        # Проверяем, есть ли сохраненный список у пользователя
+        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        
+        keyboard_buttons = []
+        
+        # Кнопка для ввода нового списка
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="✍️ Ввести новый список",
+            callback_data="input_new_participants"
+        )])
+        
+        # Если есть сохраненный список - показываем кнопку
+        if user and user.saved_participants:
+            try:
+                saved = participants_service.participants_from_json(user.saved_participants)
+                if saved:
+                    keyboard_buttons.append([InlineKeyboardButton(
+                        text=f"📋 Использовать сохраненный ({len(saved)} чел.)",
+                        callback_data="use_saved_participants"
+                    )])
+            except Exception:
+                pass
+        
+        # Кнопка для загрузки файла
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="📎 Загрузить файл (.txt, .csv)",
+            callback_data="upload_participants_file"
+        )])
+        
+        # Кнопка автоматического извлечения
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="🔍 Автоматически извлечь из текста",
+            callback_data="auto_extract_meeting_info"
+        )])
+
+        # Кнопка пропуска
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="⏭ Пропустить (без имен)",
+            callback_data="skip_participants"
+        )])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        message_text = (
+            "👥 **Добавление участников встречи**\n\n"
+            "Вы можете указать список участников для более точного протокола. "
+            "ИИ автоматически сопоставит говорящих с участниками.\n\n"
+            "**Способы добавления:**\n\n"
+            "🔍 **Автоматически извлечь** - из email или текста с информацией о встрече\n\n"
+            "📝 **Ручной ввод** - текст или файл:\n"
+            "• Текст (один участник на строку):\n"
+            "  `Иван Петров, менеджер`\n"
+            "  `Мария Иванова`\n\n"
+            "• Файл .txt или .csv\n\n"
+            "Выберите действие:"
+        )
+        
+        await message.answer(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при показе меню участников: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке меню.")
+
+
 def setup_participants_handlers() -> Router:
     """Настройка обработчиков для работы с участниками"""
     router = Router()
     user_service = UserService()
-    
-    @router.callback_query(F.data == "add_participants")
-    async def start_participants_input(callback: CallbackQuery, state: FSMContext):
-        """Начало ввода списка участников"""
-        try:
-            await callback.answer()
-            
-            # Проверяем, есть ли сохраненный список у пользователя
-            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
-            
-            keyboard_buttons = []
-            
-            # Кнопка для ввода нового списка
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="✍️ Ввести новый список",
-                callback_data="input_new_participants"
-            )])
-            
-            # Если есть сохраненный список - показываем кнопку
-            if user and user.saved_participants:
-                try:
-                    saved = participants_service.participants_from_json(user.saved_participants)
-                    if saved:
-                        keyboard_buttons.append([InlineKeyboardButton(
-                            text=f"📋 Использовать сохраненный ({len(saved)} чел.)",
-                            callback_data="use_saved_participants"
-                        )])
-                except Exception:
-                    pass
-            
-            # Кнопка для загрузки файла
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="📎 Загрузить файл (.txt, .csv)",
-                callback_data="upload_participants_file"
-            )])
-            
-            # Кнопка автоматического извлечения
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="🔍 Автоматически извлечь из текста",
-                callback_data="auto_extract_meeting_info"
-            )])
-
-            # Кнопка пропуска
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="⏭ Пропустить (без имен)",
-                callback_data="skip_participants"
-            )])
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-            
-            message_text = (
-                "👥 **Добавление участников встречи**\n\n"
-                "Вы можете указать список участников для более точного протокола. "
-                "ИИ автоматически сопоставит говорящих с участниками.\n\n"
-                "**Способы добавления:**\n\n"
-                "🔍 **Автоматически извлечь** - из email или текста с информацией о встрече\n\n"
-                "📝 **Ручной ввод** - текст или файл:\n"
-                "• Текст (один участник на строку):\n"
-                "  `Иван Петров, менеджер`\n"
-                "  `Мария Иванова`\n\n"
-                "• Файл .txt или .csv\n\n"
-                "Выберите действие:"
-            )
-            
-            await callback.message.answer(
-                message_text,
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка при начале ввода участников: {e}")
-            await callback.message.answer(
-                "❌ Произошла ошибка. Попробуйте еще раз."
-            )
     
     @router.callback_query(F.data == "auto_extract_meeting_info")
     async def prompt_auto_extraction(callback: CallbackQuery, state: FSMContext):
@@ -103,7 +99,6 @@ def setup_participants_handlers() -> Router:
 
             # Создаем клавиатуру с кнопками навигации
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")],
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_participants")]
             ])
 
@@ -136,8 +131,7 @@ def setup_participants_handlers() -> Router:
             await state.set_state(ParticipantsInput.waiting_for_participants)
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")],
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")]
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
 
             await callback.message.answer(
@@ -165,8 +159,7 @@ def setup_participants_handlers() -> Router:
             await state.set_state(ParticipantsInput.waiting_for_participants)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")],
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="add_participants")]
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
             
             await callback.message.answer(
@@ -222,8 +215,7 @@ def setup_participants_handlers() -> Router:
             display_text = participants_service.format_participants_for_display(participants)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")],
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="add_participants")]
+                [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
             ])
             
             await callback.message.answer(
@@ -483,13 +475,8 @@ def setup_participants_handlers() -> Router:
             from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
-            await callback.message.answer(
-                f"✅ Список участников сохранен ({participants_count} чел.)\n\n"
-                f"📝 Теперь выберите способ создания протокола:"
-            )
-
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
@@ -526,13 +513,8 @@ def setup_participants_handlers() -> Router:
             from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
-            await callback.message.answer(
-                f"✅ Список участников сохранен ({participants_count} чел.) и добавлен в избранное\n\n"
-                f"📝 Теперь выберите способ создания протокола:"
-            )
-
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении информации о встрече: {e}")
@@ -553,13 +535,8 @@ def setup_participants_handlers() -> Router:
             from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
-            await callback.message.answer(
-                f"✅ Список участников сохранен ({participants_count} чел.)\n\n"
-                f"📝 Теперь выберите способ создания протокола:"
-            )
-
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
@@ -590,13 +567,8 @@ def setup_participants_handlers() -> Router:
             from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
-            await callback.message.answer(
-                f"✅ Список участников сохранен ({participants_count} чел.) и добавлен в избранное\n\n"
-                f"📝 Теперь выберите способ создания протокола:"
-            )
-
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении участников: {e}")

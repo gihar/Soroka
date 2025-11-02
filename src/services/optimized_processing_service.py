@@ -8,13 +8,14 @@ import os
 import json
 import aiofiles
 from typing import Dict, Any, Optional
+from datetime import datetime
 from loguru import logger
 
 from src.services.base_processing_service import BaseProcessingService
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.exceptions.processing import ProcessingError
 from src.performance.cache_system import performance_cache, cache_transcription, cache_llm_response
-from src.performance.metrics import metrics_collector, PerformanceTimer, performance_timer
+from src.performance.metrics import metrics_collector, PerformanceTimer, performance_timer, ProcessingMetrics
 from src.performance.async_optimization import (
     task_pool, thread_manager, optimized_file_processing,
     OptimizedHTTPClient, async_lru_cache
@@ -358,7 +359,13 @@ class OptimizedProcessingService(BaseProcessingService):
                             },
                             'temp_file_path': temp_file_path,
                             'processing_metrics': {
-                                'total_duration': processing_metrics.total_duration if hasattr(processing_metrics, 'total_duration') else 0
+                                'start_time': processing_metrics.start_time.isoformat() if hasattr(processing_metrics, 'start_time') else datetime.now().isoformat(),
+                                'total_duration': processing_metrics.total_duration if hasattr(processing_metrics, 'total_duration') else 0,
+                                'download_duration': processing_metrics.download_duration if hasattr(processing_metrics, 'download_duration') else 0,
+                                'validation_duration': processing_metrics.validation_duration if hasattr(processing_metrics, 'validation_duration') else 0,
+                                'conversion_duration': processing_metrics.conversion_duration if hasattr(processing_metrics, 'conversion_duration') else 0,
+                                'transcription_duration': processing_metrics.transcription_duration if hasattr(processing_metrics, 'transcription_duration') else 0,
+                                'diarization_duration': processing_metrics.diarization_duration if hasattr(processing_metrics, 'diarization_duration') else 0
                             }
                         })
                         
@@ -606,10 +613,24 @@ class OptimizedProcessingService(BaseProcessingService):
                 chat_id=chat_id
             )
             
-            # Создаем метрики (восстанавливаем частично)
-            processing_metrics = type('Metrics', (), {
-                'total_duration': state_data.get('processing_metrics', {}).get('total_duration', 0)
-            })()
+            # Создаем метрики (восстанавливаем из сохраненного состояния)
+            saved_metrics = state_data.get('processing_metrics', {})
+            processing_metrics = ProcessingMetrics(
+                file_name=request.file_name,
+                user_id=user_id,
+                start_time=datetime.fromisoformat(saved_metrics['start_time']) if saved_metrics.get('start_time') else datetime.now()
+            )
+            # Восстанавливаем длительность этапов, если они были сохранены
+            if 'download_duration' in saved_metrics:
+                processing_metrics.download_duration = saved_metrics['download_duration']
+            if 'validation_duration' in saved_metrics:
+                processing_metrics.validation_duration = saved_metrics['validation_duration']
+            if 'conversion_duration' in saved_metrics:
+                processing_metrics.conversion_duration = saved_metrics['conversion_duration']
+            if 'transcription_duration' in saved_metrics:
+                processing_metrics.transcription_duration = saved_metrics['transcription_duration']
+            if 'diarization_duration' in saved_metrics:
+                processing_metrics.diarization_duration = saved_metrics['diarization_duration']
             
             # Продолжаем с этапа выбора шаблона (если еще не выбран)
             if not request.template_id:
@@ -1324,7 +1345,10 @@ class OptimizedProcessingService(BaseProcessingService):
                 llm_result_data['_validation'] = validation_result.to_dict()
             
             # Логирование сводки по кешированию токенов
-            if settings.log_cache_metrics and processing_metrics.total_cached_tokens > 0:
+            if (settings.log_cache_metrics and 
+                hasattr(processing_metrics, 'total_cached_tokens') and 
+                hasattr(processing_metrics, 'get_cache_summary') and
+                processing_metrics.total_cached_tokens > 0):
                 cache_summary = processing_metrics.get_cache_summary()
                 logger.info("=" * 60)
                 logger.info("📊 Итоговая сводка по кешированию токенов:")
