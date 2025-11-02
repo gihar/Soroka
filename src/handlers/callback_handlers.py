@@ -18,10 +18,12 @@ async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
         await callback.answer(text=text)
     except Exception as e:
         error_str = str(e).lower()
+        # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+        error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
         if "query is too old" in error_str or "query id is invalid" in error_str:
-            logger.debug(f"Callback query устарел: {e}")
+            logger.debug(f"Callback query устарел: {error_msg_safe}")
         else:
-            logger.warning(f"Ошибка ответа на callback: {e}")
+            logger.warning(f"Ошибка ответа на callback: {error_msg_safe}")
 
 
 def setup_callback_handlers(user_service: UserService, template_service: TemplateService,
@@ -1722,9 +1724,14 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
         except Exception as e:
             # Расширенное логирование ошибки
+            import traceback
+            import sys
+            
             logger.error(f"❌ Ошибка в speaker_mapping_confirm_callback")
             logger.error(f"Тип ошибки: {type(e).__name__}")
-            logger.error(f"Детали: {e}")
+            # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
+            logger.error(f"Детали: {error_msg_safe}")
             
             # Логируем контекст callback
             try:
@@ -1747,8 +1754,17 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             except Exception as log_error:
                 logger.warning(f"Ошибка при логировании контекста: {log_error}")
             
-            # Полный traceback
+            # Полный traceback - используем несколько методов для гарантированного вывода
             logger.error("Полный traceback:", exc_info=True)
+            
+            # Дополнительно выводим traceback как строку для надёжности
+            tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+            logger.error("Детальный traceback (построчно):")
+            for line in tb_lines:
+                logger.error(line.rstrip())
+            
+            # Выводим стек вызовов
+            logger.error(f"Стек вызовов: {traceback.format_stack()}")
             
             await safe_edit_text(
                 callback.message,

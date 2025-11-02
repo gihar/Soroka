@@ -636,17 +636,40 @@ class OptimizedProcessingService(BaseProcessingService):
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
             
+            logger.info(f"🔄 Начинаем генерацию протокола для пользователя {user_id}")
+            
             llm_result = await self._optimized_llm_generation(
                 transcription_result, template, request, processing_metrics
             )
+            
+            # Проверяем результат LLM на корректность
+            logger.info(f"✅ LLM генерация завершена. Тип результата: {type(llm_result)}")
+            if llm_result is None:
+                raise ProcessingError(
+                    "LLM вернул пустой результат",
+                    request.file_name,
+                    "llm_empty_result"
+                )
             
             # Форматирование
             with PerformanceTimer("formatting", metrics_collector):
                 processing_metrics.formatting_duration = 0.1
                 
-                protocol_text = self._format_protocol(
-                    template, llm_result, transcription_result
-                )
+                logger.info(f"🔄 Форматирование протокола...")
+                try:
+                    protocol_text = self._format_protocol(
+                        template, llm_result, transcription_result
+                    )
+                    logger.info(f"✅ Протокол отформатирован. Длина: {len(protocol_text)} символов")
+                except Exception as format_error:
+                    logger.error(f"❌ Ошибка форматирования протокола: {format_error}")
+                    logger.error(f"Тип llm_result: {type(llm_result)}")
+                    logger.error(f"Содержимое llm_result (первые 500 символов): {str(llm_result)[:500]}")
+                    raise ProcessingError(
+                        f"Ошибка форматирования протокола: {str(format_error)}",
+                        request.file_name,
+                        "protocol_formatting_error"
+                    )
                 
                 # Применяем замену спикеров на реальные имена
                 if confirmed_mapping:
@@ -710,7 +733,9 @@ class OptimizedProcessingService(BaseProcessingService):
             
         except ProcessingError as e:
             # Критичная ошибка обработки (состояние истекло, шаблон не найден и т.д.)
-            logger.error(f"❌ Критичная ошибка обработки для пользователя {user_id}: {e}", exc_info=True)
+            # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
+            logger.error(f"❌ Критичная ошибка обработки для пользователя {user_id}: {error_msg_safe}", exc_info=True)
             
             # Очищаем состояние при критичной ошибке
             await mapping_state_cache.clear_state(user_id)
@@ -769,7 +794,9 @@ class OptimizedProcessingService(BaseProcessingService):
         except (TimeoutError, asyncio.TimeoutError) as e:
             # Timeout - НЕ очищаем состояние
             error_msg = "Превышено время ожидания ответа от сервиса"
-            logger.error(f"⚠️ Timeout для пользователя {user_id}: {e}", exc_info=True)
+            # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
+            logger.error(f"⚠️ Timeout для пользователя {user_id}: {error_msg_safe}", exc_info=True)
             
             # НЕ очищаем состояние - пользователь может повторить попытку
             
@@ -788,8 +815,18 @@ class OptimizedProcessingService(BaseProcessingService):
             
         except Exception as e:
             # Неизвестная ошибка - определяем, критична ли она
+            import traceback
+            
             error_type = type(e).__name__
-            error_msg = str(e).lower()
+            error_msg = str(e).lower() if e else "unknown error"
+            
+            # Детальное логирование для диагностики
+            logger.error(f"❌ Неожиданное исключение в continue_processing_after_mapping_confirmation")
+            logger.error(f"Тип ошибки: {error_type}")
+            logger.error(f"Сообщение ошибки: {str(e)}")
+            logger.error(f"Полный traceback:")
+            for line in traceback.format_exception(type(e), e, e.__traceback__):
+                logger.error(line.rstrip())
             
             # Проверяем признаки некритичных ошибок API
             is_api_error = any(pattern in error_msg for pattern in [
@@ -799,7 +836,9 @@ class OptimizedProcessingService(BaseProcessingService):
             
             if is_api_error:
                 # Некритичная API ошибка - НЕ очищаем состояние
-                logger.error(f"⚠️ API ошибка для пользователя {user_id} ({error_type}): {e}", exc_info=True)
+                # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+                error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
+                logger.error(f"⚠️ API ошибка для пользователя {user_id} ({error_type}): {error_msg_safe}")
                 
                 await safe_send_message(
                     bot=bot,
@@ -815,7 +854,9 @@ class OptimizedProcessingService(BaseProcessingService):
                 )
             else:
                 # Неизвестная критичная ошибка - очищаем состояние
-                logger.error(f"❌ Неожиданная ошибка для пользователя {user_id} ({error_type}): {e}", exc_info=True)
+                # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
+                error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
+                logger.error(f"❌ Неожиданная ошибка для пользователя {user_id} ({error_type}): {error_msg_safe}", exc_info=True)
                 
                 # Очищаем состояние при неизвестной ошибке
                 await mapping_state_cache.clear_state(user_id)
@@ -1239,7 +1280,13 @@ class OptimizedProcessingService(BaseProcessingService):
                 )
                 
                 if not llm_result.success:
-                    raise ProcessingError(f"Ошибка LLM: {llm_result.error}", 
+                    # Безопасный доступ к атрибуту error
+                    error_msg = getattr(llm_result, 'error', None)
+                    if error_msg is None:
+                        error_msg = "Неизвестная ошибка LLM"
+                    elif isinstance(error_msg, Exception):
+                        error_msg = str(error_msg)
+                    raise ProcessingError(f"Ошибка LLM: {error_msg}", 
                                         request.file_name, "llm")
                 
                 llm_result_data = llm_result.result

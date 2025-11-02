@@ -211,14 +211,31 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
         
         Azure OpenAI в strict mode не позволяет включать в required поля с additionalProperties
         (т.е. поля типа Dict[str, T]). Такие поля должны быть опциональными.
+        Также Azure требует явно установить additionalProperties: false для всех Dict полей.
         """
         if "properties" in schema_dict:
             required_fields = []
             for prop_name, prop_schema in schema_dict["properties"].items():
-                # Исключаем поля с additionalProperties (Dict[str, T])
-                # Они должны быть опциональными для Azure OpenAI strict mode
-                if "additionalProperties" not in prop_schema:
+                # Azure OpenAI требует явно установить additionalProperties: false
+                if "additionalProperties" in prop_schema:
+                    # Устанавливаем additionalProperties: false для Dict полей
+                    prop_schema["additionalProperties"] = False
+                else:
+                    # Поля без additionalProperties добавляем в required
                     required_fields.append(prop_name)
+                
+                # Рекурсивно обрабатываем вложенные объекты
+                if prop_schema.get("type") == "object" and "properties" in prop_schema:
+                    fix_required_fields(prop_schema)
+                
+                # Обрабатываем массивы с вложенными объектами
+                if prop_schema.get("type") == "array" and "items" in prop_schema:
+                    items_schema = prop_schema["items"]
+                    if isinstance(items_schema, dict):
+                        if "additionalProperties" in items_schema:
+                            items_schema["additionalProperties"] = False
+                        if items_schema.get("type") == "object" and "properties" in items_schema:
+                            fix_required_fields(items_schema)
             
             # Устанавливаем required только если есть обязательные поля
             if required_fields:
