@@ -9,6 +9,7 @@ import json
 import aiofiles
 from typing import Dict, Any, Optional
 from datetime import datetime
+from uuid import uuid4
 from loguru import logger
 
 from src.services.base_processing_service import BaseProcessingService
@@ -722,8 +723,6 @@ class OptimizedProcessingService(BaseProcessingService):
             # Отправляем результат пользователю (используем тот же подход, что и в task_queue_manager)
             from src.services.task_queue_manager import TaskQueueManager
             from src.models.task_queue import QueuedTask, TaskPriority
-            from datetime import datetime
-            from uuid import uuid4
             
             task_queue_manager = TaskQueueManager()
             

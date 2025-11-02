@@ -114,15 +114,13 @@ class SynthesisSchema(BaseModel):
 class SpeakerMappingSchema(BaseModel):
     """Схема для сопоставления спикеров с участниками"""
     speaker_mappings: Dict[str, str] = Field(
-        default_factory=dict, 
         description="Сопоставление speaker_id -> participant_name в формате 'Имя Фамилия' (БЕЗ отчества)"
     )
-    confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Уверенность в сопоставлении для каждого спикера")
+    confidence_scores: Dict[str, float] = Field(description="Уверенность в сопоставлении для каждого спикера")
     unmapped_speakers: List[str] = Field(
-        default_factory=list, 
         description="Список speaker_id (например, SPEAKER_3), которых не удалось сопоставить с участниками"
     )
-    mapping_notes: str = Field(default="", description="Заметки по сопоставлению")
+    mapping_notes: str = Field(description="Заметки по сопоставлению")
 
 
 # Промежуточные модели для extraction (без поля id, которое генерируется в коде)
