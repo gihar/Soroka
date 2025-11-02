@@ -1049,6 +1049,9 @@ class OptimizedProcessingService(BaseProcessingService):
                 estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
             
             # Построение структурированного представления встречи (если включено)
+            # ВАЖНО: meeting_structure используется как единственный источник
+            # тем, решений и задач. Повторное извлечение в LLM запросах НЕ выполняется.
+            # Это исключает дублирование и экономит токены.
             meeting_structure = None
             if settings.enable_meeting_structure:
                 try:
@@ -1125,14 +1128,36 @@ class OptimizedProcessingService(BaseProcessingService):
                     processing_metrics.actions_extracted = 0
                     processing_metrics.structure_validation_passed = False
             
-            # Выбираем метод генерации: Chain-of-Thought > Двухэтапный > Стандартный
+            # Выбираем метод генерации: Unified > Chain-of-Thought > Двухэтапный > Стандартный
+            # Unified подход доступен через feature flag для A/B тестирования
             # Проверяем необходимость Chain-of-Thought для длинных встреч
             should_use_cot = segmentation_service.should_use_segmentation(
                 transcription=transcription_result.transcription,
                 estimated_duration_minutes=estimated_duration_minutes
             )
             
-            if should_use_cot and request.llm_provider == 'openai':
+            if settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
+                logger.info("Использование unified генерации протокола (1 запрос с self-reflection)")
+                
+                from llm_providers import generate_protocol_unified
+                
+                llm_result_data = await generate_protocol_unified(
+                    manager=llm_manager,
+                    provider_name=request.llm_provider,
+                    transcription=transcription_result.transcription,
+                    template_variables=template_variables,
+                    diarization_data=diarization_data_raw,
+                    diarization_analysis=diarization_analysis,
+                    meeting_structure=meeting_structure,
+                    openai_model_key=openai_model_key,
+                    speaker_mapping=request.speaker_mapping,
+                    meeting_topic=request.meeting_topic,
+                    meeting_date=request.meeting_date,
+                    meeting_time=request.meeting_time,
+                    participants=request.participants_list
+                )
+                
+            elif should_use_cot and request.llm_provider == 'openai':
                 logger.info("Использование Chain-of-Thought генерации для длинной встречи")
                 
                 # Сегментация транскрипции
@@ -1175,7 +1200,7 @@ class OptimizedProcessingService(BaseProcessingService):
                 )
                 
             elif settings.two_stage_processing and request.llm_provider == 'openai':
-                logger.info("Использование двухэтапной генерации протокола")
+                logger.info("Использование двухэтапной генерации протокола (оптимизированной)")
                 
                 # Двухэтапная генерация
                 llm_result_data = await generate_protocol_two_stage(

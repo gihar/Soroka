@@ -59,6 +59,21 @@ class TwoStageReflectionSchema(BaseModel):
         extra = "forbid"
 
 
+class UnifiedProtocolSchema(BaseModel):
+    """Схема для unified подхода: извлечение + self-reflection в одном запросе"""
+    protocol_data: Dict[str, str] = Field(default_factory=dict, description="Извлеченные данные протокола (ключ=переменная шаблона, значение=строка)")
+    self_reflection: Dict[str, Any] = Field(default_factory=dict, description="Самопроверка модели")
+    confidence_score: float = Field(default=0.0, description="Общая уверенность (0.0-1.0)")
+    quality_notes: str = Field(default="", description="Заметки по качеству")
+    detected_speaker_mapping: Optional[Dict[str, str]] = Field(default=None, description="Автоопределенное сопоставление SPEAKER_N с именами участников")
+    speaker_confidence_scores: Optional[Dict[str, float]] = Field(default=None, description="Уверенность в сопоставлении для каждого спикера")
+    unmapped_speakers: Optional[List[str]] = Field(default=None, description="Спикеры которых не удалось сопоставить")
+    mapping_notes: Optional[str] = Field(default=None, description="Заметки по автоопределению участников")
+    
+    class Config:
+        extra = "forbid"
+
+
 class SegmentSchema(BaseModel):
     """Схема для обработки одного сегмента транскрипции"""
     segment_data: Dict[str, str] = Field(default_factory=dict, description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
@@ -218,6 +233,7 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
 PROTOCOL_SCHEMA = get_json_schema(ProtocolSchema)
 TWO_STAGE_EXTRACTION_SCHEMA = get_json_schema(TwoStageExtractionSchema)
 TWO_STAGE_REFLECTION_SCHEMA = get_json_schema(TwoStageReflectionSchema)
+UNIFIED_PROTOCOL_SCHEMA = get_json_schema(UnifiedProtocolSchema)
 SEGMENT_SCHEMA = get_json_schema(SegmentSchema)
 SYNTHESIS_SCHEMA = get_json_schema(SynthesisSchema)
 SPEAKER_MAPPING_SCHEMA = get_json_schema(SpeakerMappingSchema)
@@ -240,6 +256,7 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'protocol': PROTOCOL_SCHEMA,
         'two_stage_extraction': TWO_STAGE_EXTRACTION_SCHEMA,
         'two_stage_reflection': TWO_STAGE_REFLECTION_SCHEMA,
+        'unified_protocol': UNIFIED_PROTOCOL_SCHEMA,
         'segment': SEGMENT_SCHEMA,
         'synthesis': SYNTHESIS_SCHEMA,
         'speaker_mapping': SPEAKER_MAPPING_SCHEMA,

@@ -32,6 +32,13 @@ from src.models.llm_schemas import (
     SEGMENT_SCHEMA, SYNTHESIS_SCHEMA
 )
 
+# Импорт утилит для оптимизации контекста
+from src.utils.context_extraction import (
+    extract_relevant_excerpts,
+    build_structure_summary,
+    add_prompt_caching_markers
+)
+
 if TYPE_CHECKING:
     from src.services.segmentation_service import TranscriptionSegment
 
@@ -1732,8 +1739,21 @@ def _build_reflection_prompt(
 ) -> str:
     """
     Промпт для второго этапа: проверка и улучшение
+    ОПТИМИЗИРОВАНО: использует релевантные фрагменты вместо полной транскрипции
     """
+    from src.utils.context_extraction import extract_relevant_excerpts
+    
     extracted_json = json.dumps(extracted_data, ensure_ascii=False, indent=2)
+    
+    # Сокращаем контекст - используем только релевантные фрагменты
+    max_context_tokens = settings.max_context_tokens_stage2
+    relevant_context = extract_relevant_excerpts(
+        transcription,
+        extracted_data,
+        max_tokens=max_context_tokens
+    )
+    
+    logger.info(f"Stage 2: сокращен контекст с {len(transcription)} до {len(relevant_context)} символов")
     
     # Добавляем анализ диаризации если есть
     diarization_context = ""
@@ -1752,8 +1772,8 @@ def _build_reflection_prompt(
 {extracted_json}
 {diarization_context}
 
-ИСХОДНАЯ ТРАНСКРИПЦИЯ:
-{transcription}
+РЕЛЕВАНТНЫЕ ФРАГМЕНТЫ ТРАНСКРИПЦИИ:
+{relevant_context}
 
 
 ЗАДАЧА:
@@ -2197,6 +2217,280 @@ async def generate_protocol_two_stage(
         return await manager.generate_protocol(
             provider_name, transcription, template_variables, diarization_data, **kwargs
         )
+
+
+# ===================================================================
+# UNIFIED PROTOCOL GENERATION (ОПТИМИЗИРОВАННЫЙ ПОДХОД)
+# ===================================================================
+
+def _build_unified_prompt(
+    transcription: Optional[str],
+    structure_summary: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    meeting_topic: Optional[str] = None,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None,
+    participants: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """
+    Построить промпт для unified подхода
+    """
+    
+    # Контекст встречи
+    context_parts = []
+    
+    if meeting_topic:
+        context_parts.append(f"Тема встречи: {meeting_topic}")
+    if meeting_date:
+        context_parts.append(f"Дата: {meeting_date}")
+    if meeting_time:
+        context_parts.append(f"Время: {meeting_time}")
+    
+    context_text = "\n".join(context_parts) if context_parts else "Информация о встрече не указана"
+    
+    # Участники
+    participants_text = ""
+    if participants:
+        participants_text = "УЧАСТНИКИ:\n" + "\n".join([
+            f"- {p.get('name', '')} ({p.get('role', 'роль не указана')})"
+            for p in participants
+        ])
+    
+    # Структура встречи (вместо транскрипции)
+    content_text = ""
+    if structure_summary:
+        content_text = f"СТРУКТУРИРОВАННОЕ ПРЕДСТАВЛЕНИЕ ВСТРЕЧИ:\n\n{structure_summary}"
+    elif transcription:
+        # Fallback: используем транскрипцию
+        if diarization_data and diarization_data.get("formatted_transcript"):
+            content_text = f"ТРАНСКРИПЦИЯ С ДИАРИЗАЦИЕЙ:\n\n{diarization_data['formatted_transcript']}"
+        else:
+            content_text = f"ТРАНСКРИПЦИЯ:\n\n{transcription}"
+    
+    # Маппинг спикеров
+    mapping_text = ""
+    if speaker_mapping:
+        mapping_text = "СОПОСТАВЛЕНИЕ СПИКЕРОВ:\n" + "\n".join([
+            f"- {speaker_id} = {name}"
+            for speaker_id, name in speaker_mapping.items()
+        ])
+    
+    # Поля шаблона
+    fields_text = "ПОЛЯ ДЛЯ ЗАПОЛНЕНИЯ:\n" + "\n".join([
+        f"- {field_name}: {field_description}"
+        for field_name, field_description in template_variables.items()
+    ])
+    
+    # Финальный промпт
+    prompt = f"""Ты — эксперт по созданию протоколов встреч. Твоя задача:
+
+1. ИЗВЛЕЧЬ данные из представленной информации о встрече
+2. ЗАПОЛНИТЬ все поля протокола
+3. ПРОВЕРИТЬ свою работу на полноту и точность (self-reflection)
+4. УКАЗАТЬ уровень уверенности и возможные проблемы
+
+{context_text}
+
+{participants_text}
+
+{content_text}
+
+{mapping_text}
+
+{fields_text}
+
+ТРЕБОВАНИЯ:
+- Извлекай ТОЛЬКО фактическую информацию из представленного материала
+- Если структурированное представление содержит темы/решения/задачи, используй их напрямую
+- Каждое поле должно быть заполнено строкой (используй \\n для списков)
+- После извлечения проверь: все ли важные моменты учтены?
+- Укажи уровень confidence_score (0.0-1.0)
+- В quality_notes опиши потенциальные проблемы или неточности
+
+Верни JSON в формате UnifiedProtocolSchema."""
+    
+    return prompt
+
+
+async def generate_protocol_unified(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+    diarization_analysis: Optional[Dict[str, Any]] = None,
+    meeting_structure = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Unified генерация протокола: извлечение + self-reflection в одном запросе
+    
+    Преимущества:
+    - Один запрос вместо двух (Stage 1 + Stage 2)
+    - Модель делает self-reflection в рамках одного контекста
+    - Снижение латентности и стоимости
+    
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера
+        transcription: Текст транскрипции
+        template_variables: Переменные шаблона
+        diarization_data: Данные диаризации
+        diarization_analysis: Анализ диаризации
+        meeting_structure: Структура встречи (используется вместо полной транскрипции)
+        **kwargs: Дополнительные параметры
+        
+    Returns:
+        Протокол
+    """
+    from src.utils.context_extraction import build_structure_summary
+    from src.models.llm_schemas import UNIFIED_PROTOCOL_SCHEMA
+    
+    logger.info("Начало unified генерации протокола")
+    
+    # Извлекаем параметры
+    speaker_mapping = kwargs.get('speaker_mapping')
+    meeting_topic = kwargs.get('meeting_topic')
+    meeting_date = kwargs.get('meeting_date')
+    meeting_time = kwargs.get('meeting_time')
+    participants = kwargs.get('participants')
+    
+    # Используем структуру вместо полной транскрипции
+    structure_summary = ""
+    if meeting_structure and settings.use_structure_only_for_protocol:
+        structure_summary = build_structure_summary(meeting_structure)
+        logger.info(f"Используем meeting_structure (сжато: {len(structure_summary)} символов)")
+    
+    # Строим промпт
+    prompt = _build_unified_prompt(
+        transcription=transcription if not structure_summary else None,
+        structure_summary=structure_summary,
+        template_variables=template_variables,
+        diarization_data=diarization_data,
+        speaker_mapping=speaker_mapping,
+        meeting_topic=meeting_topic,
+        meeting_date=meeting_date,
+        meeting_time=meeting_time,
+        participants=participants
+    )
+    
+    system_prompt = _build_system_prompt(transcription, diarization_analysis)
+    
+    # Вызов OpenAI
+    if provider_name == "openai":
+        provider = manager.providers[provider_name]
+        openai_model_key = kwargs.get("openai_model_key")
+        
+        selected_model = settings.openai_model
+        selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+        
+        if openai_model_key:
+            try:
+                preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                if preset:
+                    selected_model = preset.model
+                    if getattr(preset, 'base_url', None):
+                        selected_base_url = preset.base_url
+            except Exception:
+                pass
+        
+        client = provider.client
+        if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+            import openai
+            client = openai.OpenAI(
+                api_key=settings.openai_api_key,
+                base_url=selected_base_url,
+                http_client=provider.http_client
+            )
+        
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+        
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI REQUEST - Unified Protocol Generation")
+            logger.debug("=" * 80)
+            logger.debug(f"Model: {selected_model}")
+            logger.debug(f"System prompt:\n{system_prompt}")
+            logger.debug("-" * 80)
+            logger.debug(f"User prompt:\n{prompt}")
+            logger.debug("=" * 80)
+        
+        # Вызов с prompt caching (если включено)
+        if settings.enable_prompt_caching and transcription:
+            from src.utils.context_extraction import add_prompt_caching_markers
+            messages = add_prompt_caching_markers(system_prompt, transcription, prompt)
+        else:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+        
+        async def _call_openai():
+            import asyncio
+            import openai
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=messages,
+                temperature=0.1,
+                response_format={"type": "json_schema", "json_schema": UNIFIED_PROTOCOL_SCHEMA},
+                extra_headers=extra_headers
+            )
+        
+        try:
+            response = await _call_openai()
+        except openai.APIStatusError as e:
+            if e.status_code == 402:
+                error_message = e.message
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        error_body = e.response.json()
+                        if 'error' in error_body and 'message' in error_body['error']:
+                            error_message = error_body['error']['message']
+                    except:
+                        pass
+                logger.error(f"Недостаточно кредитов для LLM: {error_message}")
+                raise LLMInsufficientCreditsError(
+                    message=error_message,
+                    provider="openai",
+                    model=selected_model
+                )
+            raise
+        
+        content = response.choices[0].message.content
+        
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - Unified Protocol Generation")
+            logger.debug("=" * 80)
+            if hasattr(response, 'usage'):
+                logger.debug(f"Usage: {response.usage}")
+            logger.debug(f"Content:\n{content}")
+            logger.debug("=" * 80)
+        
+        result = json.loads(content)
+        
+        # Возвращаем protocol_data (для совместимости с существующим кодом)
+        protocol_data = result.get('protocol_data', {})
+        
+        # Добавляем speaker mapping если есть
+        if result.get('detected_speaker_mapping'):
+            protocol_data['detected_speaker_mapping'] = result['detected_speaker_mapping']
+        if result.get('speaker_confidence_scores'):
+            protocol_data['speaker_confidence_scores'] = result['speaker_confidence_scores']
+        
+        logger.info(f"Unified generation завершен, confidence={result.get('confidence_score', 0.0):.2f}")
+        
+        return protocol_data
+    
+    else:
+        raise ValueError(f"Unified подход пока поддерживается только для OpenAI, получен: {provider_name}")
 
 
 # ===================================================================

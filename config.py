@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     structure_extraction_model: Optional[str] = Field(None, description="Модель для извлечения структурированных данных (по умолчанию используется основная модель)")
     cache_meeting_structures: bool = Field(True, description="Кэшировать структурированные представления встреч")
     
+    # Оптимизация LLM пайплайна
+    enable_unified_protocol_generation: bool = Field(False, description="Использовать unified подход (1 запрос вместо Stage 1+2) с self-reflection")
+    enable_prompt_caching: bool = Field(True, description="Использовать prompt caching для OpenAI (экономия токенов)")
+    max_context_tokens_stage2: int = Field(10000, description="Максимальное количество токенов контекста для Stage 2 (используются релевантные фрагменты)")
+    use_structure_only_for_protocol: bool = Field(True, description="Использовать meeting_structure как единственный источник тем/решений/задач (без повторного извлечения)")
+    
     # Сопоставление участников (speaker mapping)
     enable_speaker_mapping: bool = Field(True, description="Включить автоматическое сопоставление спикеров с участниками")
     speaker_mapping_confidence_threshold: float = Field(0.7, description="Порог уверенности для сопоставления спикеров (0.0-1.0)")
