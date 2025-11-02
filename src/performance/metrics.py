@@ -73,6 +73,15 @@ class ProcessingMetrics:
     actions_extracted: int = 0
     structure_validation_passed: bool = False
     
+    # Метрики кеширования токенов
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_cached_tokens: int = 0
+    cache_hit_rate: float = 0.0  # 0.0 - 1.0
+    estimated_cost_without_cache: float = 0.0
+    estimated_cost_with_cache: float = 0.0
+    estimated_cost_saved: float = 0.0
+    
     error_occurred: bool = False
     error_stage: str = ""
     error_message: str = ""
@@ -90,6 +99,51 @@ class ProcessingMetrics:
         if self.total_duration > 0 and self.audio_duration_seconds > 0:
             return self.audio_duration_seconds / self.total_duration
         return 0.0
+    
+    def add_cache_metrics(self, cached_tokens: int, prompt_tokens: int, 
+                         cost_saved: float = 0.0, cost_with: float = 0.0, 
+                         cost_without: float = 0.0):
+        """
+        Добавить метрики кеширования из одного LLM вызова
+        
+        Args:
+            cached_tokens: Количество кешированных токенов
+            prompt_tokens: Общее количество prompt токенов
+            cost_saved: Сэкономленная стоимость
+            cost_with: Стоимость с кешированием
+            cost_without: Стоимость без кеширования
+        """
+        self.total_cached_tokens += cached_tokens
+        self.total_prompt_tokens += prompt_tokens
+        self.estimated_cost_saved += cost_saved
+        self.estimated_cost_with_cache += cost_with
+        self.estimated_cost_without_cache += cost_without
+        
+        # Пересчитываем общий cache hit rate
+        if self.total_prompt_tokens > 0:
+            self.cache_hit_rate = self.total_cached_tokens / self.total_prompt_tokens
+    
+    def get_cache_summary(self) -> Dict[str, Any]:
+        """
+        Получить сводку по кешированию токенов
+        
+        Returns:
+            Словарь с метриками кеширования
+        """
+        savings_percent = 0.0
+        if self.estimated_cost_without_cache > 0:
+            savings_percent = (self.estimated_cost_saved / self.estimated_cost_without_cache) * 100
+        
+        return {
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_cached_tokens": self.total_cached_tokens,
+            "cache_hit_rate": round(self.cache_hit_rate, 3),
+            "cache_hit_rate_percent": round(self.cache_hit_rate * 100, 1),
+            "cost_with_cache": round(self.estimated_cost_with_cache, 4),
+            "cost_without_cache": round(self.estimated_cost_without_cache, 4),
+            "cost_saved": round(self.estimated_cost_saved, 4),
+            "savings_percent": round(savings_percent, 1)
+        }
     
     def to_dict(self) -> Dict[str, Any]:
         """Безопасное преобразование в словарь (исключает несериализуемые объекты)"""

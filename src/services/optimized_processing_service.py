@@ -279,7 +279,8 @@ class OptimizedProcessingService(BaseProcessingService):
                         download_result = await http_client.download_file(file_url, temp_file_path)
                         
                         if not download_result["success"]:
-                            raise ProcessingError(f"Ошибка скачивания: {download_result['error']}", 
+                            error_msg = download_result.get('error', 'Неизвестная ошибка скачивания')
+                            raise ProcessingError(f"Ошибка скачивания: {error_msg}", 
                                                 request.file_name, "download")
                         
                         processing_metrics.download_duration = download_result["duration"]
@@ -1275,6 +1276,18 @@ class OptimizedProcessingService(BaseProcessingService):
                 # Сохраняем валидацию в результате
                 llm_result_data['_validation'] = validation_result.to_dict()
             
+            # Логирование сводки по кешированию токенов
+            if settings.log_cache_metrics and processing_metrics.total_cached_tokens > 0:
+                cache_summary = processing_metrics.get_cache_summary()
+                logger.info("=" * 60)
+                logger.info("📊 Итоговая сводка по кешированию токенов:")
+                logger.info(f"   Prompt токенов: {cache_summary['total_prompt_tokens']:,}")
+                logger.info(f"   Кешировано: {cache_summary['total_cached_tokens']:,} ({cache_summary['cache_hit_rate_percent']}%)")
+                if cache_summary['cost_saved'] > 0:
+                    logger.info(f"   💰 Экономия: ${cache_summary['cost_saved']:.4f} ({cache_summary['savings_percent']:.1f}%)")
+                    logger.info(f"   Стоимость: ${cache_summary['cost_with_cache']:.4f} (без кеша: ${cache_summary['cost_without_cache']:.4f})")
+                logger.info("=" * 60)
+        
         # Кэшируем результат
         await performance_cache.set(cache_key, llm_result_data, cache_type="llm_response")
         
@@ -1553,8 +1566,9 @@ class OptimizedProcessingService(BaseProcessingService):
             result = await http_client.download_file(file_url, temp_file_path)
             
             if not result["success"]:
+                error_msg = result.get('error', 'Неизвестная ошибка скачивания')
                 raise ProcessingError(
-                    f"Ошибка скачивания: {result['error']}", 
+                    f"Ошибка скачивания: {error_msg}", 
                     request.file_name, 
                     "download"
                 )

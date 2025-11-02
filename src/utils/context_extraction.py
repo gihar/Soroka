@@ -3,7 +3,7 @@
 вместо передачи полного текста в LLM запросы
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import re
 
 
@@ -85,24 +85,25 @@ def build_structure_summary(meeting_structure) -> str:
     
     summary_parts = []
     
-    # Темы
+    # Темы (увеличено с 10 до 20)
     if meeting_structure.topics:
         summary_parts.append(f"ТЕМЫ ({len(meeting_structure.topics)}):")
-        for i, topic in enumerate(meeting_structure.topics[:10], 1):  # Максимум 10 тем
+        for i, topic in enumerate(meeting_structure.topics[:20], 1):  # Максимум 20 тем
             summary_parts.append(f"{i}. {topic.title}")
             if topic.key_points:
-                summary_parts.append(f"   Ключевые моменты: {', '.join(topic.key_points[:3])}")
+                # Показываем до 5 ключевых моментов (было 3)
+                summary_parts.append(f"   Ключевые моменты: {', '.join(topic.key_points[:5])}")
     
-    # Решения
+    # Решения (увеличено с 15 до 30)
     if meeting_structure.decisions:
         summary_parts.append(f"\nРЕШЕНИЯ ({len(meeting_structure.decisions)}):")
-        for i, decision in enumerate(meeting_structure.decisions[:15], 1):
+        for i, decision in enumerate(meeting_structure.decisions[:30], 1):
             summary_parts.append(f"{i}. {decision.text}")
     
-    # Задачи
+    # Задачи (увеличено с 15 до 30)
     if meeting_structure.action_items:
         summary_parts.append(f"\nЗАДАЧИ ({len(meeting_structure.action_items)}):")
-        for i, action in enumerate(meeting_structure.action_items[:15], 1):
+        for i, action in enumerate(meeting_structure.action_items[:30], 1):
             assignee = action.assignee_name or action.assignee or "не указан"
             summary_parts.append(f"{i}. {action.description} (Ответственный: {assignee})")
     
@@ -117,31 +118,45 @@ def add_prompt_caching_markers(
     """
     Создать структуру сообщений с маркерами для prompt caching (OpenAI)
     
+    OpenAI автоматически кэширует префиксы промптов длиной >= 1024 токенов.
+    Кеширование работает для моделей: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4.
+    Стоимость кешированных токенов на 50% ниже стандартной.
+    
+    Структура оптимизирована для максимального использования кеша:
+    1. System prompt (статический) - кешируется
+    2. Транскрипция (статическая для повторных запросов) - кешируется
+    3. Task-specific prompt (изменяется) - в конце, не кешируется
+    
     Args:
-        system_prompt: Системный промпт
-        transcription: Транскрипция (будет кэшироваться)
-        task_specific_prompt: Специфичный промпт для задачи
+        system_prompt: Системный промпт (должен быть >= 1024 токенов для кеширования)
+        transcription: Транскрипция (будет кэшироваться при повторных запросах)
+        task_specific_prompt: Специфичный промпт для задачи (изменяющаяся часть)
         
     Returns:
-        Список сообщений в формате OpenAI с cache_control
+        Список сообщений в формате OpenAI, оптимизированный для prompt caching
     """
+    # Размещаем статический контент в начале для максимального переиспользования кеша
     messages = [
         {
             "role": "system",
-            "content": system_prompt,
-            # OpenAI автоматически кэширует длинные промпты
+            "content": system_prompt
+            # OpenAI автоматически кеширует system prompt если >= 1024 токенов
+            # Кеш действует 5-10 минут между запросами с идентичным префиксом
         },
         {
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": f"ТРАНСКРИПЦИЯ:\n\n{transcription}",
-                    # Длинная транскрипция будет закэширована
+                    "text": f"ТРАНСКРИПЦИЯ:\n\n{transcription}"
+                    # Транскрипция также входит в кешируемый префикс
+                    # Важно: для повторного использования кеша транскрипция должна быть идентична
                 },
                 {
                     "type": "text",
                     "text": task_specific_prompt
+                    # Изменяющаяся часть промпта идет в конце
+                    # Она не кешируется, но благодаря кешу префикса общая стоимость снижается
                 }
             ]
         }
@@ -149,3 +164,55 @@ def add_prompt_caching_markers(
     
     return messages
 
+
+def build_anthropic_messages_with_caching(
+    system_prompt: str,
+    transcription: str,
+    task_specific_prompt: str
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Создать сообщения с cache_control для Anthropic prompt caching
+    
+    Anthropic требует явных cache_control маркеров для кеширования.
+    Кеширование работает для моделей Claude 3+ (включая Claude 3.5 Sonnet).
+    Стоимость кешированных токенов на 90% ниже стандартной.
+    Минимальный размер для кеширования: 1024 токена (~3000-4000 символов).
+    
+    Структура оптимизирована для максимального использования кеша:
+    1. System prompt (статический) - кешируется
+    2. Транскрипция (статическая для повторных запросов) - кешируется
+    3. Task-specific prompt (изменяется) - НЕ кешируется
+    
+    Args:
+        system_prompt: Системный промпт
+        transcription: Транскрипция (будет кэшироваться)
+        task_specific_prompt: Специфичный промпт для задачи (изменяющаяся часть)
+        
+    Returns:
+        Tuple из:
+        - system: Список блоков system prompt с cache_control маркерами
+        - messages: Список сообщений пользователя
+    """
+    # System prompt с кешированием
+    # В Anthropic system может быть списком блоков
+    system = [
+        {
+            "type": "text",
+            "text": system_prompt
+        },
+        {
+            "type": "text",
+            "text": f"ТРАНСКРИПЦИЯ:\n\n{transcription}",
+            "cache_control": {"type": "ephemeral"}  # Кешировать этот блок
+        }
+    ]
+    
+    # User message с изменяющейся частью (не кешируется)
+    messages = [
+        {
+            "role": "user",
+            "content": task_specific_prompt
+        }
+    ]
+    
+    return system, messages

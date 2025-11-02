@@ -36,7 +36,17 @@ class ProtocolSchema(BaseModel):
 
 
 class TwoStageExtractionSchema(BaseModel):
-    """Схема для первого этапа двухэтапной генерации (извлечение)"""
+    """
+    Схема для первого этапа двухэтапной генерации (извлечение)
+    
+    ВАЖНО: 
+    - extracted_data содержит только строковые значения (не объекты, не массивы)
+      Ключи = поля из template_variables, значения = строки с извлеченными данными
+    - Optional поля (detected_speaker_mapping и др.) используются для автоопределения спикеров
+      Они заполняются только если в транскрипции есть метки SPEAKER_N
+    - Все Dict поля не включаются в required из-за ограничений Azure OpenAI strict mode
+      (additionalProperties не может быть в required fields)
+    """
     extracted_data: Dict[str, str] = Field(default_factory=dict, description="Извлеченные данные из транскрипции (ключ=переменная шаблона, значение=строка)")
     confidence_score: float = Field(default=0.0, description="Уровень уверенности в извлечении (0.0-1.0)")
     extraction_notes: str = Field(default="", description="Заметки по извлечению")

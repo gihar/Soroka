@@ -129,7 +129,10 @@ class Settings(BaseSettings):
     
     # Оптимизация LLM пайплайна
     enable_unified_protocol_generation: bool = Field(False, description="Использовать unified подход (1 запрос вместо Stage 1+2) с self-reflection")
-    enable_prompt_caching: bool = Field(True, description="Использовать prompt caching для OpenAI (экономия токенов)")
+    enable_prompt_caching: bool = Field(True, description="Использовать prompt caching для OpenAI/Anthropic (экономия токенов)")
+    log_cache_metrics: bool = Field(True, description="Логировать детальные метрики кеширования токенов")
+    cache_metrics_in_final_message: bool = Field(False, description="Показывать метрики кеширования в финальном сообщении пользователю (для отладки)")
+    min_transcription_length_for_cache: int = Field(3000, description="Минимальная длина транскрипции (в символах) для активации кеширования. ~1024 токенов = ~3000-4000 символов")
     max_context_tokens_stage2: int = Field(10000, description="Максимальное количество токенов контекста для Stage 2 (используются релевантные фрагменты)")
     use_structure_only_for_protocol: bool = Field(True, description="Использовать meeting_structure как единственный источник тем/решений/задач (без повторного извлечения)")
     
