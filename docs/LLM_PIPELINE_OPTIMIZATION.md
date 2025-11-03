@@ -235,9 +235,16 @@ export ENABLE_UNIFIED_PROTOCOL_GENERATION=false
 ### Схема UnifiedProtocolSchema
 
 ```python
+class SelfReflectionSchema(BaseModel):
+    """Схема для self-reflection (самопроверка модели)"""
+    completeness: float                     # Полнота извлечения (0.0-1.0)
+    missing_info: List[str]                 # Недостающая информация
+    ambiguous_points: List[str]             # Неоднозначные моменты
+    quality_concerns: List[str]             # Проблемы качества
+
 class UnifiedProtocolSchema(BaseModel):
     protocol_data: Dict[str, str]           # Извлеченные данные
-    self_reflection: Dict[str, Any]         # Самопроверка модели
+    self_reflection: SelfReflectionSchema   # Самопроверка модели (фиксированная структура)
     confidence_score: float                 # Уверенность (0.0-1.0)
     quality_notes: str                      # Заметки по качеству
     detected_speaker_mapping: Optional[...]  # Маппинг спикеров

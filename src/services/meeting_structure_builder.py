@@ -506,15 +506,37 @@ class MeetingStructureBuilder:
 {{
     "action_items": [
         {{
-            "description": "Описание задачи",
+            "description": "Подготовить презентацию с результатами анализа и отправить команде",
+            "assignee": "SPEAKER_2",
+            "assignee_name": null,
+            "deadline": "до пятницы",
+            "priority": "high",
+            "context": "Обсуждение результатов квартального отчета"
+        }},
+        {{
+            "description": "Согласовать бюджет с финансовым отделом",
             "assignee": "SPEAKER_1",
             "assignee_name": null,
-            "deadline": "до конца недели",
-            "priority": "high",
-            "context": "В рамках проекта X"
+            "deadline": null,
+            "priority": "medium",
+            "context": "Планирование на следующий квартал"
+        }},
+        {{
+            "description": "Проверить техническую возможность интеграции с новой системой",
+            "assignee": "SPEAKER_3",
+            "assignee_name": null,
+            "deadline": "к следующей встрече",
+            "priority": "critical",
+            "context": "Внедрение CRM системы"
         }}
     ]
 }}
+
+ВАЖНО:
+- Используй null для полей, значение которых неизвестно (например, deadline, если срок не указан)
+- Приоритет определяй по срочности и важности: critical > high > medium > low
+- assignee_name всегда null (имена определяются отдельно на основе маппинга спикеров)
+- Извлекай только явные задачи и поручения, не додумывай
 
 Выведи ТОЛЬКО JSON, без дополнительных комментариев."""
 

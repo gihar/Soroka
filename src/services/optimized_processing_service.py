@@ -420,44 +420,44 @@ class OptimizedProcessingService(BaseProcessingService):
                             unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
                             speakers_text=speakers_text
                         )
+                        
+                        # Проверяем, удалось ли отправить UI
+                        if confirmation_message is None:
+                            # UI не был отправлен - продолжаем обработку без паузы
+                            logger.warning(
+                                f"⚠️ Не удалось отправить UI подтверждения сопоставления для пользователя {request.user_id}. "
+                                "Продолжаю обработку без паузы на подтверждение."
+                            )
                             
-                            # Проверяем, удалось ли отправить UI
-                            if confirmation_message is None:
-                                # UI не был отправлен - продолжаем обработку без паузы
-                                logger.warning(
-                                    f"⚠️ Не удалось отправить UI подтверждения сопоставления для пользователя {request.user_id}. "
-                                    "Продолжаю обработку без паузы на подтверждение."
+                            # Отправляем уведомление пользователю
+                            try:
+                                from src.utils.telegram_safe import safe_send_message
+                                await safe_send_message(
+                                    bot=progress_tracker.bot,
+                                    chat_id=progress_tracker.chat_id,
+                                    text=(
+                                        "⚠️ Не удалось отправить интерфейс подтверждения сопоставления.\n\n"
+                                        "Продолжаю генерацию протокола с автоматическим сопоставлением спикеров."
+                                    ),
+                                    parse_mode=None
                                 )
-                                
-                                # Отправляем уведомление пользователю
-                                try:
-                                    from src.utils.telegram_safe import safe_send_message
-                                    await safe_send_message(
-                                        bot=progress_tracker.bot,
-                                        chat_id=progress_tracker.chat_id,
-                                        text=(
-                                            "⚠️ Не удалось отправить интерфейс подтверждения сопоставления.\n\n"
-                                            "Продолжаю генерацию протокола с автоматическим сопоставлением спикеров."
-                                        ),
-                                        parse_mode=None
-                                    )
-                                except Exception as notify_error:
-                                    logger.error(f"Не удалось отправить уведомление об ошибке UI: {notify_error}")
-                                
-                                # Очищаем кеш состояния, так как обработка продолжается без паузы
-                                from src.services.mapping_state_cache import mapping_state_cache
-                                await mapping_state_cache.clear_state(request.user_id)
-                                
-                                # Продолжаем обработку без паузы - сохраняем mapping в request
-                                request.speaker_mapping = speaker_mapping
-                            else:
-                                # UI успешно отправлен - приостанавливаем обработку
-                                logger.info("⏸️ Обработка приостановлена - ожидаю подтверждения от пользователя")
-                                
-                                # Возвращаем None как индикатор паузы (обработка продолжится после подтверждения)
-                                return None
+                            except Exception as notify_error:
+                                logger.error(f"Не удалось отправить уведомление об ошибке UI: {notify_error}")
+                            
+                            # Очищаем кеш состояния, так как обработка продолжается без паузы
+                            from src.services.mapping_state_cache import mapping_state_cache
+                            await mapping_state_cache.clear_state(request.user_id)
+                            
+                            # Продолжаем обработку без паузы - сохраняем mapping в request
+                            request.speaker_mapping = speaker_mapping
                         else:
-                            logger.warning("⚠️ UI подтверждения включен, но progress_tracker отсутствует - продолжаю без паузы")
+                            # UI успешно отправлен - приостанавливаем обработку
+                            logger.info("⏸️ Обработка приостановлена - ожидаю подтверждения от пользователя")
+                            
+                            # Возвращаем None как индикатор паузы (обработка продолжится после подтверждения)
+                            return None
+                    else:
+                        logger.warning("⚠️ UI подтверждения включен, но progress_tracker отсутствует - продолжаю без паузы")
                     
                     # Сохраняем mapping в request для дальнейшего использования (если UI не включен)
                     request.speaker_mapping = speaker_mapping
