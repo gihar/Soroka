@@ -1685,11 +1685,10 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             
             speaker_mapping = state_data.get('speaker_mapping', {})
             
-            # Обновляем сообщение
+            # Обновляем сообщение (кратко, без обещаний - реальная обработка начнется в следующем сообщении)
             await safe_edit_text(
                 callback.message,
-                "✅ **Сопоставление подтверждено**\n\n"
-                "⏳ Продолжаю генерацию протокола...",
+                "✅ **Сопоставление подтверждено**",
                 parse_mode="Markdown"
             )
             

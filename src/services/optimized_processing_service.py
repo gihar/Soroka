@@ -370,32 +370,56 @@ class OptimizedProcessingService(BaseProcessingService):
                             }
                         })
                         
-                        # Показываем UI подтверждения
-                        if progress_tracker:
-                            from src.ux.speaker_mapping_ui import show_mapping_confirmation
-                            
-                            # Получаем список несопоставленных спикеров
-                            all_speakers = transcription_result.diarization.get('speakers', [])
-                            if not all_speakers:
-                                segments = transcription_result.diarization.get('segments', [])
-                                all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
-                            mapped_speakers = set(speaker_mapping.keys())
-                            unmapped_speakers = [s for s in all_speakers if s not in mapped_speakers]
-                            
-                            # Извлекаем speakers_text для передачи в UI
-                            speakers_text = transcription_result.speakers_text
-                            
-                            # Пытаемся показать UI подтверждения
-                            confirmation_message = await show_mapping_confirmation(
-                                bot=progress_tracker.bot,
-                                chat_id=progress_tracker.chat_id,
-                                user_id=request.user_id,
-                                speaker_mapping=speaker_mapping,
-                                diarization_data=transcription_result.diarization,
-                                participants=request.participants_list,
-                                unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
-                                speakers_text=speakers_text
+                    # Показываем UI подтверждения
+                    if progress_tracker:
+                        from src.ux.speaker_mapping_ui import show_mapping_confirmation
+                        
+                        # Останавливаем автообновления progress_tracker, чтобы избежать преждевременного "Обработка завершена!"
+                        if progress_tracker.update_task:
+                            task = progress_tracker.update_task
+                            progress_tracker.update_task = None
+                            task.cancel()
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                pass
+                            logger.debug("🛑 Автообновления progress_tracker остановлены перед показом UI подтверждения")
+                        
+                        # Обновляем сообщение progress_tracker на информационное (БЕЗ final=True)
+                        try:
+                            from src.utils.telegram_safe import safe_edit_text
+                            await safe_edit_text(
+                                progress_tracker.message,
+                                "✅ **Транскрипция завершена**\n\n"
+                                "🎭 Проверьте сопоставление спикеров с участниками в сообщении ниже.",
+                                parse_mode="Markdown"
                             )
+                            logger.debug("✅ Сообщение progress_tracker обновлено на информационное")
+                        except Exception as e:
+                            logger.warning(f"Не удалось обновить сообщение progress_tracker: {e}")
+                        
+                        # Получаем список несопоставленных спикеров
+                        all_speakers = transcription_result.diarization.get('speakers', [])
+                        if not all_speakers:
+                            segments = transcription_result.diarization.get('segments', [])
+                            all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
+                        mapped_speakers = set(speaker_mapping.keys())
+                        unmapped_speakers = [s for s in all_speakers if s not in mapped_speakers]
+                        
+                        # Извлекаем speakers_text для передачи в UI
+                        speakers_text = transcription_result.speakers_text
+                        
+                        # Пытаемся показать UI подтверждения
+                        confirmation_message = await show_mapping_confirmation(
+                            bot=progress_tracker.bot,
+                            chat_id=progress_tracker.chat_id,
+                            user_id=request.user_id,
+                            speaker_mapping=speaker_mapping,
+                            diarization_data=transcription_result.diarization,
+                            participants=request.participants_list,
+                            unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
+                            speakers_text=speakers_text
+                        )
                             
                             # Проверяем, удалось ли отправить UI
                             if confirmation_message is None:
