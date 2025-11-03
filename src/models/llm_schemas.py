@@ -69,10 +69,21 @@ class TwoStageReflectionSchema(BaseModel):
         extra = "forbid"
 
 
+class SelfReflectionSchema(BaseModel):
+    """Схема для self-reflection (самопроверка модели)"""
+    completeness: float = Field(default=0.0, description="Полнота извлечения информации (0.0-1.0)")
+    missing_info: List[str] = Field(default_factory=list, description="Список информации, которую не удалось извлечь")
+    ambiguous_points: List[str] = Field(default_factory=list, description="Неоднозначные моменты в транскрипции")
+    quality_concerns: List[str] = Field(default_factory=list, description="Проблемы качества данных")
+    
+    class Config:
+        extra = "forbid"
+
+
 class UnifiedProtocolSchema(BaseModel):
     """Схема для unified подхода: извлечение + self-reflection в одном запросе"""
     protocol_data: Dict[str, str] = Field(default_factory=dict, description="Извлеченные данные протокола (ключ=переменная шаблона, значение=строка)")
-    self_reflection: Dict[str, Any] = Field(default_factory=dict, description="Самопроверка модели")
+    self_reflection: SelfReflectionSchema = Field(default_factory=SelfReflectionSchema)
     confidence_score: float = Field(default=0.0, description="Общая уверенность (0.0-1.0)")
     quality_notes: str = Field(default="", description="Заметки по качеству")
     detected_speaker_mapping: Optional[Dict[str, str]] = Field(default=None, description="Автоопределенное сопоставление SPEAKER_N с именами участников")
