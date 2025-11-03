@@ -116,9 +116,11 @@ class SpeakerMappingSchema(BaseModel):
     speaker_mappings: Dict[str, str] = Field(
         description="Сопоставление speaker_id -> participant_name в формате 'Имя Фамилия' (БЕЗ отчества)"
     )
-    confidence_scores: Dict[str, float] = Field(description="Уверенность в сопоставлении для каждого спикера")
+    confidence_scores: Dict[str, float] = Field(
+        description="Уверенность в сопоставлении для каждого спикера (0.0-1.0). Только спикеры с уверенностью >= 0.7 включаются в speaker_mappings"
+    )
     unmapped_speakers: List[str] = Field(
-        description="Список speaker_id (например, SPEAKER_3), которых не удалось сопоставить с участниками"
+        description="Список speaker_id (например, SPEAKER_3) с уверенностью < 0.7, которых не удалось надежно сопоставить с участниками"
     )
     mapping_notes: str = Field(description="Заметки по сопоставлению")
 
@@ -208,6 +210,8 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
     # OpenAI Structured Outputs в strict режиме требует добавлять поля с default в required,
     # НО Azure OpenAI не позволяет включать в required поля с additionalProperties (Dict[str, T]).
     # Поэтому добавляем в required только поля с фиксированными типами.
+    # Для Dict полей сохраняем их additionalProperties (тип значений), что позволяет LLM
+    # заполнять динамические ключи согласно инструкциям промпта.
     
     def fix_required_fields(schema_dict: Dict[str, Any]) -> None:
         """
@@ -215,15 +219,17 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
         
         Azure OpenAI в strict mode не позволяет включать в required поля с additionalProperties
         (т.е. поля типа Dict[str, T]). Такие поля должны быть опциональными.
-        Также Azure требует явно установить additionalProperties: false для всех Dict полей.
+        Для Dict полей сохраняем корректный тип additionalProperties вместо его обнуления.
         """
         if "properties" in schema_dict:
             required_fields = []
             for prop_name, prop_schema in schema_dict["properties"].items():
-                # Azure OpenAI требует явно установить additionalProperties: false
+                # Для Dict полей (с additionalProperties) НЕ добавляем в required
+                # но сохраняем их тип additionalProperties как есть (не обнуляем!)
                 if "additionalProperties" in prop_schema:
-                    # Устанавливаем additionalProperties: false для Dict полей
-                    prop_schema["additionalProperties"] = False
+                    # Оставляем additionalProperties как есть (строка, число и т.д.)
+                    # Это позволяет LLM заполнять динамические ключи
+                    pass
                 else:
                     # Поля без additionalProperties добавляем в required
                     required_fields.append(prop_name)
@@ -236,8 +242,7 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
                 if prop_schema.get("type") == "array" and "items" in prop_schema:
                     items_schema = prop_schema["items"]
                     if isinstance(items_schema, dict):
-                        if "additionalProperties" in items_schema:
-                            items_schema["additionalProperties"] = False
+                        # Для Dict внутри массивов также сохраняем тип
                         if items_schema.get("type") == "object" and "properties" in items_schema:
                             fix_required_fields(items_schema)
             
