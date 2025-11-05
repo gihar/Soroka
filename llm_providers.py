@@ -863,6 +863,22 @@ def _build_system_prompt(
             '  "confidence_score": 0.85,\n'
             '  "quality_notes": "Все основные моменты извлечены, одна задача без конкретного срока"\n'
             "}\n\n"
+            "ОПЦИОНАЛЬНЫЕ ПОЛЯ (добавляй ТОЛЬКО если удалось сопоставить спикеров с участниками):\n"
+            "- detected_speaker_mapping (объект): сопоставление SPEAKER_N → имя участника\n"
+            "- speaker_confidence_scores (объект): уверенность для каждого спикера (0.0-1.0)\n"
+            "- unmapped_speakers (массив строк): список несопоставленных спикеров\n"
+            "- mapping_notes (строка): заметки по сопоставлению\n\n"
+            "Пример с опциональными полями:\n"
+            "{\n"
+            '  "protocol_data": {...},\n'
+            '  "self_reflection": {...},\n'
+            '  "confidence_score": 0.9,\n'
+            '  "quality_notes": "...",\n'
+            '  "detected_speaker_mapping": {"SPEAKER_1": "Оксана Иванова", "SPEAKER_2": "Галина Петрова"},\n'
+            '  "speaker_confidence_scores": {"SPEAKER_1": 0.95, "SPEAKER_2": 0.92},\n'
+            '  "unmapped_speakers": [],\n'
+            '  "mapping_notes": "Все спикеры сопоставлены"\n'
+            "}\n\n"
             
             "ПРИМЕР НЕПРАВИЛЬНОГО JSON (НЕ ДЕЛАЙ ТАК):\n"
             "{\n"
@@ -871,7 +887,13 @@ def _build_system_prompt(
             '    "date": {"day": 20, "month": "октябрь"},  ❌ вложенный объект в значении\n'
             '    "participants": ["Оксана", "Галя"]  ❌ массив вместо строки\n'
             '  }\n'
-            "}"
+            "}\n\n"
+            "🚨 СТРОГОСТЬ СХЕМЫ:\n"
+            "- Схема строгая (strict mode): НЕ добавляй дополнительные поля, не указанные в схеме\n"
+            "- ВСЕ поля из template_variables ДОЛЖНЫ присутствовать в protocol_data\n"
+            "- Если поле не может быть заполнено - используй 'Не указано', но НЕ пропускай поле\n"
+            "- Опциональные поля speaker mapping добавляй ТОЛЬКО если удалось сопоставить спикеров\n"
+            "- Используй правильные названия полей: не 'speaker_mapping', а 'detected_speaker_mapping'"
         )
     else:
         # Примеры для обычного ProtocolSchema
@@ -984,6 +1006,7 @@ def _build_user_prompt(
         participants_info += "🎯 ПОЛНЫЙ СПИСОК УЧАСТНИКОВ ВСТРЕЧИ (ОБЯЗАТЕЛЬНЫЙ К ИСПОЛЬЗОВАНИЮ)\n"
         participants_info += "═" * 63 + "\n\n"
         from src.services.participants_service import participants_service
+        # ВАЖНО: format_participants_for_llm преобразует имена в формат "Имя Фамилия" (без отчества)
         participants_info += participants_service.format_participants_for_llm(participants)
         participants_info += "\n\n"
         participants_info += "╔═══════════════════════════════════════════════════════════╗\n"
@@ -1671,6 +1694,7 @@ def _build_extraction_prompt(
         participants_info += "║  🎯 ПОЛНЫЙ СПИСОК УЧАСТНИКОВ (ОБЯЗАТЕЛЕН К ИСПОЛЬЗОВАНИЮ) ║\n"
         participants_info += "╚════════════════════════════════════════════════════════╝\n"
         from src.services.participants_service import participants_service
+        # ВАЖНО: format_participants_for_llm преобразует имена в формат "Имя Фамилия" (без отчества)
         participants_info += participants_service.format_participants_for_llm(participants)
         participants_info += "\n\n🚨 СТРОГИЕ ПРАВИЛА:\n"
         participants_info += "1. ТОЛЬКО имена ИЗ СПИСКА ВЫШЕ! Формат: 'Имя Фамилия'\n"
@@ -2369,7 +2393,8 @@ def _build_unified_prompt(
     meeting_topic: Optional[str] = None,
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
-    participants: Optional[List[Dict[str, str]]] = None
+    participants: Optional[List[Dict[str, str]]] = None,
+    use_structure_only_for_protocol: bool = True
 ) -> str:
     """
     Построить промпт для unified подхода
@@ -2385,26 +2410,32 @@ def _build_unified_prompt(
     if meeting_time:
         context_parts.append(f"Время: {meeting_time}")
     
-    context_text = "\n".join(context_parts) if context_parts else "Информация о встрече не указана"
+    context_text = "\n".join(context_parts) if context_parts else ""
     
-    # Участники
+    # Участники - форматируем в "Имя Фамилия" (без отчества)
     participants_text = ""
     if participants:
-        participants_text = "УЧАСТНИКИ:\n" + "\n".join([
-            f"- {p.get('name', '')}"
-            for p in participants
-        ])
+        from src.services.participants_service import participants_service
+        participants_text = "УЧАСТНИКИ:\n" + participants_service.format_participants_for_llm(participants)
     
-    # Структура встречи (вместо транскрипции)
-    content_text = ""
+    # Структура встречи и транскрипция
+    content_parts = []
+    
+    # Всегда добавляем structure_summary, если он не пустой
     if structure_summary:
-        content_text = f"СТРУКТУРИРОВАННОЕ ПРЕДСТАВЛЕНИЕ ВСТРЕЧИ:\n\n{structure_summary}"
-    elif transcription:
-        # Fallback: используем транскрипцию
+        content_parts.append(f"СТРУКТУРИРОВАННОЕ ПРЕДСТАВЛЕНИЕ ВСТРЕЧИ:\n\n{structure_summary}")
+    
+    # Если use_structure_only_for_protocol=false, также добавляем транскрипцию
+    # Если use_structure_only_for_protocol=true и structure_summary пустой, используем транскрипцию как fallback
+    should_add_transcription = (not use_structure_only_for_protocol) or (use_structure_only_for_protocol and not structure_summary)
+    
+    if should_add_transcription and transcription:
         if diarization_data and diarization_data.get("formatted_transcript"):
-            content_text = f"ТРАНСКРИПЦИЯ С ДИАРИЗАЦИЕЙ:\n\n{diarization_data['formatted_transcript']}"
+            content_parts.append(f"ТРАНСКРИПЦИЯ С ДИАРИЗАЦИЕЙ:\n\n{diarization_data['formatted_transcript']}")
         else:
-            content_text = f"ТРАНСКРИПЦИЯ:\n\n{transcription}"
+            content_parts.append(f"ТРАНСКРИПЦИЯ:\n\n{transcription}")
+    
+    content_text = "\n\n".join(content_parts)
     
     # Маппинг спикеров
     mapping_text = ""
@@ -2438,34 +2469,106 @@ def _build_unified_prompt(
 
 {fields_text}
 
-ТРЕБОВАНИЯ:
+КРИТИЧЕСКИ ВАЖНО — СТРУКТУРА ОТВЕТА:
+Твой ответ ОБЯЗАТЕЛЬНО должен быть валидным JSON объектом со следующими полями:
+
+1. protocol_data (объект): Извлеченные данные протокола
+   - Ключи: названия полей из списка выше
+   - Значения: СТРОКИ (используй \\n для многострочных списков)
+   - Каждое поле из template_variables ДОЛЖНО присутствовать
+
+2. self_reflection (объект): Самопроверка качества работы
+   - completeness (число 0.0-1.0): полнота извлечения
+   - missing_info (массив строк): что не удалось извлечь
+   - ambiguous_points (массив строк): неоднозначные моменты
+   - quality_concerns (массив строк): проблемы качества данных
+
+3. confidence_score (число 0.0-1.0): общая уверенность
+
+4. quality_notes (строка): краткое резюме по качеству работы
+
+5. (ОПЦИОНАЛЬНО) detected_speaker_mapping (объект): Автоопределенное сопоставление SPEAKER_N с именами участников
+   - Ключи: идентификаторы спикеров (например, "SPEAKER_1", "SPEAKER_2")
+   - Значения: имена участников в формате "Имя Фамилия"
+   - Заполняй ТОЛЬКО если удалось надежно сопоставить спикеров с участниками из транскрипции
+
+6. (ОПЦИОНАЛЬНО) speaker_confidence_scores (объект): Уверенность в сопоставлении для каждого спикера
+   - Ключи: идентификаторы спикеров
+   - Значения: числа от 0.0 до 1.0 (уверенность в сопоставлении)
+   - Заполняй ТОЛЬКО если заполнено detected_speaker_mapping
+
+7. (ОПЦИОНАЛЬНО) unmapped_speakers (массив строк): Список идентификаторов спикеров, которых не удалось сопоставить
+   - Массив идентификаторов типа ["SPEAKER_3", "SPEAKER_5"]
+   - Заполняй ТОЛЬКО если есть спикеры, которых не удалось сопоставить
+
+8. (ОПЦИОНАЛЬНО) mapping_notes (строка): Заметки по процессу сопоставления спикеров
+   - Заполняй ТОЛЬКО если есть важные замечания по сопоставлению
+
+🚨 СТРОГОСТЬ СХЕМЫ:
+- Схема строгая (strict mode): НЕ добавляй дополнительные поля, не указанные выше
+- НЕ используй другие названия полей (например, не "speaker_mapping", а "detected_speaker_mapping")
+- ВСЕ поля из template_variables ДОЛЖНЫ присутствовать в protocol_data, даже если значение "Не указано"
+- Если поле не может быть заполнено - используй "Не указано", но НЕ пропускай поле
+
+ТРЕБОВАНИЯ К ДАННЫМ:
 - Извлекай ТОЛЬКО фактическую информацию из представленного материала
 - Если структурированное представление содержит темы/решения/задачи, используй их напрямую
-- Каждое поле в protocol_data должно быть заполнено строкой (используй \\n для списков)
-- После извлечения проверь: все ли важные моменты учтены?
+- Каждое поле в protocol_data ОБЯЗАТЕЛЬНО должно быть строкой (НЕ массивом, НЕ объектом)
+- Для списков используй многострочный текст с разделителем \\n
+- Если информации нет - пиши "Не указано", но НЕ оставляй поле пустым
 
-SELF-REFLECTION (обязательная самопроверка):
-Заполни поле self_reflection объектом со следующей структурой:
-
-Структура поля self_reflection:
-- completeness (число 0.0-1.0): полнота извлечения информации
-- missing_info (массив строк): что не удалось извлечь или осталось неопределенным
-- ambiguous_points (массив строк): моменты, которые можно интерпретировать по-разному
-- quality_concerns (массив строк): проблемы качества данных (шум, противоречия, неясность)
-
-Пример self_reflection:
+ПОЛНЫЙ ПРИМЕР ОТВЕТА (базовый случай, без speaker mapping):
 {{
-  "completeness": 0.85,
-  "missing_info": ["Точные сроки для задачи 3", "Ответственный за координацию с отделом"],
-  "ambiguous_points": ["Неясно, утверждён ли бюджет окончательно или требуется ещё согласование"],
-  "quality_concerns": []
+  "protocol_data": {{
+    "participants": "Алексей Иванов\\nМария Сидорова\\nПетр Петров",
+    "risks_and_blockers": "- Нехватка ресурсов для реализации\\n- Зависимость от внешних поставщиков",
+    "technical_issues": "- Проблемы совместимости API\\n- Необходимость обновления инфраструктуры",
+    "next_sprint_plans": "- Завершить модуль авторизации\\n- Начать интеграцию с платежной системой",
+    "architecture_decisions": "- Использовать микросервисную архитектуру\\n- Выбран PostgreSQL как основная БД",
+    "technical_tasks": "- Настроить CI/CD пайплайн — Алексей Иванов, до 15 ноября\\n- Провести код-ревью модуля — Мария Сидорова, до 18 ноября"
+  }},
+  "self_reflection": {{
+    "completeness": 0.88,
+    "missing_info": ["Точные сроки для интеграции платежей", "Бюджет на инфраструктуру"],
+    "ambiguous_points": ["Неясно, будет ли использоваться Redis или Memcached"],
+    "quality_concerns": []
+  }},
+  "confidence_score": 0.85,
+  "quality_notes": "Протокол содержит все основные решения и задачи. Не хватает конкретики по двум срокам."
 }}
 
-ДОПОЛНИТЕЛЬНЫЕ ПОЛЯ:
-- confidence_score (0.0-1.0): общая уверенность в качестве извлеченных данных
-- quality_notes (строка): краткое резюме по качеству работы, основные выводы
+ПРИМЕР С ОПЦИОНАЛЬНЫМИ ПОЛЯМИ SPEAKER MAPPING (если удалось сопоставить спикеров):
+{{
+  "protocol_data": {{
+    "participants": "Алексей Иванов\\nМария Сидорова\\nПетр Петров",
+    "decisions": "- Решение 1\\n- Решение 2"
+  }},
+  "self_reflection": {{
+    "completeness": 0.9,
+    "missing_info": [],
+    "ambiguous_points": [],
+    "quality_concerns": []
+  }},
+  "confidence_score": 0.9,
+  "quality_notes": "Все данные извлечены успешно",
+  "detected_speaker_mapping": {{
+    "SPEAKER_1": "Алексей Иванов",
+    "SPEAKER_2": "Мария Сидорова",
+    "SPEAKER_3": "Петр Петров"
+  }},
+  "speaker_confidence_scores": {{
+    "SPEAKER_1": 0.95,
+    "SPEAKER_2": 0.92,
+    "SPEAKER_3": 0.88
+  }},
+  "unmapped_speakers": [],
+  "mapping_notes": "Все спикеры успешно сопоставлены с участниками по именам из транскрипции"
+}}
 
-Верни JSON в формате UnifiedProtocolSchema."""
+ВАЖНО: 
+- Выведи ТОЛЬКО валидный JSON без дополнительных комментариев или текста
+- ВСЕ поля из template_variables должны присутствовать в protocol_data
+- Опциональные поля speaker mapping добавляй ТОЛЬКО если удалось сопоставить спикеров"""
     
     return prompt
 
@@ -2513,15 +2616,18 @@ async def generate_protocol_unified(
     meeting_time = kwargs.get('meeting_time')
     participants = kwargs.get('participants')
     
-    # Используем структуру вместо полной транскрипции
+    # Создаем структурированное представление встречи (если доступно)
     structure_summary = ""
-    if meeting_structure and settings.use_structure_only_for_protocol:
+    if meeting_structure:
         structure_summary = build_structure_summary(meeting_structure)
-        logger.info(f"Используем meeting_structure (сжато: {len(structure_summary)} символов)")
+        if settings.use_structure_only_for_protocol:
+            logger.info(f"Используем meeting_structure (сжато: {len(structure_summary)} символов)")
+        else:
+            logger.info(f"Используем meeting_structure вместе с транскрипцией (сжато: {len(structure_summary)} символов)")
     
     # Строим промпт
     prompt = _build_unified_prompt(
-        transcription=transcription if not structure_summary else None,
+        transcription=transcription,
         structure_summary=structure_summary,
         template_variables=template_variables,
         diarization_data=diarization_data,
@@ -2529,7 +2635,8 @@ async def generate_protocol_unified(
         meeting_topic=meeting_topic,
         meeting_date=meeting_date,
         meeting_time=meeting_time,
-        participants=participants
+        participants=participants,
+        use_structure_only_for_protocol=settings.use_structure_only_for_protocol
     )
     
     # System prompt: передаем транскрипцию только если не используется structure_summary
@@ -2645,7 +2752,63 @@ async def generate_protocol_unified(
                 provider="openai"
             )
         
-        result = json.loads(content)
+        # Безопасный парсинг JSON с обработкой ошибок
+        try:
+            result = safe_json_parse(content, context="Unified Protocol Generation")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"❌ Ошибка парсинга JSON в unified generation: {e}")
+            logger.error(f"Ответ модели (первые 1000 символов): {content[:1000]}")
+            logger.warning("⚠️ Переключаемся на двухэтапный режим генерации (fallback)")
+            
+            # Fallback: используем двухэтапный подход
+            try:
+                return await generate_protocol_two_stage(
+                    manager=manager,
+                    provider_name=provider_name,
+                    transcription=transcription,
+                    template_variables=template_variables,
+                    diarization_data=diarization_data,
+                    diarization_analysis=diarization_analysis,
+                    meeting_structure=meeting_structure,
+                    **kwargs
+                )
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback на двухэтапный режим также завершился с ошибкой: {fallback_error}")
+                raise ValueError(
+                    f"Unified generation не удался (ошибка парсинга JSON), "
+                    f"и fallback на двухэтапный режим также не удался: {fallback_error}"
+                )
+        
+        # Валидация структуры результата
+        if not isinstance(result, dict):
+            logger.error(f"❌ Результат unified generation не является словарем: {type(result)}")
+            logger.warning("⚠️ Переключаемся на двухэтапный режим генерации (fallback)")
+            return await generate_protocol_two_stage(
+                manager=manager,
+                provider_name=provider_name,
+                transcription=transcription,
+                template_variables=template_variables,
+                diarization_data=diarization_data,
+                diarization_analysis=diarization_analysis,
+                meeting_structure=meeting_structure,
+                **kwargs
+            )
+        
+        # Проверяем наличие обязательного поля protocol_data
+        if 'protocol_data' not in result:
+            logger.warning(f"⚠️ В результате unified generation отсутствует поле 'protocol_data'")
+            logger.warning(f"Доступные ключи: {list(result.keys())}")
+            logger.warning("⚠️ Переключаемся на двухэтапный режим генерации (fallback)")
+            return await generate_protocol_two_stage(
+                manager=manager,
+                provider_name=provider_name,
+                transcription=transcription,
+                template_variables=template_variables,
+                diarization_data=diarization_data,
+                diarization_analysis=diarization_analysis,
+                meeting_structure=meeting_structure,
+                **kwargs
+            )
         
         # Возвращаем protocol_data (для совместимости с существующим кодом)
         protocol_data = result.get('protocol_data', {})
@@ -2656,7 +2819,7 @@ async def generate_protocol_unified(
         if result.get('speaker_confidence_scores'):
             protocol_data['speaker_confidence_scores'] = result['speaker_confidence_scores']
         
-        logger.info(f"Unified generation завершен, confidence={result.get('confidence_score', 0.0):.2f}")
+        logger.info(f"✅ Unified generation завершен успешно, confidence={result.get('confidence_score', 0.0):.2f}")
         
         return protocol_data
     
@@ -2712,6 +2875,7 @@ def _build_segment_analysis_prompt(
         participants_info += "🎯 ПОЛНЫЙ СПИСОК УЧАСТНИКОВ ВСТРЕЧИ (ОБЯЗАТЕЛЬНЫЙ К ИСПОЛЬЗОВАНИЮ)\n"
         participants_info += "═" * 63 + "\n\n"
         from src.services.participants_service import participants_service
+        # ВАЖНО: format_participants_for_llm преобразует имена в формат "Имя Фамилия" (без отчества)
         participants_info += participants_service.format_participants_for_llm(participants)
         participants_info += "\n\n"
         participants_info += "╔═══════════════════════════════════════════════════════════╗\n"
@@ -2987,6 +3151,7 @@ def _build_synthesis_prompt(
     if participants:
         participants_context = "\n\nПОЛНЫЙ СПИСОК УЧАСТНИКОВ:\n"
         from src.services.participants_service import participants_service
+        # ВАЖНО: format_participants_for_llm преобразует имена в формат "Имя Фамилия" (без отчества)
         participants_context += participants_service.format_participants_for_llm(participants)
         participants_context += "\n"
     
