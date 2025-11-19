@@ -118,7 +118,6 @@ class Settings(BaseSettings):
     cache_max_age_hours: int = Field(24, description="Максимальный возраст кэш файлов в часах")
     
     # Улучшения качества протоколов
-    two_stage_processing: bool = Field(True, description="Включить двухэтапную генерацию протокола (извлечение + рефлексия)")
     enable_diarization_analysis: bool = Field(True, description="Включить расширенный анализ данных диаризации")
     enable_text_preprocessing: bool = Field(True, description="Включить предобработку текста транскрипции")
     enable_protocol_validation: bool = Field(True, description="Включить валидацию и оценку качества протоколов")
@@ -126,13 +125,8 @@ class Settings(BaseSettings):
     chain_of_thought_threshold_minutes: int = Field(30, description="Порог длительности встречи для Chain-of-Thought подхода (в минутах)")
     max_parallel_segments: Optional[int] = Field(None, description="Максимальное количество сегментов для параллельной обработки в Chain-of-Thought (None = без ограничений)")
     
-    # Структурированные представления
-    enable_meeting_structure: bool = Field(True, description="Включить построение структурированного представления встречи")
-    structure_extraction_model: Optional[str] = Field(None, description="Модель для извлечения структурированных данных (по умолчанию используется основная модель)")
-    cache_meeting_structures: bool = Field(True, description="Кэшировать структурированные представления встреч")
-    
+      
     # Оптимизация LLM пайплайна
-    enable_unified_protocol_generation: bool = Field(False, description="Использовать unified подход (1 запрос вместо Stage 1+2) с self-reflection")
     enable_prompt_caching: bool = Field(True, description="Использовать prompt caching для OpenAI/Anthropic (экономия токенов)")
     log_cache_metrics: bool = Field(True, description="Логировать детальные метрики кеширования токенов")
     cache_metrics_in_final_message: bool = Field(False, description="Показывать метрики кеширования в финальном сообщении пользователю (для отладки)")
@@ -140,7 +134,7 @@ class Settings(BaseSettings):
     max_context_tokens_stage2: int = Field(10000, description="Максимальное количество токенов контекста для Stage 2 (используются релевантные фрагменты)")
 
     # Новая консолидированная архитектура (2 запроса вместо 5-6)
-    enable_consolidated_two_request: bool = Field(False, description="Включить новую консолидированную архитектуру (2 запроса вместо 5-6)")
+    enable_consolidated_two_request: bool = Field(True, description="Включить новую консолидированную архитектуру (2 запроса вместо 5-6)")
     consolidated_protocol_quality_threshold: float = Field(0.7, description="Порог качества для использования консолидированного метода (0.0-1.0)")
     enable_consolidated_fallback: bool = Field(True, description="Разрешить fallback к стандартному методу при ошибках")
     consolidated_max_tokens_request1: int = Field(4000, description="Максимальное токенов для запроса 1 (извлечение)")
@@ -213,7 +207,8 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_file_encoding="utf-8"
+        env_file_encoding="utf-8",
+        extra='ignore'
     )
 
 

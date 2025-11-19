@@ -96,7 +96,7 @@ class MeetingStructureBuilder:
         )
         
         # 3. Параллельное извлечение основных сущностей через LLM
-        if self.llm_manager and settings.enable_meeting_structure:
+        if self.llm_manager:
             topics, decisions, action_items = await self._extract_entities_parallel(
                 transcription, diarization_analysis, speakers
             )
@@ -105,7 +105,7 @@ class MeetingStructureBuilder:
             topics = []
             decisions = []
             action_items = []
-            logger.warning("LLM manager не доступен или структурирование отключено, используем базовое извлечение")
+            logger.warning("LLM manager не доступен, используем базовое извлечение")
         
         # 4. Связывание данных
         self._link_entities(topics, decisions, action_items, speakers)

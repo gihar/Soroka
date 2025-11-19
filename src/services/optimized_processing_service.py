@@ -33,7 +33,7 @@ from src.services.protocol_validator import protocol_validator
 from src.services.segmentation_service import segmentation_service
 from src.services.meeting_structure_builder import get_structure_builder
 from src.services.smart_template_selector import smart_selector
-from llm_providers import generate_protocol_two_stage, generate_protocol_chain_of_thought, llm_manager
+from llm_providers import generate_protocol_chain_of_thought, llm_manager
 from config import settings
 
 
