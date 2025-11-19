@@ -1134,85 +1134,20 @@ class OptimizedProcessingService(BaseProcessingService):
             if diarization_data_raw:
                 estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
             
-            # Построение структурированного представления встречи (если включено)
+            # Отключено построение структурированного представления для соблюдения лимита в 2 LLM запроса
+            # Консолидированный метод уже выполняет извлечение структуры в своих 2 запросах
             # ВАЖНО: meeting_structure используется как единственный источник
             # тем, решений и задач. Повторное извлечение в LLM запросах НЕ выполняется.
             # Это исключает дублирование и экономит токены.
             meeting_structure = None
-            if settings.enable_meeting_structure:
-                try:
-                    logger.info("Построение структурированного представления встречи")
-                    structure_start_time = time.time()
-                    
-                    # Получаем builder с LLM manager
-                    structure_builder = get_structure_builder(llm_manager)
-                    
-                    # Определяем тип встречи если есть классификация
-                    meeting_type = "general"
-                    if diarization_analysis:
-                        meeting_type = diarization_analysis.get('meeting_type', 'general')
-                    
-                    # Выбираем транскрипцию: форматированную если есть диаризация, иначе исходную
-                    transcription_for_structure = transcription_result.transcription
-                    if diarization_data_raw and diarization_data_raw.get('formatted_transcript'):
-                        transcription_for_structure = diarization_data_raw['formatted_transcript']
-                        logger.info("Используем форматированную транскрипцию для построения структуры")
-                    
-                    # Строим структуру
-                    meeting_structure = await structure_builder.build_from_transcription(
-                        transcription=transcription_for_structure,
-                        diarization_analysis=diarization_analysis,
-                        meeting_type=meeting_type,
-                        language=request.language
-                    )
-                    
-                    # Сохраняем метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = len(meeting_structure.topics)
-                    processing_metrics.decisions_extracted = len(meeting_structure.decisions)
-                    processing_metrics.actions_extracted = len(meeting_structure.action_items)
-                    
-                    validation = meeting_structure.validate_structure()
-                    processing_metrics.structure_validation_passed = validation['valid']
-                    
-                    logger.info(
-                        f"Структура построена за {processing_metrics.structure_building_duration:.2f}с: "
-                        f"{processing_metrics.topics_extracted} тем, {processing_metrics.decisions_extracted} решений, "
-                        f"{processing_metrics.actions_extracted} задач"
-                    )
-                    
-                    # Кэшируем структуру если включено
-                    if settings.cache_meeting_structures:
-                        structure_cache_key = f"structure:{transcription_hash}"
-                        await performance_cache.set(structure_cache_key, meeting_structure.to_dict(), cache_type="meeting_structure")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(
-                        f"❌ Ошибка парсинга JSON при построении структуры встречи: {e}",
-                        exc_info=True
-                    )
-                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
-                    meeting_structure = None
-                    # Записываем информацию об ошибке в метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = 0
-                    processing_metrics.decisions_extracted = 0
-                    processing_metrics.actions_extracted = 0
-                    processing_metrics.structure_validation_passed = False
-                except Exception as e:
-                    error_type = type(e).__name__
-                    logger.error(
-                        f"❌ Неожиданная ошибка при построении структуры встречи ({error_type}): {e}",
-                        exc_info=True
-                    )
-                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
-                    meeting_structure = None
-                    # Записываем информацию об ошибке в метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = 0
-                    processing_metrics.decisions_extracted = 0
-                    processing_metrics.actions_extracted = 0
-                    processing_metrics.structure_validation_passed = False
+            logger.info("⚠️ Построение структурированного представления отключено для соблюдения лимита в 2 LLM запроса")
+
+            # Устанавливаем нулевые метрики структуры
+            processing_metrics.structure_building_duration = 0.0
+            processing_metrics.topics_extracted = 0
+            processing_metrics.decisions_extracted = 0
+            processing_metrics.actions_extracted = 0
+            processing_metrics.structure_validation_passed = False
             
             # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
             # OD протокол - специальный режим для протокола поручений руководителей
@@ -1302,27 +1237,6 @@ class OptimizedProcessingService(BaseProcessingService):
                     diarization_analysis=diarization_analysis,
                     participants_list=participants_list,
                     meeting_metadata=meeting_metadata,
-                    openai_model_key=openai_model_key,
-                    speaker_mapping=request.speaker_mapping,
-                    meeting_topic=request.meeting_topic,
-                    meeting_date=request.meeting_date,
-                    meeting_time=request.meeting_time,
-                    participants=request.participants_list
-                )
-
-            elif settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
-                logger.info("Использование unified генерации протокола (1 запрос с self-reflection)")
-
-                from llm_providers import generate_protocol_unified
-
-                llm_result_data = await generate_protocol_unified(
-                    manager=llm_manager,
-                    provider_name=request.llm_provider,
-                    transcription=transcription_result.transcription,
-                    template_variables=template_variables,
-                    diarization_data=diarization_data_raw,
-                    diarization_analysis=diarization_analysis,
-                    meeting_structure=meeting_structure,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
