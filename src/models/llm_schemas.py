@@ -206,6 +206,38 @@ class ActionItemsExtractionSchema(BaseModel):
         extra = "forbid"
 
 
+class ODProtocolAssignmentSchema(BaseModel):
+    """Схема для одного поручения от руководителя"""
+    manager_name: str = Field(..., description="Имя руководителя, давшего поручение")
+    instruction: str = Field(..., description="Описание поручения")
+    responsible: str = Field(default="", description="Ответственный исполнитель (если указан)")
+    deadline: str = Field(default="", description="Срок выполнения (если указан)")
+    
+    class Config:
+        extra = "forbid"
+
+
+class ODProtocolTaskSchema(BaseModel):
+    """Схема для одной задачи/проекта с поручениями"""
+    task_name: str = Field(..., description="Название задачи или проекта")
+    assignments: List[ODProtocolAssignmentSchema] = Field(default_factory=list, description="Список поручений от руководителей по этой задаче")
+    
+    class Config:
+        extra = "forbid"
+
+
+class ODProtocolSchema(BaseModel):
+    """Схема для OD протокола (протокол поручений руководителей)"""
+    tasks: List[ODProtocolTaskSchema] = Field(description="Список задач/проектов с поручениями")
+    meeting_date: Optional[str] = Field(default=None, description="Дата встречи")
+    participants: Optional[str] = Field(default=None, description="Список участников через запятую")
+    managers: Optional[str] = Field(default=None, description="Список руководителей через запятую")
+    additional_notes: Optional[str] = Field(default=None, description="Дополнительные заметки")
+    
+    class Config:
+        extra = "forbid"
+
+
 def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
     """
     Получить JSON Schema для Pydantic модели в формате OpenAI
@@ -287,6 +319,7 @@ SPEAKER_MAPPING_SCHEMA = get_json_schema(SpeakerMappingSchema)
 TOPICS_EXTRACTION_SCHEMA = get_json_schema(TopicsExtractionSchema)
 DECISIONS_EXTRACTION_SCHEMA = get_json_schema(DecisionsExtractionSchema)
 ACTION_ITEMS_EXTRACTION_SCHEMA = get_json_schema(ActionItemsExtractionSchema)
+OD_PROTOCOL_SCHEMA = get_json_schema(ODProtocolSchema)
 
 
 def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
@@ -310,6 +343,7 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'topics': TOPICS_EXTRACTION_SCHEMA,
         'decisions': DECISIONS_EXTRACTION_SCHEMA,
         'action_items': ACTION_ITEMS_EXTRACTION_SCHEMA,
+        'od_protocol': OD_PROTOCOL_SCHEMA,
     }
     
     if schema_type not in schemas:

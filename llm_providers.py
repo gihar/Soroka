@@ -2573,6 +2573,312 @@ def _build_unified_prompt(
     return prompt
 
 
+# ===================================================================
+# OD PROTOCOL GENERATION (ПРОТОКОЛ ПОРУЧЕНИЙ РУКОВОДИТЕЛЕЙ)
+# ===================================================================
+
+def _build_od_system_prompt() -> str:
+    """
+    Системный промпт для режима OD протокола (протокол поручений руководителей)
+    """
+    return """Ты — эксперт по документированию поручений и задач от руководителей на совещаниях.
+
+ТВОЯ ЗАДАЧА:
+Из транскрипции встречи извлечь структурированный протокол поручений от руководителей.
+
+ПРИНЦИПЫ РАБОТЫ:
+1. ФОКУС НА РУКОВОДИТЕЛЯХ: Особое внимание уделяй высказываниям руководителей (они указаны в списке участников с ролями)
+2. СТРУКТУРА ПО ЗАДАЧАМ: Группируй информацию по обсуждаемым задачам/проектам
+3. ТОЧНОСТЬ: Фиксируй ТОЛЬКО то, что явно прозвучало. Не додумывай, не интерпретируй
+4. КОНКРЕТИКА: Ищи конкретные поручения, ответственных, сроки
+
+ЧТО ИЗВЛЕКАТЬ:
+- Название задачи/проекта (как его называет ведущий или участники встречи)
+- Поручения от каждого руководителя по этой задаче
+- Ответственных исполнителей (если названы)
+- Сроки выполнения (если указаны)
+
+ФОРМАТ ПОРУЧЕНИЯ:
+- Кто дал поручение (имя руководителя)
+- Суть поручения (что нужно сделать)
+- Кто ответственный за выполнение
+- Когда должно быть выполнено
+
+ВАЖНО:
+- Если руководителей несколько, фиксируй поручения от каждого
+- Если поручение без срока - оставляй поле пустым, не придумывай
+- Если ответственный не назван - оставляй поле пустым
+- Используй точные формулировки из транскрипции"""
+
+
+def _build_od_user_prompt(
+    transcription: str,
+    diarization_data: Optional[Dict[str, Any]],
+    participants: Optional[List[Dict[str, str]]],
+    speaker_mapping: Optional[Dict[str, str]],
+    meeting_date: Optional[str] = None
+) -> str:
+    """
+    Пользовательский промпт для OD протокола
+    """
+    # Извлекаем руководителей из списка участников
+    managers = []
+    if participants:
+        for p in participants:
+            role = p.get('role', '').lower()
+            if any(keyword in role for keyword in ['руководитель', 'директор', 'глава', 'начальник', 'ceo', 'cto', 'cfo']):
+                managers.append(p['name'])
+    
+    # Формируем блок с транскрипцией
+    if diarization_data and diarization_data.get("formatted_transcript"):
+        transcription_text = (
+            "ТРАНСКРИПЦИЯ ВСТРЕЧИ С РАЗДЕЛЕНИЕМ ГОВОРЯЩИХ:\n\n"
+            f"{diarization_data['formatted_transcript']}\n\n"
+        )
+    else:
+        transcription_text = (
+            "ТРАНСКРИПЦИЯ ВСТРЕЧИ:\n\n"
+            f"{transcription}\n\n"
+        )
+    
+    # Информация об участниках и руководителях
+    participants_info = ""
+    if participants:
+        participants_info = "УЧАСТНИКИ ВСТРЕЧИ:\n"
+        for p in participants:
+            role_text = f" — {p['role']}" if p.get('role') else ""
+            participants_info += f"- {p['name']}{role_text}\n"
+        participants_info += "\n"
+    
+    if managers:
+        participants_info += "РУКОВОДИТЕЛИ (фокус внимания):\n"
+        for manager in managers:
+            participants_info += f"- {manager}\n"
+        participants_info += "\n"
+    
+    # Сопоставление спикеров
+    mapping_info = ""
+    if speaker_mapping:
+        mapping_info = "СОПОСТАВЛЕНИЕ СПИКЕРОВ:\n"
+        for speaker_id, name in speaker_mapping.items():
+            mapping_info += f"- {speaker_id} = {name}\n"
+        mapping_info += "\n"
+    
+    # Дополнительная информация
+    meta_info = ""
+    if meeting_date:
+        meta_info += f"Дата встречи: {meeting_date}\n\n"
+    
+    prompt = f"""{transcription_text}
+
+{participants_info}{mapping_info}{meta_info}
+
+ЗАДАНИЕ:
+Проанализируй транскрипцию и извлеки структурированный протокол поручений.
+
+СТРУКТУРА ОТВЕТА:
+Для каждой обсуждаемой задачи/проекта выдели:
+1. Название задачи (как называют участники)
+2. Все поручения от руководителей по этой задаче
+
+Для каждого поручения укажи:
+- manager_name: имя руководителя, давшего поручение
+- instruction: суть поручения (что нужно сделать)
+- responsible: ответственный исполнитель (если указан)
+- deadline: срок выполнения (если указан)
+
+ИНСТРУКЦИИ:
+1. Внимательно читай высказывания руководителей (список выше)
+2. Группируй поручения по задачам/проектам
+3. Сохраняй точные формулировки
+4. Если информации нет (ответственный, срок) - оставляй поле пустым
+5. Используй имена участников в формате "Имя Фамилия"
+
+Создай структурированный JSON согласно схеме ODProtocolSchema."""
+    
+    return prompt
+
+
+def format_od_protocol(protocol_data: Dict[str, Any]) -> str:
+    """
+    Форматирует OD протокол в читаемый текст
+    
+    Args:
+        protocol_data: Данные протокола из ODProtocolSchema
+        
+    Returns:
+        Отформатированный текст протокола
+    """
+    result = []
+    
+    # Заголовок
+    result.append("ПРОТОКОЛ ПОРУЧЕНИЙ\n")
+    result.append("=" * 60 + "\n")
+    
+    # Метаданные
+    if protocol_data.get('meeting_date'):
+        result.append(f"Дата встречи: {protocol_data['meeting_date']}\n")
+    
+    if protocol_data.get('managers'):
+        result.append(f"Руководители: {protocol_data['managers']}\n")
+    
+    if protocol_data.get('participants'):
+        result.append(f"Участники: {protocol_data['participants']}\n")
+    
+    result.append("\n" + "=" * 60 + "\n\n")
+    
+    # Задачи и поручения
+    tasks = protocol_data.get('tasks', [])
+    
+    for i, task in enumerate(tasks, 1):
+        task_name = task.get('task_name', 'Без названия')
+        result.append(f"{i}. {task_name}\n")
+        
+        assignments = task.get('assignments', [])
+        if assignments:
+            for assignment in assignments:
+                instruction = assignment.get('instruction', '')
+                manager = assignment.get('manager_name', '')
+                responsible = assignment.get('responsible', '')
+                deadline = assignment.get('deadline', '')
+                
+                # Форматируем поручение
+                result.append(f"   {instruction}")
+                
+                # Добавляем руководителя если есть
+                if manager:
+                    result.append(f" (от {manager})")
+                
+                result.append(".\n")
+                
+                # Добавляем ответственного и срок
+                details = []
+                if responsible:
+                    details.append(f"Отв. {responsible}")
+                if deadline:
+                    details.append(f"Срок — {deadline}")
+                
+                if details:
+                    result.append(f"   {'. '.join(details)}.\n")
+                
+                result.append("\n")
+        else:
+            result.append("   (Поручений не зафиксировано)\n\n")
+    
+    # Дополнительные заметки
+    if protocol_data.get('additional_notes'):
+        result.append("\n" + "=" * 60 + "\n")
+        result.append("ДОПОЛНИТЕЛЬНЫЕ ЗАМЕТКИ:\n")
+        result.append(protocol_data['additional_notes'] + "\n")
+    
+    return "".join(result)
+
+
+async def generate_protocol_od(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    diarization_data: Optional[Dict[str, Any]] = None,
+    participants: Optional[List[Dict[str, str]]] = None,
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    meeting_date: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Генерация OD протокола (протокол поручений руководителей)
+    
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера (должен быть 'openai' для structured outputs)
+        transcription: Текст транскрипции
+        diarization_data: Данные диаризации
+        participants: Список участников с ролями
+        speaker_mapping: Сопоставление спикеров с участниками
+        meeting_date: Дата встречи
+        **kwargs: Дополнительные параметры (openai_model_key и др.)
+        
+    Returns:
+        Словарь с OD протоколом
+    """
+    from src.models.llm_schemas import OD_PROTOCOL_SCHEMA
+    
+    logger.info("Начало генерации OD протокола")
+    
+    # OD протокол работает только с OpenAI (structured outputs)
+    if provider_name != 'openai':
+        raise ValueError(f"OD протокол поддерживается только для OpenAI. Текущий провайдер: {provider_name}")
+    
+    # Строим промпты
+    system_prompt = _build_od_system_prompt()
+    user_prompt = _build_od_user_prompt(
+        transcription=transcription,
+        diarization_data=diarization_data,
+        participants=participants,
+        speaker_mapping=speaker_mapping,
+        meeting_date=meeting_date
+    )
+    
+    # Выбираем модель
+    openai_model_key = kwargs.get("openai_model_key")
+    selected_model = settings.openai_model
+    
+    if openai_model_key:
+        try:
+            preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+            if preset:
+                selected_model = preset.model
+        except Exception as e:
+            logger.warning(f"Ошибка при выборе модели по ключу: {e}")
+    
+    logger.info(f"Генерация OD протокола с моделью {selected_model}")
+    
+    # Получаем провайдера
+    provider = manager.providers.get(provider_name)
+    if not provider:
+        raise ValueError(f"Провайдер {provider_name} не найден")
+    
+    # Делаем запрос к OpenAI
+    try:
+        client = openai.OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url or None
+        )
+        
+        response = client.chat.completions.create(
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": OD_PROTOCOL_SCHEMA
+            },
+            temperature=0.1
+        )
+        
+        # Парсим результат
+        import json
+        result_text = response.choices[0].message.content
+        protocol_data = json.loads(result_text)
+        
+        logger.info(f"OD протокол успешно сгенерирован. Задач: {len(protocol_data.get('tasks', []))}")
+        
+        # Форматируем в текст
+        formatted_text = format_od_protocol(protocol_data)
+        
+        # Возвращаем в формате, совместимом с остальной системой
+        return {
+            'protocol_text': formatted_text,
+            'raw_data': protocol_data,
+            'mode': 'od_protokol'
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка при генерации OD протокола: {e}")
+        raise
+
+
 async def generate_protocol_unified(
     manager: 'LLMManager',
     provider_name: str,

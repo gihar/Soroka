@@ -1214,7 +1214,8 @@ class OptimizedProcessingService(BaseProcessingService):
                     processing_metrics.actions_extracted = 0
                     processing_metrics.structure_validation_passed = False
             
-            # Выбираем метод генерации: Unified > Chain-of-Thought > Двухэтапный > Стандартный
+            # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
+            # OD протокол - специальный режим для протокола поручений руководителей
             # Unified подход доступен через feature flag для A/B тестирования
             # Проверяем необходимость Chain-of-Thought для длинных встреч
             should_use_cot = segmentation_service.should_use_segmentation(
@@ -1222,7 +1223,55 @@ class OptimizedProcessingService(BaseProcessingService):
                 estimated_duration_minutes=estimated_duration_minutes
             )
             
-            if settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
+            if request.processing_mode == 'od_protokol':
+                logger.info("Использование OD протокола (протокол поручений руководителей)")
+                
+                from llm_providers import generate_protocol_od
+                
+                # OD протокол требует список участников с ролями
+                if not request.participants_list:
+                    logger.warning("OD протокол требует список участников с ролями. Используем стандартный режим.")
+                    # Fallback на стандартный режим
+                    llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
+                    llm_result = await task_pool.submit_task(
+                        llm_task_id,
+                        self._generate_llm_response,
+                        transcription_result,
+                        template,
+                        template_variables,
+                        request.llm_provider,
+                        diarization_data=diarization_data_raw,
+                        openai_model_key=openai_model_key,
+                        **{
+                            'speaker_mapping': request.speaker_mapping,
+                            'meeting_topic': request.meeting_topic,
+                            'meeting_date': request.meeting_date,
+                            'meeting_time': request.meeting_time,
+                            'participants': request.participants_list
+                        }
+                    )
+                    llm_result_data = llm_result.extracted_data
+                else:
+                    # Генерируем OD протокол
+                    od_result = await generate_protocol_od(
+                        manager=llm_manager,
+                        provider_name=request.llm_provider,
+                        transcription=transcription_result.transcription,
+                        diarization_data=diarization_data_raw,
+                        participants=request.participants_list,
+                        speaker_mapping=request.speaker_mapping,
+                        meeting_date=request.meeting_date,
+                        openai_model_key=openai_model_key
+                    )
+                    
+                    # OD протокол возвращает готовый текст, не нужно применять шаблон
+                    llm_result_data = {
+                        'protocol_text': od_result['protocol_text'],
+                        'raw_data': od_result['raw_data'],
+                        'mode': 'od_protokol'
+                    }
+                
+            elif settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
                 logger.info("Использование unified генерации протокола (1 запрос с self-reflection)")
                 
                 from llm_providers import generate_protocol_unified
@@ -1715,6 +1764,14 @@ class OptimizedProcessingService(BaseProcessingService):
                 return text
             # Пустая строка — падаем на простой формат
             return f"# Протокол\n\n{transcription_result.transcription}"
+        
+        # Проверяем на OD протокол - он возвращает готовый текст
+        if isinstance(llm_result, dict) and llm_result.get('mode') == 'od_protokol':
+            protocol_text = llm_result.get('protocol_text', '')
+            if protocol_text:
+                return protocol_text
+            # Fallback если текста нет
+            logger.warning("OD протокол без текста, используем fallback")
         
         # Получаем содержимое шаблона
         if hasattr(template, 'content'):
