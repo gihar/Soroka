@@ -345,9 +345,13 @@ sudo apt-get install ffmpeg
 
 **Основные разделы:**
 - 🚀 [Быстрый старт](docs/QUICKSTART.md)
+- 📊 [Статус реализации](docs/IMPLEMENTATION_STATUS.md) - **НОВОЕ!**
 - 🛠 [Установка и развертывание](docs/DEPLOYMENT.md)
 - 🎙 [Транскрипция и диаризация](docs/SPEECHMATICS_INTEGRATION.md)
+- ⚡ [Оптимизация LLM пайплайна](docs/LLM_PIPELINE_OPTIMIZATION.md) - **ОБНОВЛЕНО!**
 - 🔧 [Производительность](docs/PERFORMANCE_OPTIMIZATION.md)
+- 🛡️ [Надежность и Flood Control](docs/FLOOD_CONTROL_IMPLEMENTATION_SUMMARY.md)
+- 🎯 [Улучшения качества протоколов](docs/PROTOCOL_QUALITY_IMPROVEMENTS.md)
 - 🐛 [Решение проблем](docs/SSL_TROUBLESHOOTING.md)
 
 ## 📝 Лицензия

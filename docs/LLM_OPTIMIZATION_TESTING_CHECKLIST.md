@@ -141,7 +141,6 @@ grep "confidence=" logs/bot.log
 **Действия**:
 - [ ] Проверить meeting_structure (есть ли данные?)
 - [ ] Увеличить `MAX_CONTEXT_TOKENS_STAGE2`
-- [ ] Отключить `USE_STRUCTURE_ONLY_FOR_PROTOCOL=false`
 
 ### Проблема: Ошибки импорта
 

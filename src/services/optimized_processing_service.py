@@ -1271,11 +1271,50 @@ class OptimizedProcessingService(BaseProcessingService):
                         'mode': 'od_protokol'
                     }
                 
+            elif settings.enable_consolidated_two_request:
+                logger.info("Использование новой консолидированной генерации протокола (2 запроса вместо 5-6)")
+
+                from llm_providers import generate_protocol_consolidated_two_request
+
+                # Подготавливаем список участников
+                participants_list = None
+                if request.participants_list:
+                    participants_list = "\n".join([
+                        f"{p.get('name', '')} ({p.get('role', '')})".strip()
+                        for p in request.participants_list
+                        if p.get('name')
+                    ])
+
+                # Формируем метаданные встречи
+                meeting_metadata = {
+                    'meeting_topic': request.meeting_topic or '',
+                    'meeting_date': request.meeting_date or '',
+                    'meeting_time': request.meeting_time or '',
+                    'participants': participants_list or ''
+                }
+
+                llm_result_data = await generate_protocol_consolidated_two_request(
+                    manager=llm_manager,
+                    provider_name=request.llm_provider,
+                    transcription=transcription_result.transcription,
+                    template_variables=template_variables,
+                    diarization_data=diarization_data_raw,
+                    diarization_analysis=diarization_analysis,
+                    participants_list=participants_list,
+                    meeting_metadata=meeting_metadata,
+                    openai_model_key=openai_model_key,
+                    speaker_mapping=request.speaker_mapping,
+                    meeting_topic=request.meeting_topic,
+                    meeting_date=request.meeting_date,
+                    meeting_time=request.meeting_time,
+                    participants=request.participants_list
+                )
+
             elif settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
                 logger.info("Использование unified генерации протокола (1 запрос с self-reflection)")
-                
+
                 from llm_providers import generate_protocol_unified
-                
+
                 llm_result_data = await generate_protocol_unified(
                     manager=llm_manager,
                     provider_name=request.llm_provider,
@@ -1291,7 +1330,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     meeting_time=request.meeting_time,
                     participants=request.participants_list
                 )
-                
+
             elif should_use_cot and request.llm_provider == 'openai':
                 logger.info("Использование Chain-of-Thought генерации для длинной встречи")
                 

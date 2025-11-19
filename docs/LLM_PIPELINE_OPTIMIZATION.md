@@ -1,8 +1,9 @@
 # Оптимизация LLM пайплайна генерации протоколов
 
-**Дата**: 2 ноября 2025  
-**Версия**: 1.0  
-**Статус**: Реализовано, требуется тестирование
+**Дата**: 2 ноября 2025
+**Версия**: 1.0
+**Статус**: ✅ Реализовано, готово к продакшн
+**Последнее обновление**: 19 ноября 2025
 
 ## Обзор
 
@@ -120,11 +121,6 @@ max_context_tokens_stage2: int = Field(
     10000, 
     description="Максимальное количество токенов контекста для Stage 2"
 )
-
-use_structure_only_for_protocol: bool = Field(
-    True, 
-    description="Использовать meeting_structure как единственный источник тем/решений/задач"
-)
 ```
 
 ### Переменные окружения
@@ -138,9 +134,6 @@ export MAX_CONTEXT_TOKENS_STAGE2=15000
 
 # Отключить prompt caching (если провайдер не поддерживает)
 export ENABLE_PROMPT_CACHING=false
-
-# Использовать полную транскрипцию в протоколах (отключить оптимизацию)
-export USE_STRUCTURE_ONLY_FOR_PROTOCOL=false
 ```
 
 ---
@@ -384,7 +377,6 @@ max_context_tokens_stage2 = 15000  # Больше контекста для Stag
 
 ```python
 enable_unified_protocol_generation = False
-use_structure_only_for_protocol = False
 max_context_tokens_stage2 = 50000  # Почти полная транскрипция
 ```
 

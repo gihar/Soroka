@@ -64,6 +64,10 @@ class Settings(BaseSettings):
         None,
         description="Максимальный размер файла для стадии транскрипции (MB). По умолчанию берётся из MAX_FILE_SIZE"
     )
+    oom_max_memory_percent: float = Field(
+        90.0,
+        description="Максимальный процент использования памяти перед срабатыванием защиты (OOM Killer)"
+    )
     temp_dir: str = Field("temp", description="Директория для временных файлов")
     
     # Логирование
@@ -134,7 +138,15 @@ class Settings(BaseSettings):
     cache_metrics_in_final_message: bool = Field(False, description="Показывать метрики кеширования в финальном сообщении пользователю (для отладки)")
     min_transcription_length_for_cache: int = Field(3000, description="Минимальная длина транскрипции (в символах) для активации кеширования. ~1024 токенов = ~3000-4000 символов")
     max_context_tokens_stage2: int = Field(10000, description="Максимальное количество токенов контекста для Stage 2 (используются релевантные фрагменты)")
-    use_structure_only_for_protocol: bool = Field(True, description="Использовать meeting_structure как единственный источник тем/решений/задач (без повторного извлечения)")
+
+    # Новая консолидированная архитектура (2 запроса вместо 5-6)
+    enable_consolidated_two_request: bool = Field(False, description="Включить новую консолидированную архитектуру (2 запроса вместо 5-6)")
+    consolidated_protocol_quality_threshold: float = Field(0.7, description="Порог качества для использования консолидированного метода (0.0-1.0)")
+    enable_consolidated_fallback: bool = Field(True, description="Разрешить fallback к стандартному методу при ошибках")
+    consolidated_max_tokens_request1: int = Field(4000, description="Максимальное токенов для запроса 1 (извлечение)")
+    consolidated_max_tokens_request2: int = Field(3000, description="Максимальное токенов для запроса 2 (протокол)")
+    consolidated_temperature_request1: float = Field(0.3, description="Температура для запроса 1 (высокая точность)")
+    consolidated_temperature_request2: float = Field(0.4, description="Температура для запроса 2 (качественное форматирование)")
     
     # Сопоставление участников (speaker mapping)
     enable_speaker_mapping: bool = Field(True, description="Включить автоматическое сопоставление спикеров с участниками")

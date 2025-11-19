@@ -7,6 +7,7 @@
 - **[QUICKSTART.md](QUICKSTART.md)** - Быстрый старт для новых пользователей
 - **[README.md](README.md)** - Основная документация проекта
 - **[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)** - Обзор проекта и архитектуры
+- **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - 🆕 Статус реализации проекта (ноябрь 2025)
 
 ## 🛠 Установка и развертывание
 
@@ -26,8 +27,11 @@
 ## 🔧 Производительность и оптимизация
 
 - **[PERFORMANCE_OPTIMIZATION.md](PERFORMANCE_OPTIMIZATION.md)** - Оптимизация производительности
-- **[LLM_PIPELINE_OPTIMIZATION.md](LLM_PIPELINE_OPTIMIZATION.md)** - 🆕 Оптимизация LLM пайплайна (ноябрь 2025)
-- **[LLM_OPTIMIZATION_QUICKSTART.md](LLM_OPTIMIZATION_QUICKSTART.md)** - 🆕 Быстрый старт: оптимизация LLM
+- **[LLM_PIPELINE_OPTIMIZATION.md](LLM_PIPELINE_OPTIMIZATION.md)** - ✅ Оптимизация LLM пайплайна (реализовано, обновлено)
+- **[LLM_OPTIMIZATION_QUICKSTART.md](LLM_OPTIMIZATION_QUICKSTART.md)** - ✅ Быстрый старт: оптимизация LLM
+- **[LLM_OPTIMIZATION_SUMMARY.md](LLM_OPTIMIZATION_SUMMARY.md)** - ✅ Сводка оптимизаций LLM
+- **[LLM_OPTIMIZATION_README.md](LLM_OPTIMIZATION_README.md)** - 🆕 README по оптимизации LLM (перемещено)
+- **[LLM_OPTIMIZATION_TESTING_CHECKLIST.md](LLM_OPTIMIZATION_TESTING_CHECKLIST.md)** - Чек-лист тестирования оптимизаций
 - **[OOM_PROTECTION_GUIDE.md](OOM_PROTECTION_GUIDE.md)** - Защита от нехватки памяти
 - **[PROGRESS_OPTIMIZATION.md](PROGRESS_OPTIMIZATION.md)** - Оптимизация прогресса
   
@@ -37,8 +41,9 @@
 
 - **[RELIABILITY_GUIDE.md](RELIABILITY_GUIDE.md)** - Руководство по надежности
 - **[HEALTH_CHECK_LLM_FIX.md](HEALTH_CHECK_LLM_FIX.md)** - Проверка здоровья LLM
-- **[FLOOD_CONTROL_FIX.md](FLOOD_CONTROL_FIX.md)** - 🆕 Исправление Flood Control и Error Handler (октябрь 2025)
-- **[FLOOD_CONTROL_QUICKSTART.md](FLOOD_CONTROL_QUICKSTART.md)** - 🆕 Краткое руководство по Flood Control
+- **[FLOOD_CONTROL_FIX.md](FLOOD_CONTROL_FIX.md)** - ✅ Исправление Flood Control и Error Handler (реализовано)
+- **[FLOOD_CONTROL_QUICKSTART.md](FLOOD_CONTROL_QUICKSTART.md)** - ✅ Краткое руководство по Flood Control
+- **[FLOOD_CONTROL_IMPLEMENTATION_SUMMARY.md](FLOOD_CONTROL_IMPLEMENTATION_SUMMARY.md)** - ✅ Сводка реализации Flood Control
   
 Примечание: раздел о Circuit Breaker включен в руководство по надежности.
 
@@ -54,6 +59,13 @@
 - **[LLM_TEMPLATE_IMPROVEMENTS.md](LLM_TEMPLATE_IMPROVEMENTS.md)** - Улучшения LLM и шаблонов
 - **[LLM_PROMPT_IMPROVEMENTS.md](LLM_PROMPT_IMPROVEMENTS.md)** - 🆕 Улучшения промптов для LLM (октябрь 2025)
 
+## 🎯 Протоколы и шаблоны
+
+- **[OD_PROTOCOL_MODE.md](OD_PROTOCOL_MODE.md)** - Режим OD протокола
+- **[OD_PROTOCOL_QUICKSTART.md](OD_PROTOCOL_QUICKSTART.md)** - 🆕 Быстрый старт: OD протокол (перемещено)
+- **[SMART_TEMPLATE_SELECTION.md](SMART_TEMPLATE_SELECTION.md)** - Умный выбор шаблонов
+- **[TEMPLATE_SELECTION_IMPROVEMENTS.md](TEMPLATE_SELECTION_IMPROVEMENTS.md)** - Улучшения выбора шаблонов
+
 ## 🐛 Исправления и обновления
 
 ### Критические исправления
@@ -68,6 +80,7 @@
 - **[JSON_SERIALIZATION_FIX.md](JSON_SERIALIZATION_FIX.md)** - Исправление JSON сериализации
 - **[SHUTDOWN_ERRORS_FIX.md](SHUTDOWN_ERRORS_FIX.md)** - Исправление ошибок завершения
 - **[URL_FORMAT_FIX.md](URL_FORMAT_FIX.md)** - Исправление формата URL
+- **[OD_PROTOCOL_FIX.md](OD_PROTOCOL_FIX.md)** - 🆕 Исправления OD протокола (перемещено)
 
 ## 📊 Отчеты и сводки
 

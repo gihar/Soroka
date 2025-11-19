@@ -90,11 +90,10 @@
 
 ### Измененные файлы
 
-1. **config.py** (+4 настройки)
+1. **config.py** (+3 настройки)
    - `enable_unified_protocol_generation`
    - `enable_prompt_caching`
    - `max_context_tokens_stage2`
-   - `use_structure_only_for_protocol`
 
 2. **src/models/llm_schemas.py** (+23 строки)
    - Класс `UnifiedProtocolSchema`
@@ -127,7 +126,6 @@ export ENABLE_UNIFIED_PROTOCOL_GENERATION=true
 
 # Уже включены по умолчанию:
 # - Prompt caching (ENABLE_PROMPT_CACHING=true)
-# - Переиспользование meeting_structure (USE_STRUCTURE_ONLY_FOR_PROTOCOL=true)
 # - Сокращение контекста Stage 2 (MAX_CONTEXT_TOKENS_STAGE2=10000)
 ```
 
