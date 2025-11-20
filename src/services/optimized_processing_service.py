@@ -1188,6 +1188,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     llm_result_data = llm_result.extracted_data
                 else:
                     # Генерируем OD протокол
+                    logger.info(f"Запуск OD протокола для {len(request.participants_list)} участников")
                     od_result = await generate_protocol_od(
                         manager=llm_manager,
                         provider_name=request.llm_provider,
@@ -1198,8 +1199,9 @@ class OptimizedProcessingService(BaseProcessingService):
                         meeting_date=request.meeting_date,
                         openai_model_key=openai_model_key
                     )
-                    
+  
                     # OD протокол возвращает готовый текст, не нужно применять шаблон
+                    logger.success(f"OD протокол успешно сгенерирован. Задач: {len(od_result['raw_data'].get('tasks', []))}")
                     llm_result_data = {
                         'protocol_text': od_result['protocol_text'],
                         'raw_data': od_result['raw_data'],

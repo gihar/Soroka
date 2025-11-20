@@ -2835,23 +2835,76 @@ async def generate_protocol_od(
     
     # Делаем запрос к OpenAI
     try:
+        # Формируем extra_headers для атрибуции
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+
+        # Логирование информации о запросе
+        user_len = len(user_prompt)
+        transcript_len = len(transcription)
+        participants_count = len(participants) if participants else 0
+        logger.info(
+            f"OD протокол запрос: model={selected_model}, "
+            f"participants={participants_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
+        )
+
+        # DEBUG логирование запроса
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI REQUEST - generate_protocol_od")
+            logger.debug("=" * 80)
+            logger.debug(f"Model: {selected_model}")
+            logger.debug(f"Base URL: {settings.openai_base_url}")
+            logger.debug(f"Temperature: 0.1")
+            logger.debug(f"Response format: JSON Schema (OD_PROTOCOL)")
+            logger.debug(f"Extra headers: {extra_headers}")
+            logger.debug("-" * 80)
+            logger.debug(f"System prompt:\n{system_prompt}")
+            logger.debug("-" * 80)
+            logger.debug(f"User prompt:\n{user_prompt}")
+            logger.debug("=" * 80)
+
+        logger.info(f"Отправляем OD протокол запрос в OpenAI с моделью {selected_model}")
+
         client = openai.OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url or None
         )
-        
-        response = client.chat.completions.create(
-            model=selected_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": OD_PROTOCOL_SCHEMA
-            },
-            temperature=0.1
-        )
+
+        # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
+        async def _call_openai():
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": OD_PROTOCOL_SCHEMA
+                },
+                temperature=0.1,
+                extra_headers=extra_headers
+            )
+
+        response = await _call_openai()
+
+        logger.info("Получен ответ от OpenAI API для OD протокола")
+
+        # DEBUG логирование ответа
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - generate_protocol_od")
+            logger.debug("=" * 80)
+            if hasattr(response, 'usage'):
+                logger.debug(f"Token usage: {response.usage}")
+            logger.debug("-" * 80)
+            logger.debug(f"Response content:\n{response.choices[0].message.content}")
+            logger.debug("=" * 80)
         
         # Парсим результат
         import json
