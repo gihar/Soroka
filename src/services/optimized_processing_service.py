@@ -33,7 +33,7 @@ from src.services.protocol_validator import protocol_validator
 from src.services.segmentation_service import segmentation_service
 from src.services.meeting_structure_builder import get_structure_builder
 from src.services.smart_template_selector import smart_selector
-from llm_providers import generate_protocol_two_stage, generate_protocol_chain_of_thought, llm_manager
+from llm_providers import generate_protocol_chain_of_thought, llm_manager
 from config import settings
 
 
@@ -1134,87 +1134,23 @@ class OptimizedProcessingService(BaseProcessingService):
             if diarization_data_raw:
                 estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
             
-            # Построение структурированного представления встречи (если включено)
+            # Отключено построение структурированного представления для соблюдения лимита в 2 LLM запроса
+            # Консолидированный метод уже выполняет извлечение структуры в своих 2 запросах
             # ВАЖНО: meeting_structure используется как единственный источник
             # тем, решений и задач. Повторное извлечение в LLM запросах НЕ выполняется.
             # Это исключает дублирование и экономит токены.
             meeting_structure = None
-            if settings.enable_meeting_structure:
-                try:
-                    logger.info("Построение структурированного представления встречи")
-                    structure_start_time = time.time()
-                    
-                    # Получаем builder с LLM manager
-                    structure_builder = get_structure_builder(llm_manager)
-                    
-                    # Определяем тип встречи если есть классификация
-                    meeting_type = "general"
-                    if diarization_analysis:
-                        meeting_type = diarization_analysis.get('meeting_type', 'general')
-                    
-                    # Выбираем транскрипцию: форматированную если есть диаризация, иначе исходную
-                    transcription_for_structure = transcription_result.transcription
-                    if diarization_data_raw and diarization_data_raw.get('formatted_transcript'):
-                        transcription_for_structure = diarization_data_raw['formatted_transcript']
-                        logger.info("Используем форматированную транскрипцию для построения структуры")
-                    
-                    # Строим структуру
-                    meeting_structure = await structure_builder.build_from_transcription(
-                        transcription=transcription_for_structure,
-                        diarization_analysis=diarization_analysis,
-                        meeting_type=meeting_type,
-                        language=request.language
-                    )
-                    
-                    # Сохраняем метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = len(meeting_structure.topics)
-                    processing_metrics.decisions_extracted = len(meeting_structure.decisions)
-                    processing_metrics.actions_extracted = len(meeting_structure.action_items)
-                    
-                    validation = meeting_structure.validate_structure()
-                    processing_metrics.structure_validation_passed = validation['valid']
-                    
-                    logger.info(
-                        f"Структура построена за {processing_metrics.structure_building_duration:.2f}с: "
-                        f"{processing_metrics.topics_extracted} тем, {processing_metrics.decisions_extracted} решений, "
-                        f"{processing_metrics.actions_extracted} задач"
-                    )
-                    
-                    # Кэшируем структуру если включено
-                    if settings.cache_meeting_structures:
-                        structure_cache_key = f"structure:{transcription_hash}"
-                        await performance_cache.set(structure_cache_key, meeting_structure.to_dict(), cache_type="meeting_structure")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(
-                        f"❌ Ошибка парсинга JSON при построении структуры встречи: {e}",
-                        exc_info=True
-                    )
-                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
-                    meeting_structure = None
-                    # Записываем информацию об ошибке в метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = 0
-                    processing_metrics.decisions_extracted = 0
-                    processing_metrics.actions_extracted = 0
-                    processing_metrics.structure_validation_passed = False
-                except Exception as e:
-                    error_type = type(e).__name__
-                    logger.error(
-                        f"❌ Неожиданная ошибка при построении структуры встречи ({error_type}): {e}",
-                        exc_info=True
-                    )
-                    logger.warning("⚠️ Продолжаем обработку БЕЗ структурирования встречи (fallback режим)")
-                    meeting_structure = None
-                    # Записываем информацию об ошибке в метрики
-                    processing_metrics.structure_building_duration = time.time() - structure_start_time
-                    processing_metrics.topics_extracted = 0
-                    processing_metrics.decisions_extracted = 0
-                    processing_metrics.actions_extracted = 0
-                    processing_metrics.structure_validation_passed = False
+            logger.info("⚠️ Построение структурированного представления отключено для соблюдения лимита в 2 LLM запроса")
+
+            # Устанавливаем нулевые метрики структуры
+            processing_metrics.structure_building_duration = 0.0
+            processing_metrics.topics_extracted = 0
+            processing_metrics.decisions_extracted = 0
+            processing_metrics.actions_extracted = 0
+            processing_metrics.structure_validation_passed = False
             
-            # Выбираем метод генерации: Unified > Chain-of-Thought > Двухэтапный > Стандартный
+            # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
+            # OD протокол - специальный режим для протокола поручений руководителей
             # Unified подход доступен через feature flag для A/B тестирования
             # Проверяем необходимость Chain-of-Thought для длинных встреч
             should_use_cot = segmentation_service.should_use_segmentation(
@@ -1222,19 +1158,87 @@ class OptimizedProcessingService(BaseProcessingService):
                 estimated_duration_minutes=estimated_duration_minutes
             )
             
-            if settings.enable_unified_protocol_generation and request.llm_provider == 'openai':
-                logger.info("Использование unified генерации протокола (1 запрос с self-reflection)")
+            if request.processing_mode == 'od_protokol':
+                logger.info("Использование OD протокола (протокол поручений руководителей)")
                 
-                from llm_providers import generate_protocol_unified
+                from llm_providers import generate_protocol_od
                 
-                llm_result_data = await generate_protocol_unified(
+                # OD протокол требует список участников с ролями
+                if not request.participants_list:
+                    logger.warning("OD протокол требует список участников с ролями. Используем стандартный режим.")
+                    # Fallback на стандартный режим
+                    llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
+                    llm_result = await task_pool.submit_task(
+                        llm_task_id,
+                        self._generate_llm_response,
+                        transcription_result,
+                        template,
+                        template_variables,
+                        request.llm_provider,
+                        diarization_data=diarization_data_raw,
+                        openai_model_key=openai_model_key,
+                        **{
+                            'speaker_mapping': request.speaker_mapping,
+                            'meeting_topic': request.meeting_topic,
+                            'meeting_date': request.meeting_date,
+                            'meeting_time': request.meeting_time,
+                            'participants': request.participants_list
+                        }
+                    )
+                    llm_result_data = llm_result.extracted_data
+                else:
+                    # Генерируем OD протокол
+                    logger.info(f"Запуск OD протокола для {len(request.participants_list)} участников")
+                    od_result = await generate_protocol_od(
+                        manager=llm_manager,
+                        provider_name=request.llm_provider,
+                        transcription=transcription_result.transcription,
+                        diarization_data=diarization_data_raw,
+                        participants=request.participants_list,
+                        speaker_mapping=request.speaker_mapping,
+                        meeting_date=request.meeting_date,
+                        openai_model_key=openai_model_key
+                    )
+  
+                    # OD протокол возвращает готовый текст, не нужно применять шаблон
+                    logger.success(f"OD протокол успешно сгенерирован. Задач: {len(od_result['raw_data'].get('tasks', []))}")
+                    llm_result_data = {
+                        'protocol_text': od_result['protocol_text'],
+                        'raw_data': od_result['raw_data'],
+                        'mode': 'od_protokol'
+                    }
+                
+            elif settings.enable_consolidated_two_request:
+                logger.info("Использование новой консолидированной генерации протокола (2 запроса вместо 5-6)")
+
+                from llm_providers import generate_protocol_consolidated_two_request
+
+                # Подготавливаем список участников
+                participants_list = None
+                if request.participants_list:
+                    participants_list = "\n".join([
+                        f"{p.get('name', '')} ({p.get('role', '')})".strip()
+                        for p in request.participants_list
+                        if p.get('name')
+                    ])
+
+                # Формируем метаданные встречи
+                meeting_metadata = {
+                    'meeting_topic': request.meeting_topic or '',
+                    'meeting_date': request.meeting_date or '',
+                    'meeting_time': request.meeting_time or '',
+                    'participants': participants_list or ''
+                }
+
+                llm_result_data = await generate_protocol_consolidated_two_request(
                     manager=llm_manager,
                     provider_name=request.llm_provider,
                     transcription=transcription_result.transcription,
                     template_variables=template_variables,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
-                    meeting_structure=meeting_structure,
+                    participants_list=participants_list,
+                    meeting_metadata=meeting_metadata,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
@@ -1242,7 +1246,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     meeting_time=request.meeting_time,
                     participants=request.participants_list
                 )
-                
+
             elif should_use_cot and request.llm_provider == 'openai':
                 logger.info("Использование Chain-of-Thought генерации для длинной встречи")
                 
@@ -1715,6 +1719,14 @@ class OptimizedProcessingService(BaseProcessingService):
                 return text
             # Пустая строка — падаем на простой формат
             return f"# Протокол\n\n{transcription_result.transcription}"
+        
+        # Проверяем на OD протокол - он возвращает готовый текст
+        if isinstance(llm_result, dict) and llm_result.get('mode') == 'od_protokol':
+            protocol_text = llm_result.get('protocol_text', '')
+            if protocol_text:
+                return protocol_text
+            # Fallback если текста нет
+            logger.warning("OD протокол без текста, используем fallback")
         
         # Получаем содержимое шаблона
         if hasattr(template, 'content'):

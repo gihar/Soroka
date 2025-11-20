@@ -272,8 +272,10 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             await state.clear()
             return
         
-        # Если не используется умный выбор, проверяем наличие template_id
-        if not data.get('use_smart_selection') and not data.get('template_id'):
+        # Проверяем template_id только если не используется умный выбор И не используется OD протокол
+        if (not data.get('use_smart_selection') and 
+            not data.get('template_id') and 
+            data.get('processing_mode') != 'od_protokol'):
             await message.answer(
                 "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
             )
@@ -562,7 +564,13 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             callback_data="quick_smart_select"
         )])
         
-        # Кнопка 2: Сохранённый шаблон (если есть)
+        # Кнопка 2: OD протокол (протокол поручений)
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="📋 Протокол поручений (OD)",
+            callback_data="od_protocol_select"
+        )])
+        
+        # Кнопка 3: Сохранённый шаблон (если есть)
         if user and user.default_template_id:
             try:
                 if user.default_template_id == 0:
@@ -584,7 +592,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             except Exception as e:
                 logger.warning(f"Не удалось получить шаблон по умолчанию: {e}")
         
-        # Кнопка 3: Выбрать шаблон (для разового использования)
+        # Кнопка 4: Выбрать шаблон (для разового использования)
         keyboard_buttons.append([InlineKeyboardButton(
             text="📋 Выбрать шаблон",
             callback_data="select_template_once"
@@ -602,6 +610,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         message_text += (
             "📝 **Выберите способ создания протокола:**\n\n"
             "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
+            "📋 **Протокол поручений (OD)** - структурированный протокол от руководителей\n"
             "📋 **По шаблону** - использовать сохранённый шаблон\n"
             "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки"
         )

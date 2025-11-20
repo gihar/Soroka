@@ -17,15 +17,15 @@ class ProtocolSchema(BaseModel):
     "Каждое значение — строка (UTF-8), БЕЗ вложенных объектов или массивов"
     """
     meeting_title: str = Field(description="Название встречи")
-    meeting_date: Optional[str] = Field(default=None, description="Дата встречи")
-    meeting_time: Optional[str] = Field(default=None, description="Время встречи")
+    meeting_date: str = Field(default="", description="Дата встречи")
+    meeting_time: str = Field(default="", description="Время встречи")
     participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
     agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
     key_points: str = Field(description="Ключевые моменты (пункты списком через \\n)")
     decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
     action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
-    next_meeting: Optional[str] = Field(default=None, description="Информация о следующей встрече")
-    additional_notes: Optional[str] = Field(default=None, description="Дополнительные заметки")
+    next_meeting: str = Field(default="", description="Информация о следующей встрече")
+    additional_notes: str = Field(default="", description="Дополнительные заметки")
     detected_speaker_mapping: Optional[Dict[str, str]] = Field(default=None, description="Автоопределенное сопоставление SPEAKER_N с именами участников")
     speaker_confidence_scores: Optional[Dict[str, float]] = Field(default=None, description="Уверенность в сопоставлении для каждого спикера")
     unmapped_speakers: Optional[List[str]] = Field(default=None, description="Спикеры которых не удалось сопоставить")
@@ -206,6 +206,38 @@ class ActionItemsExtractionSchema(BaseModel):
         extra = "forbid"
 
 
+class ODProtocolAssignmentSchema(BaseModel):
+    """Схема для одного поручения от руководителя"""
+    manager_name: str = Field(..., description="Имя руководителя, давшего поручение")
+    instruction: str = Field(..., description="Описание поручения")
+    responsible: str = Field(default="", description="Ответственный исполнитель (если указан)")
+    deadline: str = Field(default="", description="Срок выполнения (если указан)")
+    
+    class Config:
+        extra = "forbid"
+
+
+class ODProtocolTaskSchema(BaseModel):
+    """Схема для одной задачи/проекта с поручениями"""
+    task_name: str = Field(..., description="Название задачи или проекта")
+    assignments: List[ODProtocolAssignmentSchema] = Field(default_factory=list, description="Список поручений от руководителей по этой задаче")
+    
+    class Config:
+        extra = "forbid"
+
+
+class ODProtocolSchema(BaseModel):
+    """Схема для OD протокола (протокол поручений руководителей)"""
+    tasks: List[ODProtocolTaskSchema] = Field(description="Список задач/проектов с поручениями")
+    meeting_date: Optional[str] = Field(default=None, description="Дата встречи")
+    participants: Optional[str] = Field(default=None, description="Список участников через запятую")
+    managers: Optional[str] = Field(default=None, description="Список руководителей через запятую")
+    additional_notes: Optional[str] = Field(default=None, description="Дополнительные заметки")
+    
+    class Config:
+        extra = "forbid"
+
+
 def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
     """
     Получить JSON Schema для Pydantic модели в формате OpenAI
@@ -227,28 +259,28 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
     def fix_required_fields(schema_dict: Dict[str, Any]) -> None:
         """
         Рекурсивно исправить required для всех схем.
-        
-        Azure OpenAI в strict mode не позволяет включать в required поля с additionalProperties
-        (т.е. поля типа Dict[str, T]). Такие поля должны быть опциональными.
-        Для Dict полей сохраняем корректный тип additionalProperties вместо его обнуления.
+
+        Azure OpenAI в strict mode требует ВСЕ поля (кроме Dict) в required массиве,
+        даже если у них есть default. Это отличие от стандартного OpenAI.
         """
         if "properties" in schema_dict:
             required_fields = []
             for prop_name, prop_schema in schema_dict["properties"].items():
                 # Для Dict полей (с additionalProperties) НЕ добавляем в required
-                # но сохраняем их тип additionalProperties как есть (не обнуляем!)
+                # Azure OpenAI не позволяет Dict поля в strict mode
                 if "additionalProperties" in prop_schema:
                     # Оставляем additionalProperties как есть (строка, число и т.д.)
                     # Это позволяет LLM заполнять динамические ключи
                     pass
                 else:
-                    # Поля без additionalProperties добавляем в required
+                    # Azure OpenAI требует ВСЕ поля в required, даже с default
+                    # Это решает ошибку "Missing 'meeting_date'" и подобные
                     required_fields.append(prop_name)
-                
+
                 # Рекурсивно обрабатываем вложенные объекты
                 if prop_schema.get("type") == "object" and "properties" in prop_schema:
                     fix_required_fields(prop_schema)
-                
+
                 # Обрабатываем массивы с вложенными объектами
                 if prop_schema.get("type") == "array" and "items" in prop_schema:
                     items_schema = prop_schema["items"]
@@ -256,11 +288,11 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
                         # Для Dict внутри массивов также сохраняем тип
                         if items_schema.get("type") == "object" and "properties" in items_schema:
                             fix_required_fields(items_schema)
-            
-            # Устанавливаем required только если есть обязательные поля
+
+            # Azure OpenAI требует required массив с ВСЕМИ полями (кроме Dict)
             if required_fields:
                 schema_dict["required"] = required_fields
-        
+
         # Обработать вложенные схемы в $defs
         if "$defs" in schema_dict:
             for def_name, def_schema in schema_dict["$defs"].items():
@@ -287,15 +319,133 @@ SPEAKER_MAPPING_SCHEMA = get_json_schema(SpeakerMappingSchema)
 TOPICS_EXTRACTION_SCHEMA = get_json_schema(TopicsExtractionSchema)
 DECISIONS_EXTRACTION_SCHEMA = get_json_schema(DecisionsExtractionSchema)
 ACTION_ITEMS_EXTRACTION_SCHEMA = get_json_schema(ActionItemsExtractionSchema)
+OD_PROTOCOL_SCHEMA = get_json_schema(ODProtocolSchema)
+
+
+class ConsolidatedExtractionSchema(BaseModel):
+    """
+    Консолидированная схема для первого запроса: сопоставление спикеров + извлечение структуры встречи
+    """
+    # Speaker mapping results
+    speaker_mappings: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Сопоставление SPEAKER_N → 'Имя Фамилия' для спикеров с уверенностью >= 0.7"
+    )
+    speaker_confidence_scores: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Уверенность в сопоставлении для каждого спикера (0.0-1.0)"
+    )
+    unmapped_speakers: List[str] = Field(
+        default_factory=list,
+        description="Список SPEAKER_N с уверенностью < 0.7, которых не удалось надежно сопоставить"
+    )
+    mapping_notes: str = Field(
+        default="",
+        description="Заметки по процессу сопоставления спикеров"
+    )
+
+    # Meeting structure extraction results
+    meeting_title: str = Field(default="", description="Название встречи")
+    meeting_date: str = Field(default="", description="Дата встречи")
+    meeting_time: str = Field(default="", description="Время встречи")
+    participants: str = Field(default="", description="Список участников (каждое с новой строки через \\n)")
+    agenda: str = Field(default="", description="Повестка дня (пункты списком через \\n)")
+    discussion: str = Field(default="", description="Подробное обсуждение по темам (структурированный текст с атрибуцией высказываний через \\n)")
+    key_points: str = Field(default="", description="Краткие итоги и выводы (пункты списком через \\n)")
+    decisions: str = Field(default="", description="Принятые решения (каждое с новой строки через \\n)")
+    action_items: str = Field(default="", description="Задачи и поручения (каждая с новой строки через \\n)")
+    next_meeting: str = Field(default="", description="Информация о следующей встрече")
+    additional_notes: str = Field(default="", description="Дополнительные заметки")
+
+    # Quality assessment
+    extraction_confidence: float = Field(default=0.0, description="Общая уверенность в извлечении (0.0-1.0)")
+    missing_elements: List[str] = Field(
+        default_factory=list,
+        description="Элементы протокола, которые не удалось извлечь из транскрипции"
+    )
+    quality_issues: List[str] = Field(
+        default_factory=list,
+        description="Выявленные проблемы качества (неоднозначность, противоречия и т.д.)"
+    )
+    extraction_notes: str = Field(
+        default="",
+        description="Общие заметки по процессу извлечения"
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+class ConsolidatedProtocolSchema(BaseModel):
+    """
+    Консолидированная схема для второго запроса: финальная генерация протокола + QA
+    """
+    # Final protocol fields (with template formatting)
+    meeting_title: str = Field(description="Название встречи")
+    meeting_date: str = Field(default="", description="Дата встречи")
+    meeting_time: str = Field(default="", description="Время встречи")
+    participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
+    agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
+    discussion: str = Field(description="Подробное обсуждение по темам (структурированный текст с атрибуцией высказываний через \\n)")
+    key_points: str = Field(description="Краткие итоги и выводы (пункты списком через \\n)")
+    decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
+    action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
+    next_meeting: str = Field(default="", description="Информация о следующей встрече")
+    additional_notes: str = Field(default="", description="Дополнительные заметки")
+
+    # Enhanced speaker mapping with verified names
+    verified_speaker_mapping: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Проверенное сопоставление SPEAKER_N → 'Имя Фамилия'"
+    )
+    speaker_mapping_confidence: float = Field(
+        default=0.0,
+        description="Общая уверенность в сопоставлении спикеров (0.0-1.0)"
+    )
+
+    # Quality assurance and validation
+    protocol_quality_score: float = Field(
+        default=0.0,
+        description="Общая оценка качества протокола (0.0-1.0)"
+    )
+    consistency_checks: Dict[str, bool] = Field(
+        default_factory=dict,
+        description="Результаты проверок на согласованность (participants_consistent, dates_valid, etc.)"
+    )
+    completeness_assessment: str = Field(
+        default="",
+        description="Оценка полноты протокола"
+    )
+    improvement_suggestions: List[str] = Field(
+        default_factory=list,
+        description="Предложения по улучшению протокола"
+    )
+    self_reflection_notes: str = Field(
+        default="",
+        description="Заметки саморефлексии по качеству генерации"
+    )
+
+    # Meeting classification and type-specific data
+    meeting_type: str = Field(
+        default="general",
+        description="Тип встречи (general, technical, business, educational, brainstorm, status)"
+    )
+    type_specific_observations: str = Field(
+        default="",
+        description="Специфичные наблюдения для типа встречи"
+    )
+
+    class Config:
+        extra = "forbid"
 
 
 def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
     """
     Получить схему по типу
-    
+
     Args:
         schema_type: Тип схемы ('protocol', 'two_stage_extraction', etc.)
-        
+
     Returns:
         JSON Schema в формате OpenAI
     """
@@ -310,9 +460,13 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'topics': TOPICS_EXTRACTION_SCHEMA,
         'decisions': DECISIONS_EXTRACTION_SCHEMA,
         'action_items': ACTION_ITEMS_EXTRACTION_SCHEMA,
+        'od_protocol': OD_PROTOCOL_SCHEMA,
+        # New consolidated schemas for two-request approach
+        'consolidated_extraction': get_json_schema(ConsolidatedExtractionSchema),
+        'consolidated_protocol': get_json_schema(ConsolidatedProtocolSchema),
     }
-    
+
     if schema_type not in schemas:
         raise ValueError(f"Неизвестный тип схемы: {schema_type}. Доступные: {list(schemas.keys())}")
-    
+
     return schemas[schema_type]

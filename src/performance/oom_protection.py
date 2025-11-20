@@ -44,7 +44,10 @@ class OOMProtection:
                 if max_file_size_mb <= 0:
                     max_file_size_mb = DEFAULT_MEMORY_LIMITS.max_file_size_mb
 
-            limits = MemoryLimits(max_file_size_mb=max_file_size_mb)
+            limits = MemoryLimits(
+                max_file_size_mb=max_file_size_mb,
+                max_memory_usage_percent=settings.oom_max_memory_percent
+            )
 
         self.limits = limits
         self.process = psutil.Process()

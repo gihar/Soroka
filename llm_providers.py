@@ -1266,6 +1266,13 @@ class OpenAIProvider(LLMProvider):
             _snippet = user_prompt[:400].replace("\n", " ")
             logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
 
+            # Формируем extra_headers для атрибуции
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+
             # DEBUG логирование запроса
             if settings.llm_debug_log:
                 logger.debug("=" * 80)
@@ -1282,13 +1289,6 @@ class OpenAIProvider(LLMProvider):
                 logger.debug("=" * 80)
 
             logger.info(f"Отправляем запрос в OpenAI с моделью {selected_model}")
-            
-            # Формируем extra_headers для атрибуции
-            extra_headers = {}
-            if settings.http_referer:
-                extra_headers["HTTP-Referer"] = settings.http_referer
-            if settings.x_title:
-                extra_headers["X-Title"] = settings.x_title
             
             # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
             async def _call_openai():
@@ -2393,8 +2393,7 @@ def _build_unified_prompt(
     meeting_topic: Optional[str] = None,
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
-    participants: Optional[List[Dict[str, str]]] = None,
-    use_structure_only_for_protocol: bool = True
+    participants: Optional[List[Dict[str, str]]] = None
 ) -> str:
     """
     Построить промпт для unified подхода
@@ -2425,11 +2424,8 @@ def _build_unified_prompt(
     if structure_summary:
         content_parts.append(f"СТРУКТУРИРОВАННОЕ ПРЕДСТАВЛЕНИЕ ВСТРЕЧИ:\n\n{structure_summary}")
     
-    # Если use_structure_only_for_protocol=false, также добавляем транскрипцию
-    # Если use_structure_only_for_protocol=true и structure_summary пустой, используем транскрипцию как fallback
-    should_add_transcription = (not use_structure_only_for_protocol) or (use_structure_only_for_protocol and not structure_summary)
-    
-    if should_add_transcription and transcription:
+    # Всегда добавляем транскрипцию
+    if transcription:
         if diarization_data and diarization_data.get("formatted_transcript"):
             content_parts.append(f"ТРАНСКРИПЦИЯ С ДИАРИЗАЦИЕЙ:\n\n{diarization_data['formatted_transcript']}")
         else:
@@ -2573,6 +2569,365 @@ def _build_unified_prompt(
     return prompt
 
 
+# ===================================================================
+# OD PROTOCOL GENERATION (ПРОТОКОЛ ПОРУЧЕНИЙ РУКОВОДИТЕЛЕЙ)
+# ===================================================================
+
+def _build_od_system_prompt() -> str:
+    """
+    Системный промпт для режима OD протокола (протокол поручений руководителей)
+    """
+    return """Ты — эксперт по документированию поручений и задач от руководителей на совещаниях.
+
+ТВОЯ ЗАДАЧА:
+Из транскрипции встречи извлечь структурированный протокол поручений от руководителей.
+
+ПРИНЦИПЫ РАБОТЫ:
+1. ФОКУС НА РУКОВОДИТЕЛЯХ: Особое внимание уделяй высказываниям руководителей (они указаны в списке участников с ролями)
+2. СТРУКТУРА ПО ЗАДАЧАМ: Группируй информацию по обсуждаемым задачам/проектам
+3. ТОЧНОСТЬ: Фиксируй ТОЛЬКО то, что явно прозвучало. Не додумывай, не интерпретируй
+4. КОНКРЕТИКА: Ищи конкретные поручения, ответственных, сроки
+
+ЧТО ИЗВЛЕКАТЬ:
+- Название задачи/проекта (как его называет ведущий или участники встречи)
+- Поручения от каждого руководителя по этой задаче
+- Ответственных исполнителей (если названы)
+- Сроки выполнения (если указаны)
+
+ФОРМАТ ПОРУЧЕНИЯ:
+- Кто дал поручение (имя руководителя)
+- Суть поручения (что нужно сделать)
+- Кто ответственный за выполнение
+- Когда должно быть выполнено
+
+ВАЖНО:
+- Если руководителей несколько, фиксируй поручения от каждого
+- Если поручение без срока - оставляй поле пустым, не придумывай
+- Если ответственный не назван - оставляй поле пустым
+- Используй точные формулировки из транскрипции"""
+
+
+def _build_od_user_prompt(
+    transcription: str,
+    diarization_data: Optional[Dict[str, Any]],
+    participants: Optional[List[Dict[str, str]]],
+    speaker_mapping: Optional[Dict[str, str]],
+    meeting_date: Optional[str] = None
+) -> str:
+    """
+    Пользовательский промпт для OD протокола
+    """
+    # Извлекаем руководителей из списка участников
+    managers = []
+    if participants:
+        for p in participants:
+            role = p.get('role', '').lower()
+            if any(keyword in role for keyword in ['руководитель', 'директор', 'глава', 'начальник', 'ceo', 'cto', 'cfo']):
+                managers.append(p['name'])
+    
+    # Формируем блок с транскрипцией
+    if diarization_data and diarization_data.get("formatted_transcript"):
+        transcription_text = (
+            "ТРАНСКРИПЦИЯ ВСТРЕЧИ С РАЗДЕЛЕНИЕМ ГОВОРЯЩИХ:\n\n"
+            f"{diarization_data['formatted_transcript']}\n\n"
+        )
+    else:
+        transcription_text = (
+            "ТРАНСКРИПЦИЯ ВСТРЕЧИ:\n\n"
+            f"{transcription}\n\n"
+        )
+    
+    # Информация об участниках и руководителях
+    participants_info = ""
+    if participants:
+        participants_info = "УЧАСТНИКИ ВСТРЕЧИ:\n"
+        for p in participants:
+            role_text = f" — {p['role']}" if p.get('role') else ""
+            participants_info += f"- {p['name']}{role_text}\n"
+        participants_info += "\n"
+    
+    if managers:
+        participants_info += "РУКОВОДИТЕЛИ (фокус внимания):\n"
+        for manager in managers:
+            participants_info += f"- {manager}\n"
+        participants_info += "\n"
+    
+    # Сопоставление спикеров
+    mapping_info = ""
+    if speaker_mapping:
+        mapping_info = "СОПОСТАВЛЕНИЕ СПИКЕРОВ:\n"
+        for speaker_id, name in speaker_mapping.items():
+            mapping_info += f"- {speaker_id} = {name}\n"
+        mapping_info += "\n"
+    
+    # Дополнительная информация
+    meta_info = ""
+    if meeting_date:
+        meta_info += f"Дата встречи: {meeting_date}\n\n"
+    
+    prompt = f"""{transcription_text}
+
+{participants_info}{mapping_info}{meta_info}
+
+ЗАДАНИЕ:
+Проанализируй транскрипцию и извлеки структурированный протокол поручений.
+
+СТРУКТУРА ОТВЕТА:
+Для каждой обсуждаемой задачи/проекта выдели:
+1. Название задачи (как называют участники)
+2. Все поручения от руководителей по этой задаче
+
+Для каждого поручения укажи:
+- manager_name: имя руководителя, давшего поручение
+- instruction: суть поручения (что нужно сделать)
+- responsible: ответственный исполнитель (если указан)
+- deadline: срок выполнения (если указан)
+
+ИНСТРУКЦИИ:
+1. Внимательно читай высказывания руководителей (список выше)
+2. Группируй поручения по задачам/проектам
+3. Сохраняй точные формулировки
+4. Если информации нет (ответственный, срок) - оставляй поле пустым
+5. Используй имена участников в формате "Имя Фамилия"
+
+Создай структурированный JSON согласно схеме ODProtocolSchema."""
+    
+    return prompt
+
+
+def format_od_protocol(protocol_data: Dict[str, Any]) -> str:
+    """
+    Форматирует OD протокол в читаемый текст
+    
+    Args:
+        protocol_data: Данные протокола из ODProtocolSchema
+        
+    Returns:
+        Отформатированный текст протокола
+    """
+    result = []
+    
+    # Заголовок
+    result.append("ПРОТОКОЛ ПОРУЧЕНИЙ\n")
+    result.append("=" * 60 + "\n")
+    
+    # Метаданные
+    if protocol_data.get('meeting_date'):
+        result.append(f"Дата встречи: {protocol_data['meeting_date']}\n")
+    
+    if protocol_data.get('managers'):
+        result.append(f"Руководители: {protocol_data['managers']}\n")
+    
+    if protocol_data.get('participants'):
+        result.append(f"Участники: {protocol_data['participants']}\n")
+    
+    result.append("\n" + "=" * 60 + "\n\n")
+    
+    # Задачи и поручения
+    tasks = protocol_data.get('tasks', [])
+    
+    for i, task in enumerate(tasks, 1):
+        task_name = task.get('task_name', 'Без названия')
+        result.append(f"{i}. {task_name}\n")
+        
+        assignments = task.get('assignments', [])
+        if assignments:
+            for assignment in assignments:
+                instruction = assignment.get('instruction', '')
+                manager = assignment.get('manager_name', '')
+                responsible = assignment.get('responsible', '')
+                deadline = assignment.get('deadline', '')
+                
+                # Форматируем поручение
+                result.append(f"   {instruction}")
+                
+                # Добавляем руководителя если есть
+                if manager:
+                    result.append(f" (от {manager})")
+                
+                result.append(".\n")
+                
+                # Добавляем ответственного и срок
+                details = []
+                if responsible:
+                    details.append(f"Отв. {responsible}")
+                if deadline:
+                    details.append(f"Срок — {deadline}")
+                
+                if details:
+                    result.append(f"   {'. '.join(details)}.\n")
+                
+                result.append("\n")
+        else:
+            result.append("   (Поручений не зафиксировано)\n\n")
+    
+    # Дополнительные заметки
+    if protocol_data.get('additional_notes'):
+        result.append("\n" + "=" * 60 + "\n")
+        result.append("ДОПОЛНИТЕЛЬНЫЕ ЗАМЕТКИ:\n")
+        result.append(protocol_data['additional_notes'] + "\n")
+    
+    return "".join(result)
+
+
+async def generate_protocol_od(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    diarization_data: Optional[Dict[str, Any]] = None,
+    participants: Optional[List[Dict[str, str]]] = None,
+    speaker_mapping: Optional[Dict[str, str]] = None,
+    meeting_date: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Генерация OD протокола (протокол поручений руководителей)
+    
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера (должен быть 'openai' для structured outputs)
+        transcription: Текст транскрипции
+        diarization_data: Данные диаризации
+        participants: Список участников с ролями
+        speaker_mapping: Сопоставление спикеров с участниками
+        meeting_date: Дата встречи
+        **kwargs: Дополнительные параметры (openai_model_key и др.)
+        
+    Returns:
+        Словарь с OD протоколом
+    """
+    from src.models.llm_schemas import OD_PROTOCOL_SCHEMA
+    
+    logger.info("Начало генерации OD протокола")
+    
+    # OD протокол работает только с OpenAI (structured outputs)
+    if provider_name != 'openai':
+        raise ValueError(f"OD протокол поддерживается только для OpenAI. Текущий провайдер: {provider_name}")
+    
+    # Строим промпты
+    system_prompt = _build_od_system_prompt()
+    user_prompt = _build_od_user_prompt(
+        transcription=transcription,
+        diarization_data=diarization_data,
+        participants=participants,
+        speaker_mapping=speaker_mapping,
+        meeting_date=meeting_date
+    )
+    
+    # Выбираем модель
+    openai_model_key = kwargs.get("openai_model_key")
+    selected_model = settings.openai_model
+    
+    if openai_model_key:
+        try:
+            preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+            if preset:
+                selected_model = preset.model
+        except Exception as e:
+            logger.warning(f"Ошибка при выборе модели по ключу: {e}")
+    
+    logger.info(f"Генерация OD протокола с моделью {selected_model}")
+    
+    # Получаем провайдера
+    provider = manager.providers.get(provider_name)
+    if not provider:
+        raise ValueError(f"Провайдер {provider_name} не найден")
+    
+    # Делаем запрос к OpenAI
+    try:
+        # Формируем extra_headers для атрибуции
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+
+        # Логирование информации о запросе
+        user_len = len(user_prompt)
+        transcript_len = len(transcription)
+        participants_count = len(participants) if participants else 0
+        logger.info(
+            f"OD протокол запрос: model={selected_model}, "
+            f"participants={participants_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
+        )
+
+        # DEBUG логирование запроса
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI REQUEST - generate_protocol_od")
+            logger.debug("=" * 80)
+            logger.debug(f"Model: {selected_model}")
+            logger.debug(f"Base URL: {settings.openai_base_url}")
+            logger.debug(f"Temperature: 0.1")
+            logger.debug(f"Response format: JSON Schema (OD_PROTOCOL)")
+            logger.debug(f"Extra headers: {extra_headers}")
+            logger.debug("-" * 80)
+            logger.debug(f"System prompt:\n{system_prompt}")
+            logger.debug("-" * 80)
+            logger.debug(f"User prompt:\n{user_prompt}")
+            logger.debug("=" * 80)
+
+        logger.info(f"Отправляем OD протокол запрос в OpenAI с моделью {selected_model}")
+
+        client = openai.OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url or None
+        )
+
+        # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
+        async def _call_openai():
+            return await asyncio.to_thread(
+                client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": OD_PROTOCOL_SCHEMA
+                },
+                temperature=0.1,
+                extra_headers=extra_headers
+            )
+
+        response = await _call_openai()
+
+        logger.info("Получен ответ от OpenAI API для OD протокола")
+
+        # DEBUG логирование ответа
+        if settings.llm_debug_log:
+            logger.debug("=" * 80)
+            logger.debug("[DEBUG] OpenAI RESPONSE - generate_protocol_od")
+            logger.debug("=" * 80)
+            if hasattr(response, 'usage'):
+                logger.debug(f"Token usage: {response.usage}")
+            logger.debug("-" * 80)
+            logger.debug(f"Response content:\n{response.choices[0].message.content}")
+            logger.debug("=" * 80)
+        
+        # Парсим результат
+        import json
+        result_text = response.choices[0].message.content
+        protocol_data = json.loads(result_text)
+        
+        logger.info(f"OD протокол успешно сгенерирован. Задач: {len(protocol_data.get('tasks', []))}")
+        
+        # Форматируем в текст
+        formatted_text = format_od_protocol(protocol_data)
+        
+        # Возвращаем в формате, совместимом с остальной системой
+        return {
+            'protocol_text': formatted_text,
+            'raw_data': protocol_data,
+            'mode': 'od_protokol'
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка при генерации OD протокола: {e}")
+        raise
+
+
 async def generate_protocol_unified(
     manager: 'LLMManager',
     provider_name: str,
@@ -2620,10 +2975,7 @@ async def generate_protocol_unified(
     structure_summary = ""
     if meeting_structure:
         structure_summary = build_structure_summary(meeting_structure)
-        if settings.use_structure_only_for_protocol:
-            logger.info(f"Используем meeting_structure (сжато: {len(structure_summary)} символов)")
-        else:
-            logger.info(f"Используем meeting_structure вместе с транскрипцией (сжато: {len(structure_summary)} символов)")
+        logger.info(f"Используем meeting_structure вместе с транскрипцией (сжато: {len(structure_summary)} символов)")
     
     # Строим промпт
     prompt = _build_unified_prompt(
@@ -2635,8 +2987,7 @@ async def generate_protocol_unified(
         meeting_topic=meeting_topic,
         meeting_date=meeting_date,
         meeting_time=meeting_time,
-        participants=participants,
-        use_structure_only_for_protocol=settings.use_structure_only_for_protocol
+        participants=participants
     )
     
     # System prompt: передаем транскрипцию только если не используется structure_summary
@@ -4266,6 +4617,370 @@ async def generate_protocol_chain_of_thought(
         return await manager.generate_protocol(
             provider_name, transcription, template_variables, diarization_data, **kwargs
         )
+
+
+# -------------------------------------------------------------
+# Новые консолидированные методы (2 запроса вместо 5-6)
+# -------------------------------------------------------------
+async def generate_protocol_consolidated_two_request(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    template_variables: Dict[str, str],
+    diarization_data: Optional[Dict[str, Any]] = None,
+    diarization_analysis: Optional[Dict[str, Any]] = None,
+    participants_list: Optional[str] = None,
+    meeting_metadata: Optional[Dict[str, str]] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Консолидированный метод генерации протокола: 2 запроса вместо 5-6
+    Запрос 1: Сопоставление спикеров + извлечение структуры
+    Запрос 2: Финальная генерация протокола + QA
+
+    Args:
+        manager: Менеджер LLM
+        provider_name: Название провайдера
+        transcription: Текст транскрипции
+        template_variables: Переменные шаблона
+        diarization_data: Данные диаризации
+        diarization_analysis: Анализ диаризации
+        participants_list: Список участников
+        meeting_metadata: Метаданные встречи
+        **kwargs: Дополнительные параметры
+
+    Returns:
+        Финальный протокол
+    """
+    from src.prompts.consolidated_prompts import (
+        build_consolidated_extraction_prompt,
+        build_consolidated_extraction_system_prompt,
+        build_consolidated_protocol_prompt,
+        build_consolidated_protocol_system_prompt
+    )
+    from src.models.llm_schemas import get_schema_by_type
+    from src.services.meeting_classifier import meeting_classifier
+
+    logger.info("Начало консолидированной генерации протокола (2 запроса)")
+
+    # Извлекаем дополнительные параметры
+    meeting_topic = kwargs.get('meeting_topic')
+    meeting_date = kwargs.get('meeting_date')
+    meeting_time = kwargs.get('meeting_time')
+    participants = kwargs.get('participants')
+
+    # Формируем метаданные встречи
+    if not meeting_metadata:
+        meeting_metadata = {}
+    meeting_metadata.update({
+        'meeting_topic': meeting_topic or '',
+        'meeting_date': meeting_date or '',
+        'meeting_time': meeting_time or '',
+        'participants': participants or participants_list or ''
+    })
+
+    # Определяем тип встречи если включена классификация
+    meeting_type = "general"
+    if settings.meeting_type_detection and transcription:
+        try:
+            meeting_type, _ = meeting_classifier.classify(
+                transcription,
+                diarization_analysis
+            )
+            logger.info(f"Определен тип встречи: {meeting_type}")
+        except Exception as e:
+            logger.warning(f"Ошибка при классификации встречи: {e}")
+
+    # =======================================================
+    # ЗАПРОС 1: Сопоставление спикеров + извлечение структуры
+    # =======================================================
+    logger.info("Запрос 1: Сопоставление спикеров + извлечение структуры")
+
+    extraction_prompt = build_consolidated_extraction_prompt(
+        transcription=transcription,
+        participants_list=participants_list or participants,
+        meeting_metadata=meeting_metadata,
+        meeting_type=meeting_type
+    )
+
+    extraction_system_prompt = build_consolidated_extraction_system_prompt()
+
+    try:
+        # ЗАПРОС 1: Извлечение
+        if provider_name == "openai":
+            provider = manager.providers[provider_name]
+            selected_model = settings.openai_model
+
+            # Выбор пресета модели
+            openai_model_key = kwargs.get("openai_model_key")
+            if openai_model_key:
+                try:
+                    preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                    if preset:
+                        selected_model = preset.model
+                        if getattr(preset, 'base_url', None):
+                            selected_base_url = preset.base_url
+                except Exception:
+                    pass
+
+            selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+            client = provider.client
+            if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+                client = openai.OpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=selected_base_url,
+                    http_client=provider.http_client
+                )
+
+            # Формируем extra_headers
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+
+            async def _call_extraction():
+                return await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=selected_model,
+                    messages=[
+                        {"role": "system", "content": extraction_system_prompt},
+                        {"role": "user", "content": extraction_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=4000,
+                    response_format={"type": "json_schema", "json_schema": get_schema_by_type('consolidated_extraction')},
+                    extra_headers=extra_headers
+                )
+
+            response = await _call_extraction()
+            extraction_result = json.loads(response.choices[0].message.content)
+
+        elif provider_name == "anthropic":
+            # Для Anthropic используем упрощенный подход
+            import anthropic
+            provider = manager.providers[provider_name]
+            client = provider.client
+            if not client:
+                client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+            response = await asyncio.to_thread(
+                client.messages.create,
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                temperature=0.3,
+                system=extraction_system_prompt,
+                messages=[
+                    {"role": "user", "content": extraction_prompt}
+                ]
+            )
+
+            extraction_result = json.loads(response.content[0].text)
+        else:
+            raise ValueError(f"Неподдерживаемый провайдер: {provider_name}")
+
+        logger.success(f"Запрос 1 завершен успешно. Уверенность: {extraction_result.get('extraction_confidence', 0.0):.2f}")
+
+    except Exception as e:
+        logger.error(f"Ошибка в запросе 1 (извлечение): {e}")
+        # Fallback к стандартному методу
+        logger.warning("Переключаемся на стандартный метод генерации")
+        return await manager.generate_protocol(
+            provider_name, transcription, template_variables, diarization_data, **kwargs
+        )
+
+    # =======================================================
+    # ЗАПРОС 2: Финальная генерация протокола + QA
+    # =======================================================
+    logger.info("Запрос 2: Финальная генерация протокола + QA")
+
+    # Комбинируем результаты с шаблоном
+    combined_data = {}
+    if 'protocol_data' in extraction_result:
+        combined_data.update(extraction_result['protocol_data'])
+    else:
+        # Для ConsolidatedExtractionSchema
+        combined_data.update({
+            'meeting_title': extraction_result.get('meeting_title', ''),
+            'meeting_date': extraction_result.get('meeting_date'),
+            'meeting_time': extraction_result.get('meeting_time'),
+            'participants': extraction_result.get('participants', ''),
+            'agenda': extraction_result.get('agenda', ''),
+            'discussion': extraction_result.get('discussion', ''),
+            'key_points': extraction_result.get('key_points', ''),
+            'decisions': extraction_result.get('decisions', ''),
+            'action_items': extraction_result.get('action_items', ''),
+            'next_meeting': extraction_result.get('next_meeting'),
+            'additional_notes': extraction_result.get('additional_notes')
+        })
+
+    # Добавляем переменные шаблона
+    combined_data.update(template_variables)
+
+    protocol_prompt = build_consolidated_protocol_prompt(
+        extraction_result=extraction_result,
+        template_variables=combined_data,
+        meeting_type=meeting_type
+    )
+
+    protocol_system_prompt = build_consolidated_protocol_system_prompt()
+
+    try:
+        # ЗАПРОС 2: Финальный протокол
+        if provider_name == "openai":
+            provider = manager.providers[provider_name]
+            selected_model = settings.openai_model
+
+            # Выбор пресета модели
+            openai_model_key = kwargs.get("openai_model_key")
+            if openai_model_key:
+                try:
+                    preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                    if preset:
+                        selected_model = preset.model
+                        if getattr(preset, 'base_url', None):
+                            selected_base_url = preset.base_url
+                except Exception:
+                    pass
+
+            selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
+            client = provider.client
+            if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
+                client = openai.OpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=selected_base_url,
+                    http_client=provider.http_client
+                )
+
+            # Формируем extra_headers
+            extra_headers = {}
+            if settings.http_referer:
+                extra_headers["HTTP-Referer"] = settings.http_referer
+            if settings.x_title:
+                extra_headers["X-Title"] = settings.x_title
+
+            async def _call_protocol():
+                return await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=selected_model,
+                    messages=[
+                        {"role": "system", "content": protocol_system_prompt},
+                        {"role": "user", "content": protocol_prompt}
+                    ],
+                    temperature=0.4,
+                    max_tokens=3000,
+                    response_format={"type": "json_schema", "json_schema": get_schema_by_type('consolidated_protocol')},
+                    extra_headers=extra_headers
+                )
+
+            response = await _call_protocol()
+            final_result = json.loads(response.choices[0].message.content)
+
+        elif provider_name == "anthropic":
+            # Для Anthropic используем упрощенный подход
+            import anthropic
+            provider = manager.providers[provider_name]
+            client = provider.client
+            if not client:
+                client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+            response = await asyncio.to_thread(
+                client.messages.create,
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=3000,
+                temperature=0.4,
+                system=protocol_system_prompt,
+                messages=[
+                    {"role": "user", "content": protocol_prompt}
+                ]
+            )
+
+            final_result = json.loads(response.content[0].text)
+        else:
+            raise ValueError(f"Неподдерживаемый провайдер: {provider_name}")
+
+        logger.success(f"Запрос 2 завершен успешно. Качество протокола: {final_result.get('protocol_quality_score', 0.0):.2f}")
+
+        # =======================================================
+        # Конвертируем результат в стандартный формат
+        # =======================================================
+        # Извлекаем основные поля протокола
+        protocol_data = {}
+        for field in template_variables.keys():
+            if field in final_result:
+                protocol_data[field] = final_result[field]
+            else:
+                protocol_data[field] = "Не указано"
+
+        # Добавляем служебную информацию
+        protocol_data['_metadata'] = {
+            'method': 'consolidated_two_request',
+            'meeting_type': meeting_type,
+            'speaker_mapping': extraction_result.get('speaker_mappings', {}),
+            'extraction_confidence': extraction_result.get('extraction_confidence', 0.0),
+            'protocol_quality_score': final_result.get('protocol_quality_score', 0.0),
+            'consistency_checks': final_result.get('consistency_checks', {}),
+            'improvement_suggestions': final_result.get('improvement_suggestions', []),
+            'processing_time': 'consolidated_2_requests'
+        }
+
+        logger.info("Консолидированная генерация протокола успешно завершена")
+        return protocol_data
+
+    except Exception as e:
+        logger.error(f"Ошибка в запросе 2 (финальный протокол): {e}")
+        # Пробуем использовать результаты запроса 1 как fallback
+        logger.warning("Используем результаты запроса 1 как fallback")
+        fallback_result = {}
+        for field in template_variables.keys():
+            if field in combined_data:
+                fallback_result[field] = combined_data[field]
+            else:
+                fallback_result[field] = "Не указано"
+
+        fallback_result['_metadata'] = {
+            'method': 'consolidated_two_request_fallback',
+            'meeting_type': meeting_type,
+            'speaker_mapping': extraction_result.get('speaker_mappings', {}),
+            'extraction_confidence': extraction_result.get('extraction_confidence', 0.0),
+            'protocol_quality_score': 0.5,  # Средний показатель для fallback
+            'error': str(e)
+        }
+
+        return fallback_result
+
+
+async def generate_protocol_consolidated_simplified(
+    manager: 'LLMManager',
+    provider_name: str,
+    transcription: str,
+    template_variables: Dict[str, str],
+    participants_list: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Упрощенная версия консолидированного метода без сложной логики
+    """
+    logger.info("Используем упрощенный консолидированный метод")
+
+    # Извлекаем базовые параметры
+    meeting_metadata = {
+        'meeting_topic': kwargs.get('meeting_topic', ''),
+        'meeting_date': kwargs.get('meeting_date', ''),
+        'meeting_time': kwargs.get('meeting_time', ''),
+        'participants': kwargs.get('participants', participants_list or '')
+    }
+
+    # Используем основной консолидированный метод
+    return await generate_protocol_consolidated_two_request(
+        manager=manager,
+        provider_name=provider_name,
+        transcription=transcription,
+        template_variables=template_variables,
+        participants_list=participants_list,
+        meeting_metadata=meeting_metadata,
+        **kwargs
+    )
 
 
 # Глобальный экземпляр менеджера LLM
