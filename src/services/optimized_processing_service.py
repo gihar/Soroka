@@ -1200,10 +1200,33 @@ class OptimizedProcessingService(BaseProcessingService):
                         openai_model_key=openai_model_key
                     )
   
-                    # OD протокол возвращает готовый текст, не нужно применять шаблон
+                    # OD протокол возвращает готовый текст, но мы хотим использовать шаблон для единообразия
                     logger.success(f"OD протокол успешно сгенерирован. Задач: {len(od_result['raw_data'].get('tasks', []))}")
+                    
+                    # Принудительно используем шаблон od_protocol
+                    try:
+                        # Получаем шаблон по ID
+                        od_template = None
+                        templates = self.template_service.library.get_management_templates()
+                        for t in templates:
+                            if t['id'] == 'od_protocol':
+                                od_template = t
+                                break
+                        
+                        if od_template:
+                            # Рендерим шаблон с данными из OD протокола
+                            # Важно: передаем raw_data как контекст
+                            protocol_text = self.template_service.render_template(od_template, od_result['raw_data'])
+                            logger.info("Применен шаблон 'od_protocol' для форматирования")
+                        else:
+                            logger.warning("Шаблон 'od_protocol' не найден, используем текст от LLM")
+                            protocol_text = od_result['protocol_text']
+                    except Exception as e:
+                        logger.error(f"Ошибка при применении шаблона OD протокола: {e}")
+                        protocol_text = od_result['protocol_text']
+
                     llm_result_data = {
-                        'protocol_text': od_result['protocol_text'],
+                        'protocol_text': protocol_text,
                         'raw_data': od_result['raw_data'],
                         'mode': 'od_protokol'
                     }

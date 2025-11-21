@@ -173,25 +173,33 @@ class SmartTemplateSelector:
     def _extract_keywords(self, text: str) -> List[str]:
         """Извлечь ключевые слова из текста (простая эвристика)"""
         keywords = []
-        
+
         # Управленческие ключевые слова
         management_terms = [
             "стратегия", "бюджет", "KPI", "цели", "OKR", "ресурсы",
             "планирование", "риски", "отчет", "квартал"
         ]
-        
+
         # Продуктовые ключевые слова
         product_terms = [
             "спринт", "задачи", "backlog", "story", "ретроспектива",
             "standup", "roadmap", "фичи", "релиз", "пользователи"
         ]
-        
+
+        # Образовательные ключевые слова
+        educational_terms = [
+            "лекция", "презентация", "тренинг", "семинар", "мастер-класс",
+            "обучение", "учебный", "образовательный", "практикум", "воркшоп",
+            "вебинар", "концепция", "определение", "теория", "практика",
+            "упражнение", "материал", "курс", "занятие", "дискуссия"
+        ]
+
         text_lower = text.lower()
-        
-        for term in management_terms + product_terms:
+
+        for term in management_terms + product_terms + educational_terms:
             if term in text_lower:
                 keywords.append(term)
-        
+
         return keywords
 
 
