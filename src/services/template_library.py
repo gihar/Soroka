@@ -12,12 +12,50 @@ class TemplateLibrary:
         "management": "Управленческие встречи",
         "product": "Продуктовые встречи",
         "technical": "Технические встречи",
-        "sales": "Продажи"
+        "sales": "Продажи",
+        "educational": "Образовательные встречи"
     }
     
     def get_management_templates(self) -> List[Dict[str, Any]]:
         """6 управленческих шаблонов"""
         return [
+            {
+                "id": "od_protocol",
+                "name": "Протокол ОД (Поручения)",
+                "description": "Специальный формат для протокола поручений руководителей (OD)",
+                "category": "management",
+                "tags": ["поручения", "од", "руководители", "протокол"],
+                "keywords": ["од", "поручение", "задача", "срок", "ответственный"],
+                "is_default": False,
+                "content": """ПРОТОКОЛ ПОРУЧЕНИЙ
+============================================================
+{% if meeting_date %}Дата встречи: {{ meeting_date }}
+{% endif %}{% if managers %}Руководители: {{ managers }}
+{% endif %}{% if participants %}Участники: {{ participants }}
+{% endif %}
+============================================================
+
+{% if tasks %}
+{% for task in tasks %}
+{{ loop.index }}. {{ task.task_name }}
+{% if task.assignments %}
+{% for assignment in task.assignments %}
+   {{ assignment.instruction }}{% if assignment.manager_name %} (от {{ assignment.manager_name }}){% endif %}.
+{% if assignment.responsible or assignment.deadline %}   {% if assignment.responsible %}Отв. {{ assignment.responsible }}{% endif %}{% if assignment.responsible and assignment.deadline %}. {% endif %}{% if assignment.deadline %}Срок — {{ assignment.deadline }}{% endif %}.
+{% endif %}
+{% endfor %}
+{% else %}
+   (Поручений не зафиксировано)
+
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if additional_notes %}
+============================================================
+ДОПОЛНИТЕЛЬНЫЕ ЗАМЕТКИ:
+{{ additional_notes }}
+{% endif %}"""
+            },
             {
                 "name": "Стратегическая сессия руководства",
                 "description": "Шаблон для стратегических встреч с фокусом на целях и планах",
@@ -461,11 +499,407 @@ class TemplateLibrary:
 {{ next_steps }}"""
             }
         ]
-    
+
+    def get_educational_templates(self) -> List[Dict[str, Any]]:
+        """6 образовательных шаблонов"""
+        return [
+            {
+                "id": "education_lecture",
+                "name": "Лекция и презентация",
+                "description": "Шаблон для лекций и презентаций с фокусом на структуре материала",
+                "category": "educational",
+                "tags": ["лекция", "презентация", "теория", "концепции"],
+                "keywords": ["лекция", "презентация", "теория", "концепции", "определения", "примеры", "материал"],
+                "is_default": True,
+                "content": """# Лекция/Презентация
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Лектор/Преподаватель:** {{ participants }}
+**Тема:** {{ learning_objectives }}
+
+{% if speakers_summary %}
+## Информация о лекторе
+{{ speakers_summary }}
+{% endif %}
+
+## Цели обучения
+{{ learning_objectives }}
+
+## Структура лекции
+{{ agenda }}
+
+## Основное содержание
+
+### {% if key_concepts %}Ключевые концепции и определения{% endif %}
+{{ key_concepts }}
+
+### {% if discussion %}Основной материал{% endif %}
+{{ discussion }}
+
+{% if examples_and_cases %}
+## Примеры и кейсы
+{{ examples_and_cases }}
+{% endif %}
+
+{% if practical_demonstration %}
+## Практическая демонстрация
+{{ practical_demonstration }}
+{% endif %}
+
+{% if questions_and_answers %}
+## Вопросы и ответы
+{{ questions_and_answers }}
+{% endif %}
+
+## Ключевые выводы
+{{ key_points }}
+
+{% if homework %}
+## Домашнее задание
+{{ homework }}
+{% endif %}
+
+{% if additional_materials %}
+## Дополнительные материалы
+{{ additional_materials }}
+{% endif %}
+
+## Следующая лекция/тема
+{{ next_steps }}
+
+---
+*Протокол лекции создан автоматически с сохранением образовательной структуры*"""
+            },
+            {
+                "id": "education_training",
+                "name": "Тренинг и практикум",
+                "description": "Шаблон для тренингов с акцентом на практические упражнения",
+                "category": "educational",
+                "tags": ["тренинг", "практикум", "упражнения", "навыки"],
+                "keywords": ["тренинг", "практикум", "упражнения", "навыки", "отработка", "практика"],
+                "is_default": True,
+                "content": """# Тренинг/Практикум
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Тренер:** {{ participants }}
+**Тема тренинга:** {{ learning_objectives }}
+
+## Цели обучения
+{{ learning_objectives }}
+
+{% if speakers_summary %}
+## О тренере
+{{ speakers_summary }}
+{% endif %}
+
+## План тренинга
+{{ agenda }}
+
+## Теоретическая база
+{{ discussion }}
+
+## Практические упражнения и задания
+{{ practical_exercises }}
+
+{% if examples_and_cases %}
+## Разбор кейсов
+{{ examples_and_cases }}
+{% endif %}
+
+{% if group_work %}
+## Работа в группах
+{{ group_work }}
+{% endif %}
+
+{% if feedback_session %}
+## Сессия обратной связи
+{{ feedback_session }}
+{% endif %}
+
+## Результаты обучения
+{{ key_points }}
+
+## Домашние задания для закрепления
+{{ action_items }}
+
+## Ресурсы и материалы
+{{ materials }}
+
+## Следующие шаги в обучении
+{{ next_steps }}
+
+---
+*Протокол тренинга с фокусом на практическом применении*"""
+            },
+            {
+                "id": "education_seminar",
+                "name": "Семинар и дискуссия",
+                "description": "Шаблон для интерактивных семинаров и дискуссий",
+                "category": "educational",
+                "tags": ["семинар", "дискуссия", "интерактив", "обсуждение"],
+                "keywords": ["семинар", "дискуссия", "интерактив", "обсуждение", "диалог", "мнения"],
+                "is_default": True,
+                "content": """# Семинар/Дискуссия
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Модератор:** {{ participants }}
+**Тема семинара:** {{ learning_objectives }}
+
+## Цели семинара
+{{ learning_objectives }}
+
+{% if speakers_summary %}
+## Участники семинара
+{{ speakers_summary }}
+{% endif %}
+
+## План дискуссии
+{{ agenda }}
+
+## Основные тезисы для обсуждения
+{{ discussion }}
+
+{% if dialogue_analysis %}
+## Анализ дискуссии
+{{ dialogue_analysis }}
+{% endif %}
+
+{% if participant_contributions %}
+## Вклад участников
+{{ participant_contributions }}
+{% endif %}
+
+{% if controversial_points %}
+## Ключевые точки мнений
+{{ controversial_points }}
+{% endif %}
+
+## Сформулированные выводы
+{{ key_points }}
+
+## Практические задания для семинара
+{{ practical_exercises }}
+
+## Дополнительные вопросы для размышления
+{{ questions_and_answers }}
+
+## Материалы для самостоятельной работы
+{{ materials }}
+
+## Продолжение дискуссии
+{{ next_steps }}
+
+---
+*Протокол семинара с сохранением интерактивной динамики*"""
+            },
+            {
+                "id": "education_masterclass",
+                "name": "Мастер-класс",
+                "description": "Шаблон для мастер-классов с демонстрацией экспертизы",
+                "category": "educational",
+                "tags": ["мастер-класс", "экспертиза", "демонстрация", "профессиональные секреты"],
+                "keywords": ["мастер-класс", "экспертиза", "демонстрация", "профессиональные секреты", "техники"],
+                "is_default": True,
+                "content": """# Мастер-класс
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Мастер:** {{ participants }}
+**Тема мастер-класса:** {{ learning_objectives }}
+
+## Объявление мастер-класса
+{{ learning_objectives }}
+
+{% if speakers_summary %}
+## Экспертность мастера
+{{ speakers_summary }}
+{% endif %}
+
+## План мастер-класса
+{{ agenda }}
+
+## Демонстрация техник и методов
+{{ discussion }}
+
+{% if practical_demonstration %}
+## Пошаговая демонстрация
+{{ practical_demonstration }}
+{% endif %}
+
+{% if professional_secrets %}
+## Профессиональные секреты и лайфхаки
+{{ professional_secrets }}
+{% endif %}
+
+{% if examples_and_cases %}
+## Реальные кейсы из практики
+{{ examples_and_cases }}
+{% endif %}
+
+{% if audience_practice %}
+## Практика под руководством мастера
+{{ audience_practice }}
+{% endif %}
+
+## Ключевые техники для запоминания
+{{ key_points }}
+
+## Задания для отработки навыков
+{{ practical_exercises }}
+
+## Рекомендуемые инструменты и ресурсы
+{{ materials }}
+
+## Дальнейшее развитие навыков
+{{ next_steps }}
+
+---
+*Протокол мастер-класса с сохранением уникальных техник*"""
+            },
+            {
+                "id": "education_workshop",
+                "name": "Воркшоп и работа в группах",
+                "description": "Шаблон для воркшопов с интенсивной групповой работой",
+                "category": "educational",
+                "tags": ["воркшоп", "группы", "командная работа", "интенсив"],
+                "keywords": ["воркшоп", "группы", "командная работа", "интенсив", "коллаборация"],
+                "is_default": True,
+                "content": """# Воркшоп/Групповая работа
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Фасилитатор:** {{ participants }}
+**Тема воркшопа:** {{ learning_objectives }}
+
+## Цели воркшопа
+{{ learning_objectives }}
+
+{% if speakers_summary %}
+## Состав участников
+{{ speakers_summary }}
+{% endif %}
+
+## План воркшопа
+{{ agenda }}
+
+## Вводная теория и инструкции
+{{ discussion }}
+
+{% if group_formation %}
+## Формирование групп
+{{ group_formation }}
+{% endif %}
+
+## Групповые упражнения и задания
+{{ practical_exercises }}
+
+{% if group_results %}
+## Результаты работы групп
+{{ group_results }}
+{% endif %}
+
+{% if peer_feedback %}
+## Взаимная обратная связь
+{{ peer_feedback }}
+{% endif %}
+
+## Общие выводы и инсайты
+{{ key_points }}
+
+{% if individual_reflections %}
+## Индивидуальные рефлексии
+{{ individual_reflections }}
+{% endif %}
+
+## Задания для продолжения работы
+{{ action_items }}
+
+## Методические материалы
+{{ materials }}
+
+## Следующие этапы проекта
+{{ next_steps }}
+
+---
+*Протокол воркшопа с фокусом на коллаборативные результаты*"""
+            },
+            {
+                "id": "education_webinar",
+                "name": "Вебинар и онлайн-лекция",
+                "description": "Шаблон для онлайн-вебинаров и дистанционного обучения",
+                "category": "educational",
+                "tags": ["вебинар", "онлайн", "дистанционное обучение", "веб-конференция"],
+                "keywords": ["вебинар", "онлайн", "дистанционное обучение", "веб-конференция", "удаленный"],
+                "is_default": True,
+                "content": """# Вебинар/Онлайн-лекция
+
+**Дата:** {{ date }}
+**Время:** {{ time }}
+**Спикер:** {{ participants }}
+**Платформа:** {{ platform }}
+**Тема вебинара:** {{ learning_objectives }}
+
+## Цели вебинара
+{{ learning_objectives }}
+
+{% if speakers_summary %}
+## О спикере
+{{ speakers_summary }}
+{% endif %}
+
+## Программа вебинара
+{{ agenda }}
+
+## Основное содержание
+{{ discussion }}
+
+{% if poll_results %}
+## Результаты опросов и голосований
+{{ poll_results }}
+{% endif %}
+
+{% if chat_questions %}
+## Вопросы из чата
+{{ chat_questions }}
+{% endif %}
+
+{% if live_demonstration %}
+## Демонстрация в реальном времени
+{{ live_demonstration }}
+{% endif %}
+
+## Ключевые тезисы
+{{ key_points }}
+
+{% if downloadable_materials %}
+## Материалы для скачивания
+{{ downloadable_materials }}
+{% endif %}
+
+{% if homework %}
+## Практические задания
+{{ homework }}
+{% endif %}
+
+## Ссылки на дополнительные ресурсы
+{{ materials }}
+
+## Следующий вебинар
+{{ next_steps }}
+
+---
+*Протокол вебинара с сохранением онлайн-интерактива*"""
+            }
+        ]
+
     def get_all_templates(self) -> List[Dict[str, Any]]:
         """Все шаблоны библиотеки"""
         return (
             self.get_management_templates() +
-            self.get_product_templates()
+            self.get_product_templates() +
+            self.get_educational_templates()
         )
 
