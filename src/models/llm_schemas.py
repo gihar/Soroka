@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 import json
 
-from src.models.meeting_structure import DecisionPriority, ActionItemPriority
+
 
 
 class ProtocolSchema(BaseModel):

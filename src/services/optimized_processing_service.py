@@ -31,7 +31,7 @@ from src.services.transcription_preprocessor import get_preprocessor
 from src.services.diarization_analyzer import diarization_analyzer
 from src.services.protocol_validator import protocol_validator
 from src.services.segmentation_service import segmentation_service
-from src.services.meeting_structure_builder import get_structure_builder
+
 from src.services.smart_template_selector import smart_selector
 from llm_providers import generate_protocol_chain_of_thought, llm_manager
 from config import settings
@@ -1137,22 +1137,10 @@ class OptimizedProcessingService(BaseProcessingService):
             # Отключено построение структурированного представления для соблюдения лимита в 2 LLM запроса
             # Консолидированный метод уже выполняет извлечение структуры в своих 2 запросах
             # ВАЖНО: meeting_structure используется как единственный источник
-            # тем, решений и задач. Повторное извлечение в LLM запросах НЕ выполняется.
-            # Это исключает дублирование и экономит токены.
-            meeting_structure = None
-            logger.info("⚠️ Построение структурированного представления отключено для соблюдения лимита в 2 LLM запроса")
-
-            # Устанавливаем нулевые метрики структуры
-            processing_metrics.structure_building_duration = 0.0
-            processing_metrics.topics_extracted = 0
-            processing_metrics.decisions_extracted = 0
-            processing_metrics.actions_extracted = 0
-            processing_metrics.structure_validation_passed = False
-            
-            # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
-            # OD протокол - специальный режим для протокола поручений руководителей
-            # Unified подход доступен через feature flag для A/B тестирования
-            # Проверяем необходимость Chain-of-Thought для длинных встреч
+        # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
+        # OD протокол - специальный режим для протокола поручений руководителей
+        # Unified подход доступен через feature flag для A/B тестирования
+        # Проверяем необходимость Chain-of-Thought для длинных встреч
             should_use_cot = segmentation_service.should_use_segmentation(
                 transcription=transcription_result.transcription,
                 estimated_duration_minutes=estimated_duration_minutes
@@ -1197,6 +1185,7 @@ class OptimizedProcessingService(BaseProcessingService):
                         participants=request.participants_list,
                         speaker_mapping=request.speaker_mapping,
                         meeting_date=request.meeting_date,
+                        meeting_topic=request.meeting_topic,
                         openai_model_key=openai_model_key
                     )
   
@@ -1304,7 +1293,6 @@ class OptimizedProcessingService(BaseProcessingService):
                     segments=segments,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
-                    meeting_structure=meeting_structure,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
@@ -1323,7 +1311,6 @@ class OptimizedProcessingService(BaseProcessingService):
                     template_variables=template_variables,
                     diarization_data=diarization_data_raw,
                     diarization_analysis=diarization_analysis,
-                    meeting_structure=meeting_structure,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_topic=request.meeting_topic,
@@ -1346,8 +1333,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     request.meeting_topic,
                     request.meeting_date,
                     request.meeting_time,
-                    request.participants_list,
-                    meeting_structure
+                    request.participants_list
                 )
                 
                 if not llm_result.success:
@@ -1460,8 +1446,7 @@ class OptimizedProcessingService(BaseProcessingService):
 
     async def _generate_llm_response(self, transcription_result, template,
                                    template_variables, llm_provider, openai_model_key=None, speaker_mapping=None,
-                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None,
-                                   meeting_structure=None):
+                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None):
         """Генерация ответа LLM с постобработкой"""
         llm_result = await self.llm_service.generate_protocol_with_fallback(
             llm_provider, transcription_result.transcription, template_variables,
@@ -1471,8 +1456,7 @@ class OptimizedProcessingService(BaseProcessingService):
             meeting_topic=meeting_topic,
             meeting_date=meeting_date,
             meeting_time=meeting_time,
-            participants=participants,
-            meeting_structure=meeting_structure
+            participants=participants
         )
         
         # Постобработка результатов - проверяем и исправляем неправильные JSON-структуры

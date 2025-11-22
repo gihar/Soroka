@@ -205,6 +205,20 @@ async def test_od_protocol_prompts():
         print("   Содержит транскрипцию")
         print("   Содержит сопоставление спикеров")
         
+        # Тест с темой встречи
+        user_prompt_with_topic = _build_od_user_prompt(
+            transcription=TEST_TRANSCRIPTION,
+            diarization_data={"formatted_transcript": TEST_TRANSCRIPTION},
+            participants=TEST_PARTICIPANTS,
+            speaker_mapping=TEST_SPEAKER_MAPPING,
+            meeting_date="19.11.2025",
+            meeting_topic="Бюджетная кампания 2025"
+        )
+        
+        assert "Бюджетная кампания 2025" in user_prompt_with_topic
+        assert "Тема встречи" in user_prompt_with_topic
+        print("✅ Тема встречи корректно добавляется в промпт")
+        
         return True
         
     except Exception as e:
