@@ -14,7 +14,8 @@ import openai
 from anthropic import Anthropic
 
 # Импорт для контекстно-зависимых промптов
-from src.services.meeting_classifier import meeting_classifier
+# Импорт для контекстно-зависимых промптов
+# from src.services.meeting_classifier import meeting_classifier - MOVED TO LOCAL SCOPE TO AVOID CIRCULAR IMPORT
 from src.prompts.specialized_prompts import (
     get_specialized_system_prompt, 
     get_specialized_extraction_instructions
@@ -712,6 +713,7 @@ def _build_system_prompt(
     # Если включена классификация и есть транскрипция
     if settings.meeting_type_detection and transcription:
         try:
+            from src.services.meeting_classifier import meeting_classifier
             # Классифицируем встречу
             meeting_type, _ = meeting_classifier.classify(
                 transcription, 
@@ -936,7 +938,6 @@ def _build_user_prompt(
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
     participants: Optional[List[Dict[str, str]]] = None,
-    meeting_structure = None,  # MeetingStructure, но избегаем circular import
 ) -> str:
     """
     Формирует пользовательский промпт с контекстом и требованиями к формату.
@@ -1086,12 +1087,7 @@ def _build_user_prompt(
             meeting_info += f"🕐 Время: {meeting_time}\n"
         meeting_info += "\n"
 
-    # Добавляем структурный анализ если доступен
-    structure_info = ""
-    if meeting_structure:
-        structure_text = meeting_structure.format_for_llm_prompt()
-        if structure_text:
-            structure_info = structure_text
+
     
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
 
@@ -1101,7 +1097,6 @@ def _build_user_prompt(
         "ИСХОДНЫЕ ДАННЫЕ ДЛЯ АНАЛИЗА\n"
         "═══════════════════════════════════════════════════════════\n\n"
         f"{transcription_text}\n"
-        f"{structure_info}"
         f"{participants_info}"
         f"{meeting_info}"
         "═══════════════════════════════════════════════════════════\n"
@@ -1216,7 +1211,7 @@ class OpenAIProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        meeting_structure = kwargs.get('meeting_structure')
+
         user_prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -1226,7 +1221,7 @@ class OpenAIProvider(LLMProvider):
             meeting_date,
             meeting_time,
             participants,
-            meeting_structure
+
         )
         
         try:
@@ -1394,7 +1389,7 @@ class AnthropicProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        meeting_structure = kwargs.get('meeting_structure')
+
         prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -1403,8 +1398,7 @@ class AnthropicProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants,
-            meeting_structure
+            participants
         )
         
         try:
@@ -1506,7 +1500,7 @@ class YandexGPTProvider(LLMProvider):
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
-        meeting_structure = kwargs.get('meeting_structure')
+
         prompt = _build_user_prompt(
             transcription,
             template_variables,
@@ -1515,8 +1509,7 @@ class YandexGPTProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants,
-            meeting_structure
+            participants
         )
         
         headers = {
@@ -1651,8 +1644,7 @@ def _build_extraction_prompt(
     meeting_topic: Optional[str] = None,
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
-    participants: Optional[List[Dict[str, str]]] = None,
-    meeting_structure = None,  # MeetingStructure, но избегаем circular import
+    participants: Optional[List[Dict[str, str]]] = None
 ) -> str:
     """
     Промпт для первого этапа: извлечение и структурирование информации
@@ -1749,17 +1741,13 @@ def _build_extraction_prompt(
         meeting_info += "\n"
     
     # Добавляем структурный анализ если доступен
-    structure_info = ""
-    if meeting_structure:
-        structure_text = meeting_structure.format_for_llm_prompt()
-        if structure_text:
-            structure_info = structure_text
+
     
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     
     prompt = f"""ЭТАП 1: ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
 
-{transcription_text}{structure_info}{participants_info}{meeting_info}
+{transcription_text}{participants_info}{meeting_info}
 
 ЗАДАЧА:
 Извлеки из транскрипции информацию для следующих полей:
@@ -2007,7 +1995,6 @@ async def generate_protocol_two_stage(
     template_variables: Dict[str, str],
     diarization_data: Optional[Dict[str, Any]] = None,
     diarization_analysis: Optional[Dict[str, Any]] = None,
-    meeting_structure = None,  # MeetingStructure
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -2044,8 +2031,7 @@ async def generate_protocol_two_stage(
         meeting_topic,
         meeting_date,
         meeting_time,
-        participants,
-        meeting_structure
+        participants
     )
     
     # Используем системный промпт (с учетом классификации если включена)
@@ -2583,10 +2569,13 @@ def _build_od_system_prompt() -> str:
 Из транскрипции встречи извлечь структурированный протокол поручений от руководителей.
 
 ПРИНЦИПЫ РАБОТЫ:
-1. ФОКУС НА РУКОВОДИТЕЛЯХ: Особое внимание уделяй высказываниям руководителей (они указаны в списке участников с ролями)
-2. СТРУКТУРА ПО ЗАДАЧАМ: Группируй информацию по обсуждаемым задачам/проектам
-3. ТОЧНОСТЬ: Фиксируй ТОЛЬКО то, что явно прозвучало. Не додумывай, не интерпретируй
-4. КОНКРЕТИКА: Ищи конкретные поручения, ответственных, сроки
+1. ФОКУС НА РУКОВОДИТЕЛЯХ: Твоя главная цель — зафиксировать волю руководителей (они указаны в списке участников).
+2. КОНТЕКСТ ПОРУЧЕНИЯ: Фиксируй не только прямые приказы ("Сделай X"), но и:
+   - Утвержденные предложения ("Давайте так и сделаем")
+   - Согласованные планы действий ("Хорошо, тогда на тебе X")
+   - Резолюции по обсуждаемым вопросам
+3. СТРУКТУРА ПО ЗАДАЧАМ: Группируй информацию по обсуждаемым задачам/проектам.
+4. ТОЧНОСТЬ: Фиксируй ТОЛЬКО то, что явно прозвучало или было утверждено. Не додумывай.
 
 ЧТО ИЗВЛЕКАТЬ:
 - Название задачи/проекта (как его называет ведущий или участники встречи)
@@ -2596,15 +2585,15 @@ def _build_od_system_prompt() -> str:
 
 ФОРМАТ ПОРУЧЕНИЯ:
 - Кто дал поручение (имя руководителя)
-- Суть поручения (что нужно сделать)
+- Суть поручения (что нужно сделать, максимально конкретно, с глаголом действия)
 - Кто ответственный за выполнение
 - Когда должно быть выполнено
 
 ВАЖНО:
-- Если руководителей несколько, фиксируй поручения от каждого
-- Если поручение без срока - оставляй поле пустым, не придумывай
-- Если ответственный не назван - оставляй поле пустым
-- Используй точные формулировки из транскрипции"""
+- Если руководителей несколько, фиксируй поручения от каждого.
+- Если поручение без срока - оставляй поле пустым.
+- Если ответственный не назван - оставляй поле пустым.
+- Используй точные формулировки из транскрипции, но приводи их к императивному виду (например, "Нужно сделать отчет" -> "Подготовить отчет")."""
 
 
 def _build_od_user_prompt(
@@ -2612,7 +2601,8 @@ def _build_od_user_prompt(
     diarization_data: Optional[Dict[str, Any]],
     participants: Optional[List[Dict[str, str]]],
     speaker_mapping: Optional[Dict[str, str]],
-    meeting_date: Optional[str] = None
+    meeting_date: Optional[str] = None,
+    meeting_topic: Optional[str] = None
 ) -> str:
     """
     Пользовательский промпт для OD протокола
@@ -2663,7 +2653,11 @@ def _build_od_user_prompt(
     # Дополнительная информация
     meta_info = ""
     if meeting_date:
-        meta_info += f"Дата встречи: {meeting_date}\n\n"
+        meta_info += f"Дата встречи: {meeting_date}\n"
+    if meeting_topic:
+        meta_info += f"Тема встречи: {meeting_topic}\n"
+    if meta_info:
+        meta_info += "\n"
     
     prompt = f"""{transcription_text}
 
@@ -2678,17 +2672,18 @@ def _build_od_user_prompt(
 2. Все поручения от руководителей по этой задаче
 
 Для каждого поручения укажи:
-- manager_name: имя руководителя, давшего поручение
-- instruction: суть поручения (что нужно сделать)
+- manager_name: имя руководителя, давшего или утвердившего поручение
+- instruction: суть поручения (что нужно сделать, конкретное действие)
 - responsible: ответственный исполнитель (если указан)
 - deadline: срок выполнения (если указан)
 
 ИНСТРУКЦИИ:
-1. Внимательно читай высказывания руководителей (список выше)
-2. Группируй поручения по задачам/проектам
-3. Сохраняй точные формулировки
-4. Если информации нет (ответственный, срок) - оставляй поле пустым
-5. Используй имена участников в формате "Имя Фамилия"
+1. Внимательно читай высказывания руководителей (список выше).
+2. Также обращай внимание на моменты, где руководитель соглашается с предложением ("Да, давайте так", "Ок, делай"). В этом случае автором поручения считается руководитель.
+3. Группируй поручения по задачам/проектам.
+4. Сохраняй точные формулировки, но делай их понятными и действенными.
+5. Если информации нет (ответственный, срок) - оставляй поле пустым.
+6. Используй имена участников в формате "Имя Фамилия".
 
 Создай структурированный JSON согласно схеме ODProtocolSchema."""
     
@@ -2778,6 +2773,7 @@ async def generate_protocol_od(
     participants: Optional[List[Dict[str, str]]] = None,
     speaker_mapping: Optional[Dict[str, str]] = None,
     meeting_date: Optional[str] = None,
+    meeting_topic: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -2791,6 +2787,7 @@ async def generate_protocol_od(
         participants: Список участников с ролями
         speaker_mapping: Сопоставление спикеров с участниками
         meeting_date: Дата встречи
+        meeting_topic: Тема встречи
         **kwargs: Дополнительные параметры (openai_model_key и др.)
         
     Returns:
@@ -2811,7 +2808,8 @@ async def generate_protocol_od(
         diarization_data=diarization_data,
         participants=participants,
         speaker_mapping=speaker_mapping,
-        meeting_date=meeting_date
+        meeting_date=meeting_date,
+        meeting_topic=meeting_topic
     )
     
     # Выбираем модель
@@ -2935,7 +2933,6 @@ async def generate_protocol_unified(
     template_variables: Dict[str, str],
     diarization_data: Optional[Dict[str, Any]] = None,
     diarization_analysis: Optional[Dict[str, Any]] = None,
-    meeting_structure = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -2953,7 +2950,6 @@ async def generate_protocol_unified(
         template_variables: Переменные шаблона
         diarization_data: Данные диаризации
         diarization_analysis: Анализ диаризации
-        meeting_structure: Структура встречи (используется вместо полной транскрипции)
         **kwargs: Дополнительные параметры
         
     Returns:
@@ -2973,9 +2969,7 @@ async def generate_protocol_unified(
     
     # Создаем структурированное представление встречи (если доступно)
     structure_summary = ""
-    if meeting_structure:
-        structure_summary = build_structure_summary(meeting_structure)
-        logger.info(f"Используем meeting_structure вместе с транскрипцией (сжато: {len(structure_summary)} символов)")
+
     
     # Строим промпт
     prompt = _build_unified_prompt(
@@ -3120,7 +3114,6 @@ async def generate_protocol_unified(
                     template_variables=template_variables,
                     diarization_data=diarization_data,
                     diarization_analysis=diarization_analysis,
-                    meeting_structure=meeting_structure,
                     **kwargs
                 )
             except Exception as fallback_error:
@@ -3141,7 +3134,6 @@ async def generate_protocol_unified(
                 template_variables=template_variables,
                 diarization_data=diarization_data,
                 diarization_analysis=diarization_analysis,
-                meeting_structure=meeting_structure,
                 **kwargs
             )
         
@@ -3157,7 +3149,6 @@ async def generate_protocol_unified(
                 template_variables=template_variables,
                 diarization_data=diarization_data,
                 diarization_analysis=diarization_analysis,
-                meeting_structure=meeting_structure,
                 **kwargs
             )
         
@@ -3288,6 +3279,7 @@ def _build_segment_analysis_prompt(
         participants_info += "   • SPEAKER_2: \"Викулин и Марат просили...\"\n"
         participants_info += "     SPEAKER_1: \"Все верно, Марат это просил...\"\n"
         participants_info += "     → SPEAKER_2 = Марат (подтверждение через обращение)\n\n"
+        
         participants_info += "   • SPEAKER_1: \"Как сказал Иван ранее...\"\n"
         participants_info += "     → Найди предыдущего SPEAKER, говорившего на эту тему = Иван\n\n"
         
@@ -4197,7 +4189,6 @@ async def generate_protocol_chain_of_thought(
     segments: List['TranscriptionSegment'],
     diarization_data: Optional[Dict[str, Any]] = None,
     diarization_analysis: Optional[Dict[str, Any]] = None,
-    meeting_structure = None,  # MeetingStructure
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -4234,7 +4225,7 @@ async def generate_protocol_chain_of_thought(
     
     segment_results = []
     
-    # ЭТАП 1: Анализ каждого сегмента
+    # ЭТАП 1: Анализ отдельных сегментов
     logger.info("Этап 1: Анализ отдельных сегментов")
     
     if provider_name == "openai":
@@ -4611,9 +4602,7 @@ async def generate_protocol_chain_of_thought(
             f"Chain-of-Thought не поддерживается для {provider_name}, "
             f"используем стандартный подход"
         )
-        # Передаем meeting_structure через kwargs
-        if meeting_structure:
-            kwargs['meeting_structure'] = meeting_structure
+
         return await manager.generate_protocol(
             provider_name, transcription, template_variables, diarization_data, **kwargs
         )
