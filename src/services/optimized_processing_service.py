@@ -30,10 +30,10 @@ from src.utils.telegram_safe import safe_send_message
 from src.services.transcription_preprocessor import get_preprocessor
 from src.services.diarization_analyzer import diarization_analyzer
 from src.services.protocol_validator import protocol_validator
-from src.services.segmentation_service import segmentation_service
+
 
 from src.services.smart_template_selector import smart_selector
-from llm_providers import generate_protocol_chain_of_thought, llm_manager
+from llm_providers import llm_manager
 from config import settings
 
 
@@ -1128,23 +1128,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     elif hasattr(analysis_obj, 'to_dict'):
                         diarization_analysis = analysis_obj.to_dict()
             
-            # Определяем длительность встречи для проверки необходимости Chain-of-Thought
-            estimated_duration_minutes = None
-            diarization_data_raw = getattr(transcription_result, 'diarization', None)
-            if diarization_data_raw:
-                estimated_duration_minutes = diarization_data_raw.get('total_duration', 0) / 60
-            
-            # Отключено построение структурированного представления для соблюдения лимита в 2 LLM запроса
-            # Консолидированный метод уже выполняет извлечение структуры в своих 2 запросах
-            # ВАЖНО: meeting_structure используется как единственный источник
-        # Выбираем метод генерации: OD > Unified > Chain-of-Thought > Двухэтапный > Стандартный
-        # OD протокол - специальный режим для протокола поручений руководителей
-        # Unified подход доступен через feature flag для A/B тестирования
-        # Проверяем необходимость Chain-of-Thought для длинных встреч
-            should_use_cot = segmentation_service.should_use_segmentation(
-                transcription=transcription_result.transcription,
-                estimated_duration_minutes=estimated_duration_minutes
-            )
+
             
             if request.processing_mode == 'od_protokol':
                 logger.info("Использование OD протокола (протокол поручений руководителей)")
@@ -1259,46 +1243,7 @@ class OptimizedProcessingService(BaseProcessingService):
                     participants=request.participants_list
                 )
 
-            elif should_use_cot and request.llm_provider == 'openai':
-                logger.info("Использование Chain-of-Thought генерации для длинной встречи")
-                
-                # Сегментация транскрипции
-                # Приоритет: по спикерам если есть диаризация, иначе по времени
-                if diarization_data_raw and diarization_data_raw.get('formatted_transcript'):
-                    logger.info("Сегментация по спикерам")
-                    segments = segmentation_service.segment_by_speakers(
-                        diarization_data=diarization_data_raw,
-                        transcription=transcription_result.transcription,
-                        speaker_mapping=request.speaker_mapping
-                    )
-                else:
-                    logger.info("Сегментация по времени")
-                    segments = segmentation_service.segment_by_time(
-                        transcription=transcription_result.transcription,
-                        diarization_data=diarization_data_raw,
-                        target_minutes=int(settings.chain_of_thought_threshold_minutes / 6),  # ~5 мин сегменты
-                        speaker_mapping=request.speaker_mapping
-                    )
-                
-                # Логирование сегментов
-                for segment in segments:
-                    logger.info(segmentation_service.create_segment_summary(segment))
-                
-                # Chain-of-Thought генерация
-                llm_result_data = await generate_protocol_chain_of_thought(
-                    manager=llm_manager,
-                    provider_name=request.llm_provider,
-                    transcription=transcription_result.transcription,
-                    template_variables=template_variables,
-                    segments=segments,
-                    diarization_data=diarization_data_raw,
-                    diarization_analysis=diarization_analysis,
-                    openai_model_key=openai_model_key,
-                    speaker_mapping=request.speaker_mapping,
-                    meeting_topic=request.meeting_topic,
-                    meeting_date=request.meeting_date,
-                    meeting_time=request.meeting_time
-                )
+
                 
             elif settings.two_stage_processing and request.llm_provider == 'openai':
                 logger.info("Использование двухэтапной генерации протокола (оптимизированной)")
