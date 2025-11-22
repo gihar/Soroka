@@ -98,15 +98,31 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             category_names = {
                 'management': '👔 Управленческие',
                 'product': '🚀 Продуктовые',
+                'educational': '📚 Учебные',
                 'technical': '⚙️ Технические',
                 'general': '📋 Общие',
                 'sales': '💼 Продажи'
             }
             
+            # Порядок отображения категорий
+            category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
+            
             keyboard_buttons = []
             
-            # Добавляем категории (без кнопки "Умный выбор")
-            for category, cat_templates in sorted(categories.items()):
+            # Сортируем категории согласно заданному порядку
+            sorted_categories = []
+            # Сначала добавляем категории из списка порядка
+            for cat in category_order:
+                if cat in categories:
+                    sorted_categories.append((cat, categories[cat]))
+            
+            # Затем добавляем остальные категории (если есть), отсортированные по алфавиту
+            for cat, templates in sorted(categories.items()):
+                if cat not in category_order:
+                    sorted_categories.append((cat, templates))
+            
+            # Добавляем кнопки категорий
+            for category, cat_templates in sorted_categories:
                 category_name = category_names.get(category, f'📁 {category.title()}')
                 keyboard_buttons.append([InlineKeyboardButton(
                     text=f"{category_name} ({len(cat_templates)})",
@@ -152,6 +168,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 category_names = {
                     'management': '👔 Управленческие',
                     'product': '🚀 Продуктовые',
+                    'educational': '📚 Учебные',
                     'technical': '⚙️ Технические',
                     'general': '📋 Общие',
                     'sales': '💼 Продажи'
@@ -503,15 +520,31 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             category_names = {
                 'management': '👔 Управленческие',
                 'product': '🚀 Продуктовые',
+                'educational': '📚 Учебные',
                 'technical': '⚙️ Технические',
                 'general': '📋 Общие',
                 'sales': '💼 Продажи'
             }
             
+            # Порядок отображения категорий
+            category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
+            
             keyboard_buttons = []
             
+            # Сортируем категории согласно заданному порядку
+            sorted_categories = []
+            # Сначала добавляем категории из списка порядка
+            for cat in category_order:
+                if cat in categories:
+                    sorted_categories.append((cat, categories[cat]))
+            
+            # Затем добавляем остальные категории (если есть), отсортированные по алфавиту
+            for cat, templates in sorted(categories.items()):
+                if cat not in category_order:
+                    sorted_categories.append((cat, templates))
+            
             # Добавляем категории
-            for category, cat_templates in sorted(categories.items()):
+            for category, cat_templates in sorted_categories:
                 category_name = category_names.get(category, f'📁 {category.title()}')
                 keyboard_buttons.append([InlineKeyboardButton(
                     text=f"{category_name} ({len(cat_templates)})",
@@ -698,10 +731,14 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 category_names = {
                     'management': '👔 Управленческие',
                     'product': '🚀 Продуктовые',
+                    'educational': '📚 Учебные',
                     'technical': '⚙️ Технические',
                     'general': '📋 Общие',
                     'sales': '💼 Продажи'
                 }
+                
+                # Порядок отображения категорий
+                category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
                 
                 keyboard_buttons = []
                 
@@ -711,8 +748,20 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                     callback_data="set_default_template_0"  # 0 = умный выбор
                 )])
                 
+                # Сортируем категории согласно заданному порядку
+                sorted_categories = []
+                # Сначала добавляем категории из списка порядка
+                for cat in category_order:
+                    if cat in categories:
+                        sorted_categories.append((cat, categories[cat]))
+                
+                # Затем добавляем остальные категории (если есть), отсортированные по алфавиту
+                for cat, templates in sorted(categories.items()):
+                    if cat not in category_order:
+                        sorted_categories.append((cat, templates))
+                
                 # Категории шаблонов
-                for category, templates in sorted(categories.items()):
+                for category, templates in sorted_categories:
                     category_name = category_names.get(category, f'📁 {category.title()}')
                     keyboard_buttons.append([InlineKeyboardButton(
                         text=f"{category_name} ({len(templates)})",
@@ -769,6 +818,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
                 category_names = {
                     'management': '👔 Управленческие',
                     'product': '🚀 Продуктовые',
+                    'educational': '📚 Учебные',
                     'technical': '⚙️ Технические',
                     'general': '📋 Общие',
                     'sales': '💼 Продажи'
