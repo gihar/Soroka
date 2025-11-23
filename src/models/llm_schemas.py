@@ -271,6 +271,53 @@ class ExtractionSchema(BaseModel):
         description="Общие заметки по процессу извлечения"
     )
 
+    # Compatibility fields for templates
+    date: str = Field(default="", description="Дата встречи (alias для meeting_date)")
+    time: str = Field(default="", description="Время встречи (alias для meeting_time)")
+    managers: str = Field(default="", description="Список руководителей через запятую")
+    platform: str = Field(default="", description="Платформа проведения (для онлайн-встреч)")
+
+    # Additional fields used by templates
+    tasks: str = Field(default="", description="Задачи и распределение ответственности")
+    next_steps: str = Field(default="", description="Следующие шаги и контрольные точки")
+    deadlines: str = Field(default="", description="Сроки выполнения задач")
+    issues: str = Field(default="", description="Выявленные проблемы и вопросы")
+    questions: str = Field(default="", description="Открытые вопросы")
+    risks_and_blockers: str = Field(default="", description="Риски и блокеры")
+    technical_issues: str = Field(default="", description="Технические вопросы и проблемы")
+    architecture_decisions: str = Field(default="", description="Архитектурные решения")
+    technical_tasks: str = Field(default="", description="Технические задачи")
+    speaker_contributions: str = Field(default="", description="Вклад каждого участника")
+    dialogue_analysis: str = Field(default="", description="Анализ диалога и взаимодействия")
+    speakers_summary: str = Field(default="", description="Краткая характеристика участников")
+    learning_objectives: str = Field(default="", description="Цели обучения (для образовательных встреч)")
+    key_concepts: str = Field(default="", description="Ключевые концепции и определения")
+    examples_and_cases: str = Field(default="", description="Примеры и кейсы")
+    practical_exercises: str = Field(default="", description="Практические упражнения")
+    homework: str = Field(default="", description="Домашнее задание")
+    materials: str = Field(default="", description="Материалы и ресурсы")
+    next_sprint_plans: str = Field(default="", description="Планы на следующий спринт")
+
+    # Educational template specific fields
+    professional_secrets: str = Field(default="", description="Профессиональные секреты и лайфхаки")
+    audience_practice: str = Field(default="", description="Практика под руководством мастера")
+    group_formation: str = Field(default="", description="Формирование групп")
+    group_results: str = Field(default="", description="Результаты работы групп")
+    peer_feedback: str = Field(default="", description="Взаимная обратная связь")
+    individual_reflections: str = Field(default="", description="Индивидуальные рефлексии")
+    poll_results: str = Field(default="", description="Результаты опросов и голосований")
+    chat_questions: str = Field(default="", description="Вопросы из чата")
+    live_demonstration: str = Field(default="", description="Демонстрация в реальном времени")
+    downloadable_materials: str = Field(default="", description="Материалы для скачивания")
+
+    # Additional educational fields
+    practical_demonstration: str = Field(default="", description="Практическая демонстрация")
+    feedback_session: str = Field(default="", description="Сессия обратной связи")
+    group_work: str = Field(default="", description="Работа в группах")
+    controversial_points: str = Field(default="", description="Ключевые точки мнений")
+    participant_contributions: str = Field(default="", description="Вклад участников")
+    questions_and_answers: str = Field(default="", description="Вопросы и ответы")
+
     class Config:
         extra = "forbid"
 
@@ -333,6 +380,53 @@ class ConsolidatedProtocolSchema(BaseModel):
         default="",
         description="Специфичные наблюдения для типа встречи"
     )
+
+    # Compatibility fields for templates
+    date: str = Field(default="", description="Дата встречи (alias для meeting_date)")
+    time: str = Field(default="", description="Время встречи (alias для meeting_time)")
+    managers: str = Field(default="", description="Список руководителей через запятую")
+    platform: str = Field(default="", description="Платформа проведения (для онлайн-встреч)")
+
+    # Additional fields used by templates
+    tasks: str = Field(default="", description="Задачи и распределение ответственности")
+    next_steps: str = Field(default="", description="Следующие шаги и контрольные точки")
+    deadlines: str = Field(default="", description="Сроки выполнения задач")
+    issues: str = Field(default="", description="Выявленные проблемы и вопросы")
+    questions: str = Field(default="", description="Открытые вопросы")
+    risks_and_blockers: str = Field(default="", description="Риски и блокеры")
+    technical_issues: str = Field(default="", description="Технические вопросы и проблемы")
+    architecture_decisions: str = Field(default="", description="Архитектурные решения")
+    technical_tasks: str = Field(default="", description="Технические задачи")
+    speaker_contributions: str = Field(default="", description="Вклад каждого участника")
+    dialogue_analysis: str = Field(default="", description="Анализ диалога и взаимодействия")
+    speakers_summary: str = Field(default="", description="Краткая характеристика участников")
+    learning_objectives: str = Field(default="", description="Цели обучения (для образовательных встреч)")
+    key_concepts: str = Field(default="", description="Ключевые концепции и определения")
+    examples_and_cases: str = Field(default="", description="Примеры и кейсы")
+    practical_exercises: str = Field(default="", description="Практические упражнения")
+    homework: str = Field(default="", description="Домашнее задание")
+    materials: str = Field(default="", description="Материалы и ресурсы")
+    next_sprint_plans: str = Field(default="", description="Планы на следующий спринт")
+
+    # Educational template specific fields
+    professional_secrets: str = Field(default="", description="Профессиональные секреты и лайфхаки")
+    audience_practice: str = Field(default="", description="Практика под руководством мастера")
+    group_formation: str = Field(default="", description="Формирование групп")
+    group_results: str = Field(default="", description="Результаты работы групп")
+    peer_feedback: str = Field(default="", description="Взаимная обратная связь")
+    individual_reflections: str = Field(default="", description="Индивидуальные рефлексии")
+    poll_results: str = Field(default="", description="Результаты опросов и голосований")
+    chat_questions: str = Field(default="", description="Вопросы из чата")
+    live_demonstration: str = Field(default="", description="Демонстрация в реальном времени")
+    downloadable_materials: str = Field(default="", description="Материалы для скачивания")
+
+    # Additional educational fields
+    practical_demonstration: str = Field(default="", description="Практическая демонстрация")
+    feedback_session: str = Field(default="", description="Сессия обратной связи")
+    group_work: str = Field(default="", description="Работа в группах")
+    controversial_points: str = Field(default="", description="Ключевые точки мнений")
+    participant_contributions: str = Field(default="", description="Вклад участников")
+    questions_and_answers: str = Field(default="", description="Вопросы и ответы")
 
     class Config:
         extra = "forbid"
