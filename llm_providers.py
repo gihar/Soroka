@@ -16,10 +16,6 @@ from anthropic import Anthropic
 # Импорт для контекстно-зависимых промптов
 # Импорт для контекстно-зависимых промптов
 # from src.services.meeting_classifier import meeting_classifier - MOVED TO LOCAL SCOPE TO AVOID CIRCULAR IMPORT
-from src.prompts.specialized_prompts import (
-    get_specialized_system_prompt, 
-    get_specialized_extraction_instructions
-)
 
 # Импорт для retry логики
 from src.reliability.retry import RetryManager, LLM_RETRY_CONFIG
@@ -731,14 +727,9 @@ def _build_system_prompt(
         except Exception as e:
             logger.warning(f"Ошибка при классификации встречи: {e}. Используем базовый промпт")
 
-    # Если есть определенный тип встречи - получаем специализированный промпт
+    # Если определен тип встречи, логируем для информации (но используем базовый промпт)
     if meeting_type:
-        try:
-            specialized_prompt = get_specialized_system_prompt(meeting_type)
-            logger.info(f"Использую специализированный промпт для типа встречи: {meeting_type}")
-            return specialized_prompt
-        except Exception as e:
-            logger.warning(f"Ошибка получения специализированного промпта: {e}. Используем базовый промпт")
+        logger.info(f"Определен тип встречи: {meeting_type} (используем базовый промпт)")
     
     # Базовый промпт (общий для всех режимов)
     base_prompt = (
