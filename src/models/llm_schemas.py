@@ -212,12 +212,65 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
 
 
 # Предопределенные схемы для быстрого доступа
+
+class MeetingAnalysisSchema(BaseModel):
+    """
+    Схема для первого запроса: анализ типа встречи и сопоставление спикеров
+    """
+    meeting_type: str = Field(
+        description="Тип встречи (technical, business, educational, brainstorm, status, general)"
+    )
+    speaker_mappings: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Сопоставление SPEAKER_N → 'Имя Фамилия' для спикеров с уверенностью >= 0.7"
+    )
+    unmapped_speakers: List[str] = Field(
+        default_factory=list,
+        description="Список SPEAKER_N с уверенностью < 0.7, которых не удалось надежно сопоставить"
+    )
+    analysis_confidence: float = Field(
+        default=0.0,
+        description="Уверенность в анализе (0.0-1.0)"
+    )
+    analysis_notes: str = Field(
+        default="",
+        description="Заметки по анализу типа и спикеров"
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+class ProtocolDataSchema(BaseModel):
+    """
+    Схема для второго запроса: извлечение данных протокола
+    """
+    protocol_data: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Извлеченные данные протокола (ключ=переменная шаблона, значение=строка)"
+    )
+    quality_score: float = Field(
+        default=0.0,
+        description="Оценка качества извлечения (0.0-1.0)"
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description="Проблемы или неоднозначности при извлечении"
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+# Предопределенные схемы для быстрого доступа
 PROTOCOL_SCHEMA = get_json_schema(ProtocolSchema)
 TWO_STAGE_EXTRACTION_SCHEMA = get_json_schema(TwoStageExtractionSchema)
 TWO_STAGE_REFLECTION_SCHEMA = get_json_schema(TwoStageReflectionSchema)
 UNIFIED_PROTOCOL_SCHEMA = get_json_schema(UnifiedProtocolSchema)
 SPEAKER_MAPPING_SCHEMA = get_json_schema(SpeakerMappingSchema)
 OD_PROTOCOL_SCHEMA = get_json_schema(ODProtocolSchema)
+MEETING_ANALYSIS_SCHEMA = get_json_schema(MeetingAnalysisSchema)
+PROTOCOL_DATA_SCHEMA = get_json_schema(ProtocolDataSchema)
 
 
 class ExtractionSchema(BaseModel):
@@ -451,6 +504,8 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'unified_protocol': UNIFIED_PROTOCOL_SCHEMA,
         'speaker_mapping': SPEAKER_MAPPING_SCHEMA,
         'od_protocol': OD_PROTOCOL_SCHEMA,
+        'meeting_analysis': MEETING_ANALYSIS_SCHEMA,
+        'protocol_data': PROTOCOL_DATA_SCHEMA,
         # New consolidated schemas for two-request approach
         'extraction': get_json_schema(ExtractionSchema),
         'consolidated_protocol': get_json_schema(ConsolidatedProtocolSchema),

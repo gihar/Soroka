@@ -20,11 +20,20 @@ from src.reliability.retry import RetryManager, LLM_RETRY_CONFIG
 from src.exceptions.processing import LLMInsufficientCreditsError
 
 # Импорт правил для полей протокола и функции генерации динамических правил
-from src.prompts.prompts import FIELD_SPECIFIC_RULES, _build_field_specific_rules
+from src.prompts.prompts import (
+    FIELD_SPECIFIC_RULES, 
+    _build_field_specific_rules,
+    build_analysis_prompt,
+    build_analysis_system_prompt,
+    build_generation_prompt,
+    build_generation_system_prompt
+)
 
 # Импорт JSON Schema для structured outputs
 from src.models.llm_schemas import (
-    PROTOCOL_SCHEMA
+    PROTOCOL_SCHEMA,
+    MEETING_ANALYSIS_SCHEMA,
+    PROTOCOL_DATA_SCHEMA
 )
 
 # Импорт утилит для оптимизации контекста
@@ -615,163 +624,132 @@ class OpenAIProvider(LLMProvider):
         return self.client is not None and settings.openai_api_key is not None
     
     async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        """Генерировать протокол используя OpenAI GPT"""
+        """Генерировать протокол используя OpenAI GPT (Двухэтапный процесс)"""
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
 
         # Извлекаем параметры из kwargs
-        speaker_mapping = kwargs.get('speaker_mapping')
-        meeting_topic = kwargs.get('meeting_topic')
-        meeting_date = kwargs.get('meeting_date')
-        meeting_time = kwargs.get('meeting_time')
         participants = kwargs.get('participants')
+        meeting_metadata = {
+            'meeting_topic': kwargs.get('meeting_topic', ''),
+            'meeting_date': kwargs.get('meeting_date', ''),
+            'meeting_time': kwargs.get('meeting_time', '')
+        }
 
-        # Унифицированные системный и пользовательский промпты
-        system_prompt = _build_system_prompt()
+        # Подготовка данных для первого этапа (Анализ)
+        # Используем formatted_transcript если есть, так как он содержит метки спикеров
+        analysis_transcription = transcription
+        if diarization_data and diarization_data.get("formatted_transcript"):
+            analysis_transcription = diarization_data["formatted_transcript"]
 
-        user_prompt = _build_user_prompt(
-            transcription,
-            template_variables,
-            diarization_data,
-            speaker_mapping,
-            meeting_topic,
-            meeting_date,
-            meeting_time,
-            participants,
-
-        )
-        
-        try:
-            # Выбор пресета модели, если передан ключ
-            selected_model = settings.openai_model
-            selected_base_url = settings.openai_base_url or "https://api.openai.com/v1"
-            model_key = kwargs.get("openai_model_key")
-            if model_key:
-                try:
-                    preset = next((p for p in settings.openai_models if p.key == model_key), None)
-                except Exception:
-                    preset = None
-                if preset:
-                    selected_model = preset.model
-                    if getattr(preset, 'base_url', None):
-                        selected_base_url = preset.base_url
-            
-            # Клиент для нужного base_url (по умолчанию используем self.client)
-            client = self.client
-            if client is None or (selected_base_url and getattr(client, 'base_url', None) != selected_base_url):
-                client = openai.OpenAI(
-                    api_key=settings.openai_api_key,
-                    base_url=selected_base_url,
-                    http_client=self.http_client
-                )
-
-            # Диагностика запроса (без утечки полной транскрипции)
-            base_url = selected_base_url or "https://api.openai.com/v1"
-            sys_msg = "Ты - строгий аналитик протоколов встреч..."
-            user_len = len(user_prompt)
-            transcript_len = len(transcription)
-            vars_count = len(template_variables)
-            logger.info(
-                f"OpenAI запрос: model={selected_model}, base_url={base_url}, "
-                f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
-            )
-            _snippet = user_prompt[:400].replace("\n", " ")
-            logger.debug(f"OpenAI prompt (фрагмент 400): {_snippet}...")
-
-            # Формируем extra_headers для атрибуции
-            extra_headers = {}
-            if settings.http_referer:
-                extra_headers["HTTP-Referer"] = settings.http_referer
-            if settings.x_title:
-                extra_headers["X-Title"] = settings.x_title
-
-            # DEBUG логирование запроса
-            if settings.llm_debug_log:
-                logger.debug("=" * 80)
-                logger.debug("[DEBUG] OpenAI REQUEST - generate_protocol")
-                logger.debug("=" * 80)
-                logger.debug(f"Model: {selected_model}")
-                logger.debug(f"Base URL: {selected_base_url}")
-                logger.debug(f"Temperature: 0.1")
-                logger.debug(f"Extra headers: {extra_headers}")
-                logger.debug("-" * 80)
-                logger.debug(f"System prompt:\n{system_prompt}")
-                logger.debug("-" * 80)
-                logger.debug(f"User prompt:\n{user_prompt}")
-                logger.debug("=" * 80)
-
-            logger.info(f"Отправляем запрос в OpenAI с моделью {selected_model}")
-            
-            # Выполняем синхронный вызов клиента в отдельном потоке, чтобы не блокировать event loop
-            async def _call_openai():
-                return await asyncio.to_thread(
-                    client.chat.completions.create,
-                    model=selected_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_schema", "json_schema": PROTOCOL_SCHEMA},
-                    extra_headers=extra_headers
-                )
-            
+        # Форматирование списка участников
+        participants_list_str = "Не предоставлен"
+        if participants:
             try:
-                response = await _call_openai()
-            except openai.APIStatusError as e:
-                # Проверяем на ошибку 402 - недостаточно кредитов
-                if e.status_code == 402:
-                    error_message = e.message
-                    # Пытаемся извлечь более подробное сообщение из тела ответа
-                    if hasattr(e, 'response') and e.response:
-                        try:
-                            error_body = e.response.json()
-                            if 'error' in error_body and 'message' in error_body['error']:
-                                error_message = error_body['error']['message']
-                        except:
-                            pass
-                    logger.error(f"Недостаточно кредитов для LLM: {error_message}")
-                    raise LLMInsufficientCreditsError(
-                        message=error_message,
-                        provider="openai",
-                        model=selected_model
-                    )
-                # Другие ошибки API пробрасываем дальше
-                raise
-            
-            logger.info("Получен ответ от OpenAI API")
-            
+                from src.services.participants_service import participants_service
+                participants_list_str = participants_service.format_participants_for_llm(participants)
+            except ImportError:
+                participants_list_str = "\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
+
+        # ЭТАП 1: АНАЛИЗ (Тип встречи + Сопоставление спикеров)
+        logger.info("🚀 Запуск ЭТАПА 1: Анализ встречи и сопоставление спикеров")
+        
+        analysis_system_prompt = build_analysis_system_prompt()
+        analysis_user_prompt = build_analysis_prompt(
+            transcription=analysis_transcription,
+            participants_list=participants_list_str,
+            meeting_metadata=meeting_metadata
+        )
+
+        analysis_result = await self._call_openai(
+            system_prompt=analysis_system_prompt,
+            user_prompt=analysis_user_prompt,
+            schema=MEETING_ANALYSIS_SCHEMA,
+            step_name="Analysis"
+        )
+
+        meeting_type = analysis_result.get('meeting_type', 'general')
+        speaker_mapping = analysis_result.get('speaker_mappings', {})
+        
+        logger.info(f"✅ ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
+
+        # ЭТАП 2: ГЕНЕРАЦИЯ (Извлечение данных протокола)
+        logger.info("🚀 Запуск ЭТАПА 2: Генерация протокола")
+
+        generation_system_prompt = build_generation_system_prompt()
+        generation_user_prompt = build_generation_prompt(
+            transcription=analysis_transcription, # Используем ту же транскрипцию с метками
+            template_variables=template_variables,
+            speaker_mapping=speaker_mapping,
+            meeting_type=meeting_type
+        )
+
+        generation_result = await self._call_openai(
+            system_prompt=generation_system_prompt,
+            user_prompt=generation_user_prompt,
+            schema=PROTOCOL_DATA_SCHEMA,
+            step_name="Generation"
+        )
+
+        protocol_data = generation_result.get('protocol_data', {})
+        
+        logger.info(f"✅ ЭТАП 2 завершен. Извлечено полей: {len(protocol_data)}")
+
+        # Консолидация результатов
+        # Возвращаем плоский словарь, как ожидает остальная система
+        # Но добавляем метаданные анализа
+        final_result = protocol_data.copy()
+        final_result['_meeting_type'] = meeting_type
+        final_result['_speaker_mapping'] = speaker_mapping
+        final_result['_analysis_confidence'] = analysis_result.get('analysis_confidence', 0.0)
+        final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
+
+        return final_result
+
+    async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any], step_name: str) -> Dict[str, Any]:
+        """Вспомогательный метод для вызова OpenAI"""
+        
+        selected_model = settings.openai_model
+        # Для анализа можно использовать модель попроще/быстрее, но пока используем основную
+        
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+
+        logger.info(f"Отправляем запрос в OpenAI [{step_name}] с моделью {selected_model}")
+
+        async def _api_call():
+            return await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_schema", "json_schema": schema},
+                extra_headers=extra_headers
+            )
+
+        try:
+            response = await _api_call()
             content = response.choices[0].message.content
-            
-            # DEBUG логирование ответа
-            if settings.llm_debug_log:
-                logger.debug("=" * 80)
-                logger.debug("[DEBUG] OpenAI RESPONSE - generate_protocol")
-                logger.debug("=" * 80)
-                if hasattr(response, 'usage'):
-                    logger.debug(f"Usage: {response.usage}")
-                finish_reason = response.choices[0].finish_reason
-                logger.debug(f"Finish reason: {finish_reason}")
-                logger.debug("-" * 80)
-                logger.debug(f"Content:\n{content}")
-                logger.debug("=" * 80)
             
             # Логирование кешированных токенов
             if settings.log_cache_metrics:
                 log_cached_tokens_usage(
                     response=response,
-                    context="generate_protocol",
+                    context=f"generate_protocol_{step_name}",
                     model_name=selected_model,
                     provider="openai"
                 )
-            
-            logger.info(f"Получен ответ от OpenAI (длина: {len(content) if content else 0}): {content[:200] if content else 'None'}...")
-            
-            # Используем безопасный парсер JSON
-            return safe_json_parse(content, context="OpenAI API response")
+                
+            return safe_json_parse(content, context=f"OpenAI {step_name} response")
             
         except Exception as e:
-            logger.error(f"Ошибка при работе с OpenAI API: {e}")
+            logger.error(f"Ошибка при вызове OpenAI [{step_name}]: {e}")
             raise
 
 
@@ -793,103 +771,135 @@ class AnthropicProvider(LLMProvider):
         return self.client is not None and settings.anthropic_api_key is not None
     
     async def generate_protocol(self, transcription: str, template_variables: Dict[str, str], diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        """Генерировать протокол используя Anthropic Claude"""
+        """Генерировать протокол используя Anthropic Claude (Двухэтапный процесс)"""
         if not self.is_available():
             raise ValueError("Anthropic API не настроен")
 
         # Извлекаем параметры из kwargs
-        speaker_mapping = kwargs.get('speaker_mapping')
-        meeting_topic = kwargs.get('meeting_topic')
-        meeting_date = kwargs.get('meeting_date')
-        meeting_time = kwargs.get('meeting_time')
         participants = kwargs.get('participants')
+        meeting_metadata = {
+            'meeting_topic': kwargs.get('meeting_topic', ''),
+            'meeting_date': kwargs.get('meeting_date', ''),
+            'meeting_time': kwargs.get('meeting_time', '')
+        }
 
-        # Унифицированные системный и пользовательский промпты
-        system_prompt = _build_system_prompt()
+        # Подготовка данных для первого этапа (Анализ)
+        analysis_transcription = transcription
+        if diarization_data and diarization_data.get("formatted_transcript"):
+            analysis_transcription = diarization_data["formatted_transcript"]
 
-        prompt = _build_user_prompt(
-            transcription,
-            template_variables,
-            diarization_data,
-            speaker_mapping,
-            meeting_topic,
-            meeting_date,
-            meeting_time,
-            participants
-        )
+        # Форматирование списка участников
+        participants_list_str = "Не предоставлен"
+        if participants:
+            try:
+                from src.services.participants_service import participants_service
+                participants_list_str = participants_service.format_participants_for_llm(participants)
+            except ImportError:
+                participants_list_str = "\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
+
+        # ЭТАП 1: АНАЛИЗ
+        logger.info("🚀 [Anthropic] Запуск ЭТАПА 1: Анализ встречи")
         
-        try:
-            base_url = "Anthropic SDK"
-            user_len = len(prompt)
-            transcript_len = len(transcription)
-            vars_count = len(template_variables)
-            logger.info(
-                f"Anthropic запрос: model=claude-3-haiku-20240307, base={base_url}, "
-                f"vars={vars_count}, transcription_chars={transcript_len}, prompt_chars={user_len}"
+        analysis_system_prompt = build_analysis_system_prompt()
+        analysis_user_prompt = build_analysis_prompt(
+            transcription=analysis_transcription,
+            participants_list=participants_list_str,
+            meeting_metadata=meeting_metadata
+        )
+
+        # Используем prompt caching для первого этапа (где большая транскрипция)
+        analysis_result = await self._call_anthropic(
+            system_prompt=analysis_system_prompt,
+            user_prompt=analysis_user_prompt,
+            step_name="Analysis",
+            use_caching=True,
+            transcription_for_caching=analysis_transcription
+        )
+
+        meeting_type = analysis_result.get('meeting_type', 'general')
+        speaker_mapping = analysis_result.get('speaker_mappings', {})
+        
+        logger.info(f"✅ [Anthropic] ЭТАП 1 завершен. Тип: {meeting_type}")
+
+        # ЭТАП 2: ГЕНЕРАЦИЯ
+        logger.info("🚀 [Anthropic] Запуск ЭТАПА 2: Генерация протокола")
+
+        generation_system_prompt = build_generation_system_prompt()
+        generation_user_prompt = build_generation_prompt(
+            transcription=analysis_transcription,
+            template_variables=template_variables,
+            speaker_mapping=speaker_mapping,
+            meeting_type=meeting_type
+        )
+
+        # Тоже используем caching, так как транскрипция та же
+        generation_result = await self._call_anthropic(
+            system_prompt=generation_system_prompt,
+            user_prompt=generation_user_prompt,
+            step_name="Generation",
+            use_caching=True,
+            transcription_for_caching=analysis_transcription
+        )
+
+        protocol_data = generation_result.get('protocol_data', {})
+        
+        logger.info(f"✅ [Anthropic] ЭТАП 2 завершен.")
+
+        # Консолидация
+        final_result = protocol_data.copy()
+        final_result['_meeting_type'] = meeting_type
+        final_result['_speaker_mapping'] = speaker_mapping
+        final_result['_analysis_confidence'] = analysis_result.get('analysis_confidence', 0.0)
+        final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
+
+        return final_result
+
+    async def _call_anthropic(self, system_prompt: str, user_prompt: str, step_name: str, use_caching: bool = False, transcription_for_caching: str = "") -> Dict[str, Any]:
+        """Вспомогательный метод для вызова Anthropic"""
+        
+        extra_headers = {}
+        if settings.http_referer:
+            extra_headers["HTTP-Referer"] = settings.http_referer
+        if settings.x_title:
+            extra_headers["X-Title"] = settings.x_title
+
+        # Подготовка сообщений с учетом кеширования
+        system_block = system_prompt
+        messages = [{"role": "user", "content": user_prompt}]
+
+        if use_caching and settings.enable_prompt_caching and len(transcription_for_caching) >= settings.min_transcription_length_for_cache:
+            logger.debug(f"Используем Anthropic prompt caching для {step_name}")
+            system_block, messages = build_anthropic_messages_with_caching(
+                system_prompt, transcription_for_caching, user_prompt
             )
-            _a_snippet = prompt[:400].replace("\n", " ")
-            logger.debug(f"Anthropic prompt (фрагмент 400): {_a_snippet}...")
-            
-            # Формируем extra_headers для атрибуции
-            extra_headers = {}
-            if settings.http_referer:
-                extra_headers["HTTP-Referer"] = settings.http_referer
-            if settings.x_title:
-                extra_headers["X-Title"] = settings.x_title
-            
-            # Используем prompt caching если включено и транскрипция достаточно длинная
-            if settings.enable_prompt_caching and len(transcription) >= settings.min_transcription_length_for_cache:
-                logger.debug("Используем Anthropic prompt caching (cache_control)")
-                system_with_caching, messages_with_caching = build_anthropic_messages_with_caching(
-                    system_prompt, transcription, prompt
-                )
-                
-                # Выполняем синхронный вызов клиента Anthropic в отдельном потоке
-                async def _call_anthropic():
-                    return await asyncio.to_thread(
-                        self.client.messages.create,
-                        model="claude-3-haiku-20240307",
-                        max_tokens=2000,
-                        temperature=0.1,
-                        system=system_with_caching,  # Список блоков с cache_control
-                        messages=messages_with_caching,
-                        extra_headers=extra_headers
-                    )
-            else:
-                # Стандартный вызов без кеширования
-                async def _call_anthropic():
-                    return await asyncio.to_thread(
-                        self.client.messages.create,
-                        model="claude-3-haiku-20240307",
-                        max_tokens=2000,
-                        temperature=0.1,
-                        system=system_prompt,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
-                        extra_headers=extra_headers
-                    )
-            
-            response = await _call_anthropic()
-            
+
+        async def _api_call():
+            return await asyncio.to_thread(
+                self.client.messages.create,
+                model="claude-3-haiku-20240307",
+                max_tokens=4000,
+                temperature=0.1,
+                system=system_block,
+                messages=messages,
+                extra_headers=extra_headers
+            )
+
+        try:
+            response = await _api_call()
             content = response.content[0].text
             
-            # Логирование кешированных токенов для Anthropic
             if settings.log_cache_metrics:
                 log_cached_tokens_usage(
                     response=response,
-                    context="Anthropic generate_protocol",
+                    context=f"Anthropic_{step_name}",
                     model_name="claude-3-haiku-20240307",
                     provider="anthropic"
                 )
-            
-            logger.info(f"Получен ответ от Anthropic (длина: {len(content) if content else 0}): {content[:200] if content else 'None'}...")
-            
-            # Используем безопасный парсер JSON
-            return safe_json_parse(content, context="Anthropic API response")
+                
+            return safe_json_parse(content, context=f"Anthropic {step_name} response")
             
         except Exception as e:
-            logger.error(f"Ошибка при работе с Anthropic API: {e}")
+            logger.error(f"Ошибка при вызове Anthropic [{step_name}]: {e}")
             raise
 
 
