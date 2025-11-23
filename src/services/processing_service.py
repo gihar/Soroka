@@ -1209,7 +1209,7 @@ class ProcessingService(BaseProcessingService):
             elif settings.enable_consolidated_two_request:
                 logger.info("Использование новой консолидированной генерации протокола (2 запроса вместо 5-6)")
 
-                from llm_providers import generate_protocol_consolidated_two_request
+                from llm_providers import generate_protocol
 
                 # Подготавливаем список участников
                 participants_list = None
@@ -1240,7 +1240,7 @@ class ProcessingService(BaseProcessingService):
                 else:
                     logger.info("Используется обычная транскрипция (formatted_transcript недоступен)")
 
-                llm_result_data = await generate_protocol_consolidated_two_request(
+                llm_result_data = await generate_protocol(
                     manager=llm_manager,
                     provider_name=request.llm_provider,
                     transcription=transcription_text,
@@ -1258,35 +1258,6 @@ class ProcessingService(BaseProcessingService):
                 )
 
 
-                
-            elif settings.two_stage_processing and request.llm_provider == 'openai':
-                logger.info("Использование двухэтапной генерации протокола (оптимизированной)")
-                
-                # Используем форматированную транскрипцию с метками SPEAKER_N если доступна диаризация
-                transcription_text = transcription_result.transcription
-                if hasattr(transcription_result, 'formatted_transcript') and transcription_result.formatted_transcript:
-                    if transcription_result.diarization:
-                        transcription_text = transcription_result.formatted_transcript
-                        logger.info("Используется форматированная транскрипция с метками SPEAKER_N для диаризации")
-                    else:
-                        logger.info("Используется обычная транскрипция (диаризация недоступна)")
-                else:
-                    logger.info("Используется обычная транскрипция (formatted_transcript недоступен)")
-                
-                # Двухэтапная генерация
-                llm_result_data = await generate_protocol_two_stage(
-                    manager=llm_manager,
-                    provider_name=request.llm_provider,
-                    transcription=transcription_text,
-                    template_variables=template_variables,
-                    diarization_data=transcription_result.diarization,
-                    diarization_analysis=diarization_analysis,
-                    openai_model_key=openai_model_key,
-                    speaker_mapping=request.speaker_mapping,
-                    meeting_topic=request.meeting_topic,
-                    meeting_date=request.meeting_date,
-                    meeting_time=request.meeting_time
-                )
             else:
                 # Стандартная генерация
                 llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
