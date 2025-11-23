@@ -11,8 +11,8 @@ from src.models.template import Template
 
 # Маппинг типов встреч к ключевым словам категорий шаблонов
 MEETING_TYPE_TO_CATEGORIES = {
-    'technical': ['техническое', 'code review', 'разработка', 'архитектура', 'технический'],
-    'business': ['деловое', 'переговоры', 'бизнес', 'продажи', 'коммерческ'],
+    'technical': ['техническое', 'code review', 'разработка', 'архитектура', 'технический', 'api', 'база данных', 'фреймворк'],
+    'business': ['деловое', 'переговоры', 'бизнес', 'продажи', 'коммерческ', 'контракт', 'сделка', 'финансы', 'договор', 'поставщик', 'заказ', 'маркетплейс', 'бюджет', 'kpi', 'цели', 'план', 'шаблон', 'режим'],
     'educational': ['обучение', 'презентация', 'лекция', 'тренинг', 'образовательн'],
     'brainstorm': ['брейншторм', 'мозговой штурм', 'идеи', 'генерация'],
     'status': ['статус', 'отчет', 'ретроспектива', 'стендап', 'отчетн'],
@@ -148,13 +148,17 @@ class SmartTemplateSelector:
                 if meeting_type and meeting_type in MEETING_TYPE_TO_CATEGORIES:
                     category_keywords = MEETING_TYPE_TO_CATEGORIES[meeting_type]
                     template_text = f"{template.name} {template.description or ''} {template.category or ''}".lower()
-                    
+
                     for keyword in category_keywords:
                         if keyword in template_text:
-                            category_boost = 0.15  # +15% за соответствие категории
+                            # Повышенный boost для бизнес встреч (+30% вместо +15%)
+                            if meeting_type == 'business':
+                                category_boost = 0.30  # +30% для бизнес шаблонов
+                            else:
+                                category_boost = 0.15  # +15% для остальных категорий
                             logger.debug(
                                 f"Категорийный boost для шаблона '{template.name}': "
-                                f"meeting_type={meeting_type}, keyword='{keyword}'"
+                                f"meeting_type={meeting_type}, keyword='{keyword}', boost={category_boost}"
                             )
                             break
                 
