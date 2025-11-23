@@ -3202,11 +3202,11 @@ async def generate_protocol_consolidated_two_request(
     Returns:
         Финальный протокол
     """
-    from src.prompts.consolidated_prompts import (
-        build_consolidated_extraction_prompt,
-        build_consolidated_extraction_system_prompt,
-        build_consolidated_protocol_prompt,
-        build_consolidated_protocol_system_prompt
+    from src.prompts.prompts import (
+        build_extraction_prompt,
+        build_extraction_system_prompt,
+        build_protocol_prompt,
+        build_protocol_system_prompt
     )
     from src.models.llm_schemas import get_schema_by_type
     from src.services.meeting_classifier import meeting_classifier
@@ -3246,14 +3246,14 @@ async def generate_protocol_consolidated_two_request(
     # =======================================================
     logger.info("Запрос 1: Сопоставление спикеров + извлечение структуры")
 
-    extraction_prompt = build_consolidated_extraction_prompt(
+    extraction_prompt = build_extraction_prompt(
         transcription=transcription,
         participants_list=participants_list or participants,
         meeting_metadata=meeting_metadata,
         meeting_type=meeting_type
     )
 
-    extraction_system_prompt = build_consolidated_extraction_system_prompt()
+    extraction_system_prompt = build_extraction_system_prompt()
 
     try:
         # ЗАПРОС 1: Извлечение
@@ -3367,13 +3367,13 @@ async def generate_protocol_consolidated_two_request(
     # Добавляем переменные шаблона
     combined_data.update(template_variables)
 
-    protocol_prompt = build_consolidated_protocol_prompt(
+    protocol_prompt = build_protocol_prompt(
         extraction_result=extraction_result,
-        template_variables=combined_data,
+        template_variables=template_variables,
         meeting_type=meeting_type
     )
 
-    protocol_system_prompt = build_consolidated_protocol_system_prompt()
+    protocol_system_prompt = build_protocol_system_prompt()
 
     try:
         # ЗАПРОС 2: Финальный протокол

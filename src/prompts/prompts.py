@@ -1,11 +1,11 @@
 """
-Консолидированные промпты для двухзапросного подхода к генерации протоколов
+Промпты для двухзапросного подхода к генерации протоколов
 """
 
 from typing import Dict, Any, Optional
 
 
-def build_consolidated_extraction_prompt(
+def build_extraction_prompt(
     transcription: str,
     participants_list: Optional[str] = None,
     meeting_metadata: Optional[Dict[str, str]] = None,
@@ -110,7 +110,7 @@ def build_consolidated_extraction_prompt(
     return prompt
 
 
-def build_consolidated_extraction_system_prompt() -> str:
+def build_extraction_system_prompt() -> str:
     """
     Создает системный промпт для первого запроса (извлечение)
     """
@@ -148,7 +148,7 @@ def build_consolidated_extraction_system_prompt() -> str:
 Строго валидный JSON с соответствующей схемой. Все значения - строки."""
 
 
-def build_consolidated_protocol_prompt(
+def build_protocol_prompt(
     extraction_result: Dict[str, Any],
     template_variables: Dict[str, str],
     meeting_type: str = "general"
@@ -232,7 +232,7 @@ def build_consolidated_protocol_prompt(
 6. ЗАПОЛНЕНИЕ ПОЛЕЙ КАЧЕСТВА:
 - verified_speaker_mapping: Проверенное сопоставление SPEAKER_N → 'Имя Фамилия'
 - speaker_mapping_confidence: Общая уверенность в сопоставлении спикеров (0.0-1.0)
-- consistency_checks: Объект с проверками {'participants_consistent': true/false, 'dates_valid': true/false, 'decisions_complete': true/false, 'action_items_clear': true/false, 'meeting_type_appropriate': true/false}
+- consistency_checks: Объект с проверками {{'participants_consistent': true/false, 'dates_valid': true/false, 'decisions_complete': true/false, 'action_items_clear': true/false, 'meeting_type_appropriate': true/false}}
 - meeting_type: Тип встречи (general, technical, business, educational, brainstorm, status)
 - type_specific_observations: Специфичные наблюдения для типа встречи
 - completeness_assessment: Оценка полноты протокола
@@ -261,7 +261,7 @@ def build_consolidated_protocol_prompt(
     return prompt
 
 
-def build_consolidated_protocol_system_prompt() -> str:
+def build_protocol_system_prompt() -> str:
     """
     Создает системный промпт для второго запроса (финальный протокол)
     """
