@@ -3299,7 +3299,7 @@ async def generate_protocol_consolidated_two_request(
                     ],
                     temperature=0.3,
                     max_tokens=4000,
-                    response_format={"type": "json_schema", "json_schema": get_schema_by_type('consolidated_extraction')},
+                    response_format={"type": "json_schema", "json_schema": get_schema_by_type('extraction')},
                     extra_headers=extra_headers
                 )
 
@@ -3349,7 +3349,7 @@ async def generate_protocol_consolidated_two_request(
     if 'protocol_data' in extraction_result:
         combined_data.update(extraction_result['protocol_data'])
     else:
-        # Для ConsolidatedExtractionSchema
+        # Для ExtractionSchema
         combined_data.update({
             'meeting_title': extraction_result.get('meeting_title', ''),
             'meeting_date': extraction_result.get('meeting_date'),

@@ -167,7 +167,7 @@ def build_protocol_prompt(
     Returns:
         Промпт для LLM
     """
-    # Извлекаем данные из первого запроса (ConsolidatedExtractionSchema)
+    # Извлекаем данные из первого запроса (ExtractionSchema)
     # Данные находятся прямо в корне extraction_result, нет вложенного protocol_data
     extracted_data = extraction_result
     speaker_mapping = extraction_result.get('speaker_mappings', {})

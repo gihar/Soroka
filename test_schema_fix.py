@@ -47,8 +47,8 @@ def test_protocol_schema():
 
 def test_consolidated_schemas():
     """Проверяем консолидированные схемы"""
-    print("=== Testing ConsolidatedExtractionSchema ===")
-    schema = get_schema_by_type('consolidated_extraction')
+    print("=== Testing ExtractionSchema ===")
+    schema = get_schema_by_type('extraction')
 
     properties = schema['schema'].get('properties', {})
     required = schema['schema'].get('required', [])

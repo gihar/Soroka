@@ -295,9 +295,9 @@ ACTION_ITEMS_EXTRACTION_SCHEMA = get_json_schema(ActionItemsExtractionSchema)
 OD_PROTOCOL_SCHEMA = get_json_schema(ODProtocolSchema)
 
 
-class ConsolidatedExtractionSchema(BaseModel):
+class ExtractionSchema(BaseModel):
     """
-    Консолидированная схема для первого запроса: сопоставление спикеров + извлечение структуры встречи
+    Схема для первого запроса: сопоставление спикеров + извлечение структуры встречи
     """
     # Speaker mapping results
     speaker_mappings: Dict[str, str] = Field(
@@ -434,7 +434,7 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'action_items': ACTION_ITEMS_EXTRACTION_SCHEMA,
         'od_protocol': OD_PROTOCOL_SCHEMA,
         # New consolidated schemas for two-request approach
-        'consolidated_extraction': get_json_schema(ConsolidatedExtractionSchema),
+        'extraction': get_json_schema(ExtractionSchema),
         'consolidated_protocol': get_json_schema(ConsolidatedProtocolSchema),
     }
 
