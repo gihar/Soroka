@@ -95,31 +95,6 @@ class UnifiedProtocolSchema(BaseModel):
         extra = "forbid"
 
 
-class SegmentSchema(BaseModel):
-    """Схема для обработки одного сегмента транскрипции"""
-    segment_data: Dict[str, str] = Field(default_factory=dict, description="Данные сегмента (ключ=переменная шаблона, значение=строка)")
-    speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Сопоставление SPEAKER_N с именами участников")
-    confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Уверенность в сопоставлении для каждого спикера (0.0-1.0)")
-    unmapped_speakers: List[str] = Field(default_factory=list, description="Список SPEAKER_N которых не удалось сопоставить")
-    mapping_notes: str = Field(default="", description="Заметки по процессу сопоставления")
-    segment_confidence: float = Field(default=0.0, description="Уверенность в обработке сегмента (0.0-1.0)")
-    
-    class Config:
-        extra = "forbid"
-
-
-class SynthesisSchema(BaseModel):
-    """Схема для синтеза в chain-of-thought подходе"""
-    synthesized_content: Dict[str, str] = Field(default_factory=dict, description="Синтезированный контент (ключ=переменная шаблона, значение=строка)")
-    final_speaker_mapping: Dict[str, str] = Field(default_factory=dict, description="Итоговый маппинг SPEAKER_N → имена участников")
-    final_confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Итоговая уверенность для каждого спикера (0.0-1.0)")
-    final_unmapped_speakers: List[str] = Field(default_factory=list, description="Итоговый список несопоставленных спикеров")
-    aggregation_notes: str = Field(default="", description="Заметки по агрегации маппингов из сегментов")
-    synthesis_quality: float = Field(default=0.0, description="Качество синтеза (0.0-1.0)")
-    synthesis_notes: str = Field(default="", description="Заметки по синтезу")
-    
-    class Config:
-        extra = "forbid"
 
 
 class SpeakerMappingSchema(BaseModel):
@@ -313,8 +288,6 @@ PROTOCOL_SCHEMA = get_json_schema(ProtocolSchema)
 TWO_STAGE_EXTRACTION_SCHEMA = get_json_schema(TwoStageExtractionSchema)
 TWO_STAGE_REFLECTION_SCHEMA = get_json_schema(TwoStageReflectionSchema)
 UNIFIED_PROTOCOL_SCHEMA = get_json_schema(UnifiedProtocolSchema)
-SEGMENT_SCHEMA = get_json_schema(SegmentSchema)
-SYNTHESIS_SCHEMA = get_json_schema(SynthesisSchema)
 SPEAKER_MAPPING_SCHEMA = get_json_schema(SpeakerMappingSchema)
 TOPICS_EXTRACTION_SCHEMA = get_json_schema(TopicsExtractionSchema)
 DECISIONS_EXTRACTION_SCHEMA = get_json_schema(DecisionsExtractionSchema)
@@ -322,9 +295,9 @@ ACTION_ITEMS_EXTRACTION_SCHEMA = get_json_schema(ActionItemsExtractionSchema)
 OD_PROTOCOL_SCHEMA = get_json_schema(ODProtocolSchema)
 
 
-class ConsolidatedExtractionSchema(BaseModel):
+class ExtractionSchema(BaseModel):
     """
-    Консолидированная схема для первого запроса: сопоставление спикеров + извлечение структуры встречи
+    Схема для первого запроса: сопоставление спикеров + извлечение структуры встречи
     """
     # Speaker mapping results
     speaker_mappings: Dict[str, str] = Field(
@@ -346,6 +319,7 @@ class ConsolidatedExtractionSchema(BaseModel):
 
     # Meeting structure extraction results
     meeting_title: str = Field(default="", description="Название встречи")
+    meeting_type: str = Field(default="", description="Тип встречи определенный из анализа (technical, business, educational, brainstorm, status, general)")
     meeting_date: str = Field(default="", description="Дата встречи")
     meeting_time: str = Field(default="", description="Время встречи")
     participants: str = Field(default="", description="Список участников (каждое с новой строки через \\n)")
@@ -454,15 +428,13 @@ def get_schema_by_type(schema_type: str) -> Dict[str, Any]:
         'two_stage_extraction': TWO_STAGE_EXTRACTION_SCHEMA,
         'two_stage_reflection': TWO_STAGE_REFLECTION_SCHEMA,
         'unified_protocol': UNIFIED_PROTOCOL_SCHEMA,
-        'segment': SEGMENT_SCHEMA,
-        'synthesis': SYNTHESIS_SCHEMA,
         'speaker_mapping': SPEAKER_MAPPING_SCHEMA,
         'topics': TOPICS_EXTRACTION_SCHEMA,
         'decisions': DECISIONS_EXTRACTION_SCHEMA,
         'action_items': ACTION_ITEMS_EXTRACTION_SCHEMA,
         'od_protocol': OD_PROTOCOL_SCHEMA,
         # New consolidated schemas for two-request approach
-        'consolidated_extraction': get_json_schema(ConsolidatedExtractionSchema),
+        'extraction': get_json_schema(ExtractionSchema),
         'consolidated_protocol': get_json_schema(ConsolidatedProtocolSchema),
     }
 

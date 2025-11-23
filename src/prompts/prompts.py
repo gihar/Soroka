@@ -1,11 +1,11 @@
 """
-Консолидированные промпты для двухзапросного подхода к генерации протоколов
+Промпты для двухзапросного подхода к генерации протоколов
 """
 
 from typing import Dict, Any, Optional
 
 
-def build_consolidated_extraction_prompt(
+def build_extraction_prompt(
     transcription: str,
     participants_list: Optional[str] = None,
     meeting_metadata: Optional[Dict[str, str]] = None,
@@ -34,9 +34,26 @@ def build_consolidated_extraction_prompt(
     # Получаем специализированные инструкции для типа встречи
     type_instructions = _get_type_specific_instructions(meeting_type)
 
-    prompt = f"""Проанализируй стенограмму встречи и выполни две задачи:
+    prompt = f"""Проанализируй стенограмму встречи и выполни три задачи:
 
-ЗАДАЧА 1: СОПОСТАВЛЕНИЕ СПИКЕРОВ
+ЗАДАЧА 1: ОПРЕДЕЛЕНИЕ ТИПА ВСТРЕЧИ
+На основе анализа контента стенограммы определи тип встречи:
+
+ТИПЫ ВСТРЕЧ:
+- **technical** (техническое): Обсуждение кода, архитектуры, API, баз данных, серверов, тестирования, фреймворков, библиотек, CI/CD, девопса, багов, дебага
+- **business** (деловое): Обсуждение бюджета, прибыли, контрактов, сделок, клиентов, продаж, маркетинга, стратегии, финансов, инвестиций, ROI, конкурентов, договоров
+- **educational** (образовательное): Обучение, объяснение, изучение, лекции, семинары, тренинги, презентации, передача знаний, менторство
+- **brainstorm** (брейншторм): Генерация идей, креативные сессии, предложение вариантов, обсуждение возможностей, инновации, новые подходы
+- **status** (статусное): Отчеты о прогрессе, статусные обновления, обсуждение метрик, KPI, результатов достижений, стендапы, ретроспективы
+- **general** (общее): Если тип точно не определяется или смешанное содержание
+
+ЛОГИКА ОПРЕДЕЛЕНИЯ:
+1. Проанализируй основные темы и ключевые слова в стенограмме
+2. Определи доминирующий тип контента
+3. Учти характер обсуждения (обучение vs принятие решений vs генерация идей)
+4. Выбери ОДИН наиболее подходящий тип
+
+ЗАДАЧА 2: СОПОСТАВЛЕНИЕ СПИКЕРОВ
 Изучи список участников и сопоставь метки SPEAKER_1, SPEAKER_2 с реальными именами.
 
 Правила сопоставления:
@@ -49,7 +66,7 @@ def build_consolidated_extraction_prompt(
 Список участников:
 {participants_list or 'Не предоставлен'}
 
-ЗАДАЧА 2: ИЗВЛЕЧЕНИЕ СТРУКТУРЫ ВСТРЕЧИ
+ЗАДАЧА 3: ИЗВЛЕЧЕНИЕ СТРУКТУРЫ ВСТРЕЧИ
 Полностью проанализируй ВСЮ транскрипцию и извлеки информацию для протокола.
 
 КРИТИЧЕСКИ ВАЖНЫЕ ПРИНЦИПЫ:
@@ -63,6 +80,7 @@ def build_consolidated_extraction_prompt(
 
 СТРУКТУРА ПРОТОКОЛА:
 - meeting_title: Краткое название встречи (если известно из контекста)
+- meeting_type: Тип встречи определенный из анализа (technical, business, educational, brainstorm, status, general)
 - meeting_date: Дата встречи ({meeting_date})
 - meeting_time: Время встречи ({meeting_time})
 - participants: Список участников в формате 'Имя Фамилия' (каждый с новой строки через \\n)
@@ -92,7 +110,7 @@ def build_consolidated_extraction_prompt(
     return prompt
 
 
-def build_consolidated_extraction_system_prompt() -> str:
+def build_extraction_system_prompt() -> str:
     """
     Создает системный промпт для первого запроса (извлечение)
     """
@@ -130,7 +148,7 @@ def build_consolidated_extraction_system_prompt() -> str:
 Строго валидный JSON с соответствующей схемой. Все значения - строки."""
 
 
-def build_consolidated_protocol_prompt(
+def build_protocol_prompt(
     extraction_result: Dict[str, Any],
     template_variables: Dict[str, str],
     meeting_type: str = "general"
@@ -149,7 +167,7 @@ def build_consolidated_protocol_prompt(
     Returns:
         Промпт для LLM
     """
-    # Извлекаем данные из первого запроса (ConsolidatedExtractionSchema)
+    # Извлекаем данные из первого запроса (ExtractionSchema)
     # Данные находятся прямо в корне extraction_result, нет вложенного protocol_data
     extracted_data = extraction_result
     speaker_mapping = extraction_result.get('speaker_mappings', {})
@@ -214,7 +232,7 @@ def build_consolidated_protocol_prompt(
 6. ЗАПОЛНЕНИЕ ПОЛЕЙ КАЧЕСТВА:
 - verified_speaker_mapping: Проверенное сопоставление SPEAKER_N → 'Имя Фамилия'
 - speaker_mapping_confidence: Общая уверенность в сопоставлении спикеров (0.0-1.0)
-- consistency_checks: Объект с проверками {'participants_consistent': true/false, 'dates_valid': true/false, 'decisions_complete': true/false, 'action_items_clear': true/false, 'meeting_type_appropriate': true/false}
+- consistency_checks: Объект с проверками {{'participants_consistent': true/false, 'dates_valid': true/false, 'decisions_complete': true/false, 'action_items_clear': true/false, 'meeting_type_appropriate': true/false}}
 - meeting_type: Тип встречи (general, technical, business, educational, brainstorm, status)
 - type_specific_observations: Специфичные наблюдения для типа встречи
 - completeness_assessment: Оценка полноты протокола
@@ -243,7 +261,7 @@ def build_consolidated_protocol_prompt(
     return prompt
 
 
-def build_consolidated_protocol_system_prompt() -> str:
+def build_protocol_system_prompt() -> str:
     """
     Создает системный промпт для второго запроса (финальный протокол)
     """

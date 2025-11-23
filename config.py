@@ -122,8 +122,6 @@ class Settings(BaseSettings):
     enable_text_preprocessing: bool = Field(True, description="Включить предобработку текста транскрипции")
     enable_protocol_validation: bool = Field(True, description="Включить валидацию и оценку качества протоколов")
     meeting_type_detection: bool = Field(True, description="Включить автоопределение типа встречи")
-    chain_of_thought_threshold_minutes: int = Field(30, description="Порог длительности встречи для Chain-of-Thought подхода (в минутах)")
-    max_parallel_segments: Optional[int] = Field(None, description="Максимальное количество сегментов для параллельной обработки в Chain-of-Thought (None = без ограничений)")
     
       
     # Оптимизация LLM пайплайна
@@ -136,7 +134,6 @@ class Settings(BaseSettings):
     # Новая консолидированная архитектура (2 запроса вместо 5-6)
     enable_consolidated_two_request: bool = Field(True, description="Включить новую консолидированную архитектуру (2 запроса вместо 5-6)")
     consolidated_protocol_quality_threshold: float = Field(0.7, description="Порог качества для использования консолидированного метода (0.0-1.0)")
-    enable_consolidated_fallback: bool = Field(True, description="Разрешить fallback к стандартному методу при ошибках")
     consolidated_max_tokens_request1: int = Field(4000, description="Максимальное токенов для запроса 1 (извлечение)")
     consolidated_max_tokens_request2: int = Field(3000, description="Максимальное токенов для запроса 2 (протокол)")
     consolidated_temperature_request1: float = Field(0.3, description="Температура для запроса 1 (высокая точность)")
