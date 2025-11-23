@@ -92,7 +92,8 @@ class SmartTemplateSelector:
         top_k: int = 3,
         user_history: Optional[List[int]] = None,
         meeting_type: Optional[str] = None,
-        type_scores: Optional[Dict[str, float]] = None
+        type_scores: Optional[Dict[str, float]] = None,
+        meeting_topic: Optional[str] = None
     ) -> List[Tuple[Template, float]]:
         """
         Предложить подходящие шаблоны
@@ -104,6 +105,7 @@ class SmartTemplateSelector:
             user_history: История использования (template_id)
             meeting_type: Классифицированный тип встречи (для boost)
             type_scores: Оценки по всем типам (для тонкой настройки)
+            meeting_topic: Тема встречи (если есть)
         
         Returns:
             List[(template, confidence_score)]
@@ -119,8 +121,20 @@ class SmartTemplateSelector:
         try:
             from sklearn.metrics.pairwise import cosine_similarity
             
-            # Берем первые 1500 символов транскрипции для анализа
-            sample = transcription[:1500]
+            # Формируем текст для анализа (расширенный контекст)
+            # Берем начало (2000) и середину (2000) для лучшего охвата
+            text_len = len(transcription)
+            if text_len <= 4000:
+                sample = transcription
+            else:
+                start_part = transcription[:2000]
+                mid_start = text_len // 2
+                mid_part = transcription[mid_start : mid_start + 2000]
+                sample = f"{start_part} ... {mid_part}"
+            
+            # Добавляем тему встречи в контекст поиска (сильный сигнал)
+            if meeting_topic:
+                sample = f"Тема: {meeting_topic}\n\n{sample}"
             
             # Создаем embedding транскрипции
             query_embedding = self.model.encode(sample, convert_to_numpy=True)

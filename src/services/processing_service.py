@@ -970,7 +970,8 @@ class ProcessingService(BaseProcessingService):
             top_k=3,
             user_history=template_history,
             meeting_type=meeting_type,
-            type_scores=type_scores
+            type_scores=type_scores,
+            meeting_topic=request.meeting_topic
         )
         
         if suggestions:
