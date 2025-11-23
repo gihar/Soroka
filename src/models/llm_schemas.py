@@ -327,15 +327,15 @@ class ConsolidatedProtocolSchema(BaseModel):
     Консолидированная схема для второго запроса: финальная генерация протокола + QA
     """
     # Final protocol fields (with template formatting)
-    meeting_title: str = Field(description="Название встречи")
+    meeting_title: str = Field(default="", description="Название встречи")
     meeting_date: str = Field(default="", description="Дата встречи")
     meeting_time: str = Field(default="", description="Время встречи")
-    participants: str = Field(description="Список участников (каждое имя с новой строки через \\n)")
-    agenda: str = Field(description="Повестка дня (пункты списком через \\n)")
-    discussion: str = Field(description="Подробное обсуждение по темам (структурированный текст с атрибуцией высказываний через \\n)")
-    key_points: str = Field(description="Краткие итоги и выводы (пункты списком через \\n)")
-    decisions: str = Field(description="Принятые решения (каждое с новой строки через \\n)")
-    action_items: str = Field(description="Задачи и поручения (каждая с новой строки через \\n)")
+    participants: str = Field(default="", description="Список участников (каждое имя с новой строки через \\n)")
+    agenda: str = Field(default="", description="Повестка дня (пункты списком через \\n)")
+    discussion: str = Field(default="", description="Подробное обсуждение по темам (структурированный текст с атрибуцией высказываний через \\n)")
+    key_points: str = Field(default="", description="Краткие итоги и выводы (пункты списком через \\n)")
+    decisions: str = Field(default="", description="Принятые решения (каждое с новой строки через \\n)")
+    action_items: str = Field(default="", description="Задачи и поручения (каждая с новой строки через \\n)")
     next_meeting: str = Field(default="", description="Информация о следующей встрече")
     additional_notes: str = Field(default="", description="Дополнительные заметки")
 
