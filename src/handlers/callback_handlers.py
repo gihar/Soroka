@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 
-from services import UserService, TemplateService, EnhancedLLMService, OptimizedProcessingService
+from services import UserService, TemplateService, EnhancedLLMService, ProcessingService
 from src.utils.pdf_converter import convert_markdown_to_pdf
 from src.utils.telegram_safe import safe_edit_text
 
@@ -27,7 +27,7 @@ async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
 
 
 def setup_callback_handlers(user_service: UserService, template_service: TemplateService,
-                           llm_service: EnhancedLLMService, processing_service: OptimizedProcessingService) -> Router:
+                           llm_service: EnhancedLLMService, processing_service: ProcessingService) -> Router:
     """Настройка обработчиков callback запросов"""
     router = Router()
     
@@ -2027,7 +2027,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
 
 async def _show_llm_selection(callback: CallbackQuery, state: FSMContext, 
                              user_service: UserService, llm_service: EnhancedLLMService,
-                             processing_service: OptimizedProcessingService):
+                             processing_service: ProcessingService):
     """Показать выбор LLM или использовать сохранённые предпочтения"""
     user = await user_service.get_user_by_telegram_id(callback.from_user.id)
     available_providers = llm_service.get_available_providers()
@@ -2089,7 +2089,7 @@ async def _show_llm_selection(callback: CallbackQuery, state: FSMContext,
     )
 
 
-async def _process_file(callback: CallbackQuery, state: FSMContext, processing_service: OptimizedProcessingService):
+async def _process_file(callback: CallbackQuery, state: FSMContext, processing_service: ProcessingService):
     """Начать обработку файла"""
     from src.models.processing import ProcessingRequest
     from src.services.task_queue_manager import task_queue_manager

@@ -3349,20 +3349,40 @@ async def generate_protocol_consolidated_two_request(
     if 'protocol_data' in extraction_result:
         combined_data.update(extraction_result['protocol_data'])
     else:
-        # Для ExtractionSchema
-        combined_data.update({
-            'meeting_title': extraction_result.get('meeting_title', ''),
-            'meeting_date': extraction_result.get('meeting_date'),
-            'meeting_time': extraction_result.get('meeting_time'),
-            'participants': extraction_result.get('participants', ''),
-            'agenda': extraction_result.get('agenda', ''),
-            'discussion': extraction_result.get('discussion', ''),
-            'key_points': extraction_result.get('key_points', ''),
-            'decisions': extraction_result.get('decisions', ''),
-            'action_items': extraction_result.get('action_items', ''),
-            'next_meeting': extraction_result.get('next_meeting'),
-            'additional_notes': extraction_result.get('additional_notes')
-        })
+        # Для ExtractionSchema - извлекаем ВСЕ поля, которые используются шаблонами
+        protocol_fields = [
+            # Основные поля протокола
+            'meeting_title', 'meeting_date', 'meeting_time', 'participants',
+            'agenda', 'discussion', 'key_points', 'decisions', 'action_items',
+            'next_meeting', 'additional_notes',
+
+            # Поля совместимости для шаблонов
+            'date', 'time', 'managers', 'platform',
+
+            # Дополнительные поля используемые шаблонами
+            'tasks', 'next_steps', 'deadlines', 'issues', 'questions',
+            'risks_and_blockers', 'technical_issues', 'architecture_decisions',
+            'technical_tasks', 'speaker_contributions', 'dialogue_analysis',
+            'speakers_summary',
+
+            # Образовательные поля
+            'learning_objectives', 'key_concepts', 'examples_and_cases',
+            'practical_exercises', 'homework', 'materials',
+
+            # Agile/DevOps поля
+            'next_sprint_plans'
+        ]
+
+        # Извлекаем все поля из extraction_result
+        for field in protocol_fields:
+            if field in extraction_result:
+                combined_data[field] = extraction_result[field]
+            else:
+                # Проверяем, есть ли поле в template_variables как запасной вариант
+                if field in template_variables:
+                    combined_data[field] = template_variables[field]
+                else:
+                    combined_data[field] = ''
 
     # Добавляем переменные шаблона
     combined_data.update(template_variables)
@@ -3450,6 +3470,36 @@ async def generate_protocol_consolidated_two_request(
             raise ValueError(f"Неподдерживаемый провайдер: {provider_name}")
 
         logger.success(f"Запрос 2 завершен успешно. Качество протокола: {final_result.get('protocol_quality_score', 0.0):.2f}")
+
+        # =======================================================
+        # Валидация критически важных полей
+        # =======================================================
+        # Проверяем наличие критически важной информации
+        critical_fields = ['participants', 'discussion', 'decisions']
+        empty_critical_fields = []
+
+        for field in critical_fields:
+            field_value = final_result.get(field, '').strip()
+            if not field_value or len(field_value) < 10:
+                empty_critical_fields.append(field)
+
+        if empty_critical_fields:
+            logger.warning(f"Критически важные поля протокола пусты или слишком короткие: {empty_critical_fields}")
+            # Если ключевые поля отсутствуют, пытаемся извлечь их из extraction_result
+            for field in empty_critical_fields:
+                if field in extraction_result and extraction_result[field].strip():
+                    final_result[field] = extraction_result[field]
+                    logger.info(f"Восстановлено поле {field} из extraction_result")
+                else:
+                    # Пробуем извлечь из template_variables
+                    if field in template_variables and template_variables[field].strip():
+                        final_result[field] = template_variables[field]
+                        logger.info(f"Восстановлено поле {field} из template_variables")
+
+        # Дополнительная проверка качества
+        protocol_quality = final_result.get('protocol_quality_score', 0.0)
+        if protocol_quality < 0.5:
+            logger.warning(f"Низкое качество протокола: {protocol_quality:.2f}. Рекомендуется повторная генерация.")
 
         # =======================================================
         # Конвертируем результат в стандартный формат

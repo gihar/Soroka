@@ -284,7 +284,7 @@ class TaskQueueManager:
     
     async def _process_task(self, task: QueuedTask):
         """Обработать задачу"""
-        from src.services.optimized_processing_service import OptimizedProcessingService
+        from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
         from src.ux.queue_tracker import QueuePositionTracker
         from config import settings as cfg
@@ -313,7 +313,7 @@ class TaskQueueManager:
             )
             
             # Обрабатываем файл
-            processing_service = OptimizedProcessingService()
+            processing_service = ProcessingService()
             result = await processing_service.process_file(task.request, progress_tracker)
             
             # Проверяем, была ли обработка приостановлена для подтверждения сопоставления

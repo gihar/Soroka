@@ -37,7 +37,7 @@ from llm_providers import llm_manager
 from config import settings
 
 
-class OptimizedProcessingService(BaseProcessingService):
+class ProcessingService(BaseProcessingService):
     """Сервис обработки с оптимизацией производительности"""
     
     def __init__(self):
@@ -1363,58 +1363,20 @@ class OptimizedProcessingService(BaseProcessingService):
             # Создаем словарь переменных с начальными значениями
             template_variables = {}
 
-            # Добавляем все извлеченные переменные с пустыми значениями
-            for var in variables_list:
-                template_variables[var] = ""  # Пустое значение для заполнения LLM
-
-            # Добавляем базовые переменные, которые могут понадобиться
-            base_variables = {
+            # Базовые переменные, которые всегда должны быть доступны (метаданные)
+            core_variables = {
                 'meeting_title': '',
                 'meeting_date': '',
                 'meeting_time': '',
-                'participants': '',
-                'agenda': '',
-                'discussion': '',
-                'key_points': '',
-                'decisions': '',
-                'action_items': '',
-                'tasks': '',
-                'next_steps': '',
-                'deadlines': '',
-                'issues': '',
-                'questions': '',
-                'risks_and_blockers': '',
-                'technical_issues': '',
-                'architecture_decisions': '',
-                'technical_tasks': '',
-                'speaker_contributions': '',
-                'dialogue_analysis': '',
-                'speakers_summary': '',
-                'next_meeting': '',
-                'additional_notes': '',
-                # Поля совместимости
-                'date': '',
-                'time': '',
-                'managers': '',
-                'platform': '',
-                # Образовательные поля
-                'learning_objectives': '',
-                'key_concepts': '',
-                'examples_and_cases': '',
-                'practical_exercises': '',
-                'homework': '',
-                'materials': '',
-                # Agile поля
-                'next_sprint_plans': ''
+                'participants': ''
             }
+            
+            # Инициализируем базовыми переменными
+            template_variables.update(core_variables)
 
-            # Объединяем все переменные
-            template_variables.update(base_variables)
-
-            # Убедимся, что все переменные из шаблона присутствуют
+            # Добавляем переменные из шаблона
             for var in variables_list:
-                if var not in template_variables:
-                    template_variables[var] = ""
+                template_variables[var] = ""  # Пустое значение для заполнения LLM
 
             logger.info(f"Подготовлены переменные шаблона: {list(template_variables.keys())}")
             return template_variables
@@ -2018,18 +1980,18 @@ class OptimizedProcessingService(BaseProcessingService):
 
 
 # Фабрика для создания оптимизированного сервиса
-class OptimizedServiceFactory:
+class ServiceFactory:
     """Фабрика для создания оптимизированных сервисов"""
     
     @staticmethod
-    def create_processing_service() -> OptimizedProcessingService:
+    def create_processing_service() -> ProcessingService:
         """Создать оптимизированный сервис обработки"""
-        return OptimizedProcessingService()
+        return ProcessingService()
     
     @staticmethod
-    async def create_with_prewarming() -> OptimizedProcessingService:
+    async def create_with_prewarming() -> ProcessingService:
         """Создать сервис с предварительным прогревом"""
-        service = OptimizedProcessingService()
+        service = ProcessingService()
         
         # Прогреваем кэш и системы
         await service._prewarm_systems()

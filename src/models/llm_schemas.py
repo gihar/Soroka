@@ -309,6 +309,7 @@ class ExtractionSchema(BaseModel):
     chat_questions: str = Field(default="", description="Вопросы из чата")
     live_demonstration: str = Field(default="", description="Демонстрация в реальном времени")
     downloadable_materials: str = Field(default="", description="Материалы для скачивания")
+    additional_materials: str = Field(default="", description="Дополнительные материалы и ресурсы")
 
     # Additional educational fields
     practical_demonstration: str = Field(default="", description="Практическая демонстрация")
@@ -419,6 +420,7 @@ class ConsolidatedProtocolSchema(BaseModel):
     chat_questions: str = Field(default="", description="Вопросы из чата")
     live_demonstration: str = Field(default="", description="Демонстрация в реальном времени")
     downloadable_materials: str = Field(default="", description="Материалы для скачивания")
+    additional_materials: str = Field(default="", description="Дополнительные материалы и ресурсы")
 
     # Additional educational fields
     practical_demonstration: str = Field(default="", description="Практическая демонстрация")

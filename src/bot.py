@@ -40,7 +40,7 @@ except ImportError:
 # Импорты новой архитектуры
 from services import (
     UserService, TemplateService, FileService, 
-    EnhancedLLMService, OptimizedProcessingService
+    EnhancedLLMService, ProcessingService
 )
 from handlers import (
     setup_command_handlers, setup_callback_handlers,
@@ -70,7 +70,7 @@ class EnhancedTelegramBot:
         self.template_service = TemplateService()
         self.file_service = FileService()
         self.llm_service = EnhancedLLMService()
-        self.processing_service = OptimizedProcessingService()
+        self.processing_service = ProcessingService()
         
         # Инициализация менеджера очереди задач
         from src.services.task_queue_manager import task_queue_manager

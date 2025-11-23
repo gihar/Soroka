@@ -10,7 +10,7 @@ from loguru import logger
 from api.monitoring import monitoring_api
 from reliability.health_check import health_checker
 from services.enhanced_llm_service import EnhancedLLMService
-from services.optimized_processing_service import OptimizedProcessingService
+from services.processing_service import ProcessingService
 from config import settings
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_edit_text
@@ -24,7 +24,7 @@ except ImportError:
 
 
 def setup_admin_handlers(llm_service: EnhancedLLMService, 
-                        processing_service: OptimizedProcessingService) -> Router:
+                        processing_service: ProcessingService) -> Router:
     """Настройка административных обработчиков"""
     router = Router()
     

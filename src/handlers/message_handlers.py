@@ -12,7 +12,7 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 
-from services import FileService, TemplateService, OptimizedProcessingService
+from services import FileService, TemplateService, ProcessingService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.utils.pdf_converter import convert_markdown_to_pdf
@@ -20,7 +20,7 @@ from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
-                          processing_service: OptimizedProcessingService) -> Router:
+                          processing_service: ProcessingService) -> Router:
     """Настройка обработчиков сообщений"""
     router = Router()
     
