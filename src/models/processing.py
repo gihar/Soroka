@@ -23,7 +23,6 @@ class ProcessingRequest(BaseModel):
     meeting_topic: Optional[str] = Field(None, description="Тема встречи")
     meeting_date: Optional[str] = Field(None, description="Дата встречи")
     meeting_time: Optional[str] = Field(None, description="Время встречи")
-    processing_mode: Optional[str] = Field(None, description="Режим обработки протокола (None, 'od_protokol')")
 
 
 class TranscriptionResult(BaseModel):

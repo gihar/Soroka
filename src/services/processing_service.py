@@ -1130,83 +1130,8 @@ class ProcessingService(BaseProcessingService):
                         diarization_analysis = analysis_obj.to_dict()
             
 
-            
-            if request.processing_mode == 'od_protokol':
-                logger.info("Использование OD протокола (протокол поручений руководителей)")
-                
-                from llm_providers import generate_protocol_od
-                
-                # OD протокол требует список участников с ролями
-                if not request.participants_list:
-                    logger.warning("OD протокол требует список участников с ролями. Используем стандартный режим.")
-                    # Fallback на стандартный режим
-                    llm_task_id = f"llm_{request.user_id}_{int(time.time())}"
-                    llm_result = await task_pool.submit_task(
-                        llm_task_id,
-                        self._generate_llm_response,
-                        transcription_result,
-                        template,
-                        template_variables,
-                        request.llm_provider,
-                        diarization_data=transcription_result.diarization,
-                        openai_model_key=openai_model_key,
-                        **{
-                            'speaker_mapping': request.speaker_mapping,
-                            'meeting_topic': request.meeting_topic,
-                            'meeting_date': request.meeting_date,
-                            'meeting_time': request.meeting_time,
-                            'participants': request.participants_list
-                        }
-                    )
-                    llm_result_data = llm_result.extracted_data
-                else:
-                    # Генерируем OD протокол
-                    logger.info(f"Запуск OD протокола для {len(request.participants_list)} участников")
-                    od_result = await generate_protocol_od(
-                        manager=llm_manager,
-                        provider_name=request.llm_provider,
-                        transcription=transcription_result.transcription,
-                        diarization_data=transcription_result.diarization,
-                        participants=request.participants_list,
-                        speaker_mapping=request.speaker_mapping,
-                        meeting_date=request.meeting_date,
-                        meeting_topic=request.meeting_topic,
-                        openai_model_key=openai_model_key
-                    )
-  
-                    # OD протокол возвращает готовый текст, но мы хотим использовать шаблон для единообразия
-                    logger.success(f"OD протокол успешно сгенерирован. Задач: {len(od_result['raw_data'].get('tasks', []))}")
-                    
-                    # Принудительно используем шаблон od_protocol
-                    try:
-                        # Получаем шаблон по ID
-                        od_template = None
-                        templates = self.template_service.library.get_management_templates()
-                        for t in templates:
-                            if t['id'] == 'od_protocol':
-                                od_template = t
-                                break
-                        
-                        if od_template:
-                            # Рендерим шаблон с данными из OD протокола
-                            # Используем protocol_data для шаблонизации, а не raw_data
-                            template_data = od_result.get('protocol_data', od_result.get('raw_data', {}))
-                            protocol_text = self.template_service.render_template(od_template, template_data)
-                            logger.info("Применен пользовательский шаблон для форматирования OD протокола")
-                        else:
-                            logger.warning("Шаблон по умолчанию не найден, используем текст от LLM")
-                            protocol_text = od_result['protocol_text']
-                    except Exception as e:
-                        logger.error(f"Ошибка при применении шаблона OD протокола: {e}")
-                        protocol_text = od_result['protocol_text']
-
-                    llm_result_data = {
-                        'protocol_text': protocol_text,
-                        'raw_data': od_result['raw_data'],
-                        'mode': 'od_protokol'
-                    }
-                
-            elif settings.enable_consolidated_two_request:
+            # Стандартная консолидированная генерация протокола
+            if settings.enable_consolidated_two_request:
                 logger.info("Использование новой консолидированной генерации протокола (2 запроса вместо 5-6)")
 
                 from llm_providers import generate_protocol
@@ -1718,15 +1643,6 @@ class ProcessingService(BaseProcessingService):
             # Пустая строка — падаем на простой формат
             logger.warning("LLM вернул пустую строку, используем fallback")
             return f"# Протокол\n\n{transcription_result.transcription}"
-
-        # Проверяем на OD протокол - он возвращает готовый текст
-        if isinstance(llm_result, dict) and llm_result.get('mode') == 'od_protokol':
-            protocol_text = llm_result.get('protocol_text', '')
-            if protocol_text:
-                logger.info(f"OD протокол с готовым текстом (длина: {len(protocol_text)})")
-                return protocol_text
-            # Fallback если текста нет
-            logger.warning("OD протокол без текста, используем fallback")
 
         # Получаем содержимое шаблона
         if hasattr(template, 'content'):

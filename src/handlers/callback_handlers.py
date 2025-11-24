@@ -1071,139 +1071,6 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             logger.error(f"Ошибка в use_saved_default_callback: {e}")
             await _safe_callback_answer(callback, "❌ Произошла ошибка при использовании шаблона")
     
-    @router.callback_query(F.data == "od_protocol_select")
-    async def od_protocol_selection_callback(callback: CallbackQuery, state: FSMContext):
-        """Обработчик выбора OD протокола (протокол поручений)"""
-        try:
-            # Немедленно отвечаем на callback query
-            await _safe_callback_answer(callback)
-            
-            # Проверяем наличие участников с ролями
-            state_data = await state.get_data()
-            participants_list = state_data.get('participants_list', [])
-            
-            if not participants_list:
-                # Участников нет - просим добавить
-                await safe_edit_text(callback.message,
-                    "⚠️ **Протокол поручений требует список участников**\n\n"
-                    "Для создания протокола поручений от руководителей необходимо:\n"
-                    "1. Добавить список участников встречи\n"
-                    "2. Указать роли участников (особенно руководителей)\n\n"
-                    "📝 Отправьте список участников в формате:\n"
-                    "```\n"
-                    "Иванов Иван, Директор\n"
-                    "Петров Петр, Менеджер\n"
-                    "```\n\n"
-                    "❓ Или выберите другой способ создания протокола:",
-                    parse_mode="Markdown"
-                )
-                
-                # Показываем кнопку для возврата к выбору
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к выбору протокола",
-                        callback_data="back_to_template_selection"
-                    )]
-                ])
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
-                return
-            
-            # Проверяем, есть ли руководители в списке
-            managers_found = []
-            keywords = ['руководитель', 'директор', 'глава', 'начальник', 'ceo', 'cto', 'cfo']
-            
-            for p in participants_list:
-                role = p.get('role', '').lower()
-                if any(keyword in role for keyword in keywords):
-                    managers_found.append(p['name'])
-            
-            if not managers_found:
-                # Нет руководителей - предупреждаем
-                await safe_edit_text(callback.message,
-                    "⚠️ **Не найдены руководители в списке участников**\n\n"
-                    f"Всего участников: {len(participants_list)}\n"
-                    "Руководителей: 0\n\n"
-                    "Для протокола поручений нужны участники с ролями:\n"
-                    "• Руководитель\n"
-                    "• Директор\n"
-                    "• Начальник\n"
-                    "• CEO, CTO, CFO\n\n"
-                    "Вы можете:\n"
-                    "1. Обновить список участников с указанием ролей\n"
-                    "2. Продолжить без фильтрации по руководителям",
-                    parse_mode="Markdown"
-                )
-                
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="✅ Продолжить без фильтрации",
-                        callback_data="od_protocol_continue"
-                    )],
-                    [InlineKeyboardButton(
-                        text="📝 Обновить участников",
-                        callback_data="back_to_template_selection"
-                    )],
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к выбору",
-                        callback_data="back_to_template_selection"
-                    )]
-                ])
-                await callback.message.edit_reply_markup(reply_markup=keyboard)
-                return
-            
-            # Все хорошо - устанавливаем OD режим и переходим к выбору LLM
-            await state.update_data(
-                processing_mode='od_protokol',
-                template_id=None  # Для OD протокола шаблон не нужен
-            )
-            
-            managers_text = ", ".join(managers_found[:3])
-            if len(managers_found) > 3:
-                managers_text += f" и еще {len(managers_found) - 3}"
-            
-            await safe_edit_text(callback.message,
-                f"✅ **Протокол поручений (OD)**\n\n"
-                f"📊 Участников: {len(participants_list)}\n"
-                f"👔 Руководителей: {len(managers_found)} ({managers_text})\n\n"
-                f"Протокол будет структурирован по задачам с поручениями от руководителей.\n\n"
-                f"⏳ Переходим к выбору ИИ для обработки...",
-                parse_mode="Markdown"
-            )
-            
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
-            
-        except Exception as e:
-            logger.error(f"Ошибка в od_protocol_selection_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка при выборе OD протокола")
-    
-    @router.callback_query(F.data == "od_protocol_continue")
-    async def od_protocol_continue_callback(callback: CallbackQuery, state: FSMContext):
-        """Продолжить с OD протоколом без руководителей"""
-        try:
-            await _safe_callback_answer(callback)
-            
-            await state.update_data(
-                processing_mode='od_protokol',
-                template_id=None
-            )
-            
-            state_data = await state.get_data()
-            participants_count = len(state_data.get('participants_list', []))
-            
-            await safe_edit_text(callback.message,
-                f"✅ **Протокол поручений (OD)**\n\n"
-                f"📊 Участников: {participants_count}\n\n"
-                f"⏳ Переходим к выбору ИИ для обработки...",
-                parse_mode="Markdown"
-            )
-            
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
-            
-        except Exception as e:
-            logger.error(f"Ошибка в od_protocol_continue_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка")
-    
     @router.callback_query(F.data == "back_to_template_selection")
     async def back_to_template_selection_callback(callback: CallbackQuery, state: FSMContext):
         """Вернуться к выбору способа создания протокола"""
@@ -2125,10 +1992,9 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             await state.clear()
             return
         
-        # Проверяем template_id только если не используется умный выбор И не используется OD протокол
+        # Проверяем template_id только если не используется умный выбор
         if (not data.get('use_smart_selection') and 
-            not data.get('template_id') and 
-            data.get('processing_mode') != 'od_protokol'):
+            not data.get('template_id')):
             await safe_edit_text(callback.message, 
                 "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
             )
