@@ -100,7 +100,10 @@ class UnifiedProtocolSchema(BaseModel):
 
 
 class SpeakerMappingSchema(BaseModel):
-    """Схема для сопоставления спикеров с участниками"""
+    """Схема для сопоставления спикеров с участниками и определения типа встречи"""
+    meeting_type: str = Field(
+        description="Тип встречи (technical, business, educational, brainstorm, status, general)"
+    )
     speaker_mappings: Dict[str, str] = Field(
         description="Сопоставление speaker_id -> participant_name в формате 'Имя Фамилия' (БЕЗ отчества)"
     )
@@ -110,7 +113,7 @@ class SpeakerMappingSchema(BaseModel):
     unmapped_speakers: List[str] = Field(
         description="Список speaker_id (например, SPEAKER_3) с уверенностью < 0.7, которых не удалось надежно сопоставить с участниками"
     )
-    mapping_notes: str = Field(description="Заметки по сопоставлению")
+    mapping_notes: str = Field(description="Заметки по сопоставлению и определению типа встречи")
 
 
 

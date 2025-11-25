@@ -312,6 +312,9 @@ class ProcessingService(BaseProcessingService):
             # КРИТИЧЕСКИ ВАЖНО: логируем состояние для диагностики
             logger.info(f"Проверка условий для speaker mapping: participants_list={request.participants_list is not None} ({len(request.participants_list) if request.participants_list else 0} чел.), diarization={transcription_result.diarization is not None}")
             
+            # Инициализируем переменную для типа встречи
+            request_meeting_type = None
+            
             if request.participants_list and transcription_result.diarization:
                 # Пропускаем обновление статуса, так как это быстрая операция
                 # и не требует отдельного отображения в трекере прогресса
@@ -319,21 +322,21 @@ class ProcessingService(BaseProcessingService):
                 try:
                     from src.services.speaker_mapping_service import speaker_mapping_service
                     
-                    logger.info(f"🎭 НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ: {len(request.participants_list)} участников")
+                    logger.info(f"🎭 НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ И ОПРЕДЕЛЕНИЯ ТИПА ВСТРЕЧИ: {len(request.participants_list)} участников")
                     logger.info(f"Список участников для сопоставления:")
                     for i, p in enumerate(request.participants_list[:5], 1):  # Показываем первые 5
                         logger.info(f"  {i}. {p.get('name')} ({p.get('role', 'без роли')})")
                     if len(request.participants_list) > 5:
                         logger.info(f"  ... и еще {len(request.participants_list) - 5} участников")
                     
-                    speaker_mapping = await speaker_mapping_service.map_speakers_to_participants(
+                    speaker_mapping, meeting_type = await speaker_mapping_service.map_speakers_to_participants(
                         diarization_data=transcription_result.diarization,
                         participants=request.participants_list,
                         transcription_text=transcription_result.transcription,
                         llm_provider=request.llm_provider
                     )
                     
-                    logger.info(f"✅ СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров сопоставлено")
+                    logger.info(f"✅ СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров сопоставлено, тип встречи: {meeting_type}")
                     if speaker_mapping:
                         logger.info("Результаты сопоставления:")
                         for speaker_id, name in speaker_mapping.items():
@@ -349,6 +352,7 @@ class ProcessingService(BaseProcessingService):
                         from src.services.mapping_state_cache import mapping_state_cache
                         await mapping_state_cache.save_state(request.user_id, {
                             'speaker_mapping': speaker_mapping,
+                            'meeting_type': meeting_type,  # Сохраняем тип встречи
                             'diarization_data': transcription_result.diarization,
                             'participants_list': request.participants_list,
                             'request_data': request.model_dump() if hasattr(request, 'model_dump') else request.dict(),
@@ -461,6 +465,8 @@ class ProcessingService(BaseProcessingService):
                     
                     # Сохраняем mapping в request для дальнейшего использования (если UI не включен)
                     request.speaker_mapping = speaker_mapping
+                    # Сохраняем meeting_type для передачи в генерацию протокола
+                    request_meeting_type = meeting_type
                     
                     # ЗАКОММЕНТИРОВАНО: Промежуточное уведомление больше не отправляется
                     # Информация о сопоставлении будет показана в финальном сообщении с протоколом
@@ -536,7 +542,7 @@ class ProcessingService(BaseProcessingService):
                 await progress_tracker.start_stage("analysis")
                 
             llm_result = await self._optimized_llm_generation(
-                transcription_result, template, request, processing_metrics
+                transcription_result, template, request, processing_metrics, meeting_type=request_meeting_type
             )
             
             # Форматирование (включается в этап анализа)
@@ -618,6 +624,9 @@ class ProcessingService(BaseProcessingService):
             transcription_data = state_data.get('transcription_result', {})
             diarization_data = state_data.get('diarization_data', {})
             temp_file_path = state_data.get('temp_file_path')
+            meeting_type = state_data.get('meeting_type', 'general')  # Извлекаем тип встречи
+            
+            logger.info(f"📋 Восстановлено из кеша: тип встречи = {meeting_type}")
             
             # Восстанавливаем ProcessingRequest
             request = ProcessingRequest(**request_data)
@@ -685,7 +694,8 @@ class ProcessingService(BaseProcessingService):
             logger.info(f"🔄 Начинаем генерацию протокола для пользователя {user_id}")
             
             llm_result = await self._optimized_llm_generation(
-                transcription_result, template, request, processing_metrics
+                transcription_result, template, request, processing_metrics,
+                meeting_type=meeting_type
             )
             
             # Проверяем результат LLM на корректность
@@ -1077,7 +1087,7 @@ class ProcessingService(BaseProcessingService):
     
     @cache_llm_response()
     async def _optimized_llm_generation(self, transcription_result: Any, template: Dict,
-                                      request: ProcessingRequest, processing_metrics) -> Any:
+                                      request: ProcessingRequest, processing_metrics, meeting_type: str = None) -> Any:
         """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
         
         # Создаем ключ кэша на основе транскрипции и шаблона
@@ -1176,6 +1186,7 @@ class ProcessingService(BaseProcessingService):
                     meeting_metadata=meeting_metadata,
                     openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
+                    meeting_type=meeting_type,  # Передаем тип встречи из первого запроса
                     meeting_topic=request.meeting_topic,
                     meeting_date=request.meeting_date,
                     meeting_time=request.meeting_time,

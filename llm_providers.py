@@ -649,29 +649,54 @@ class OpenAIProvider(LLMProvider):
                 from src.services.participants_service import participants_service
                 participants_list_str = participants_service.format_participants_for_llm(participants)
             except ImportError:
-                participants_list_str = "\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
+                participants_list_str = "\\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
 
-        # ЭТАП 1: АНАЛИЗ (Тип встречи + Сопоставление спикеров)
-        logger.info("🚀 Запуск ЭТАПА 1: Анализ встречи и сопоставление спикеров")
+        # Проверяем, предоставлен ли meeting_type из speaker_mapping_service
+        provided_meeting_type = kwargs.get('meeting_type')
+        provided_speaker_mapping = kwargs.get('speaker_mapping')
+
+        # Определяем модель для использования (для обоих этапов)
+        # Если передан openai_model_key, пытаемся найти соответствующую модель в настройках
+        selected_model = settings.openai_model
+        openai_model_key = kwargs.get('openai_model_key')
         
-        analysis_system_prompt = build_analysis_system_prompt()
-        analysis_user_prompt = build_analysis_prompt(
-            transcription=analysis_transcription,
-            participants_list=participants_list_str,
-            meeting_metadata=meeting_metadata
-        )
-
-        analysis_result = await self._call_openai(
-            system_prompt=analysis_system_prompt,
-            user_prompt=analysis_user_prompt,
-            schema=MEETING_ANALYSIS_SCHEMA,
-            step_name="Analysis"
-        )
-
-        meeting_type = analysis_result.get('meeting_type', 'general')
-        speaker_mapping = analysis_result.get('speaker_mappings', {})
+        if openai_model_key:
+            try:
+                preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                if preset:
+                    selected_model = preset.model
+                    logger.info(f"Используется пользовательская модель: {selected_model} (ключ: {openai_model_key})")
+            except Exception as e:
+                logger.warning(f"Не удалось определить модель по ключу {openai_model_key}: {e}")
         
-        logger.info(f"✅ ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
+        if provided_meeting_type and provided_speaker_mapping:
+            # ЭТАП 1 пропущен - используем данные из speaker_mapping_service
+            logger.info(f"✅ ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление спикеров ({len(provided_speaker_mapping)} спикеров) уже определены")
+            meeting_type = provided_meeting_type
+            speaker_mapping = provided_speaker_mapping
+        else:
+            # ЭТАП 1: АНАЛИЗ (Тип встречи + Сопоставление спикеров)
+            logger.info("🚀 Запуск ЭТАПА 1: Анализ встречи и сопоставление спикеров")
+            
+            analysis_system_prompt = build_analysis_system_prompt()
+            analysis_user_prompt = build_analysis_prompt(
+                transcription=analysis_transcription,
+                participants_list=participants_list_str,
+                meeting_metadata=meeting_metadata
+            )
+
+            analysis_result = await self._call_openai(
+                system_prompt=analysis_system_prompt,
+                user_prompt=analysis_user_prompt,
+                schema=MEETING_ANALYSIS_SCHEMA,
+                step_name="Analysis",
+                model=selected_model
+            )
+
+            meeting_type = analysis_result.get('meeting_type', 'general')
+            speaker_mapping = analysis_result.get('speaker_mappings', {})
+            
+            logger.info(f"✅ ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
 
         # ЭТАП 2: ГЕНЕРАЦИЯ (Извлечение данных протокола)
         logger.info("🚀 Запуск ЭТАПА 2: Генерация протокола")
@@ -688,7 +713,8 @@ class OpenAIProvider(LLMProvider):
             system_prompt=generation_system_prompt,
             user_prompt=generation_user_prompt,
             schema=PROTOCOL_DATA_SCHEMA,
-            step_name="Generation"
+            step_name="Generation",
+            model=selected_model
         )
 
         protocol_data = generation_result.get('protocol_data', {})
@@ -701,15 +727,15 @@ class OpenAIProvider(LLMProvider):
         final_result = protocol_data.copy()
         final_result['_meeting_type'] = meeting_type
         final_result['_speaker_mapping'] = speaker_mapping
-        final_result['_analysis_confidence'] = analysis_result.get('analysis_confidence', 0.0)
+        final_result['_analysis_confidence'] = 0.0 if provided_meeting_type else analysis_result.get('analysis_confidence', 0.0)
         final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
 
         return final_result
 
-    async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any], step_name: str) -> Dict[str, Any]:
+    async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any], step_name: str, model: str = None) -> Dict[str, Any]:
         """Вспомогательный метод для вызова OpenAI"""
         
-        selected_model = settings.openai_model
+        selected_model = model or settings.openai_model
         # Для анализа можно использовать модель попроще/быстрее, но пока используем основную
         
         extra_headers = {}
@@ -795,31 +821,41 @@ class AnthropicProvider(LLMProvider):
                 from src.services.participants_service import participants_service
                 participants_list_str = participants_service.format_participants_for_llm(participants)
             except ImportError:
-                participants_list_str = "\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
+                participants_list_str = "\\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
 
-        # ЭТАП 1: АНАЛИЗ
-        logger.info("🚀 [Anthropic] Запуск ЭТАПА 1: Анализ встречи")
+        # Проверяем, предоставлен ли meeting_type из speaker_mapping_service
+        provided_meeting_type = kwargs.get('meeting_type')
+        provided_speaker_mapping = kwargs.get('speaker_mapping')
         
-        analysis_system_prompt = build_analysis_system_prompt()
-        analysis_user_prompt = build_analysis_prompt(
-            transcription=analysis_transcription,
-            participants_list=participants_list_str,
-            meeting_metadata=meeting_metadata
-        )
+        if provided_meeting_type and provided_speaker_mapping:
+            # ЭТАП 1 пропущен - используем данные из speaker_mapping_service
+            logger.info(f"✅ [Anthropic] ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление спикеров ({len(provided_speaker_mapping)} спикеров) уже определены")
+            meeting_type = provided_meeting_type
+            speaker_mapping = provided_speaker_mapping
+        else:
+            # ЭТАП 1: АНАЛИЗ
+            logger.info("🚀 [Anthropic] Запуск ЭТАПА 1: Анализ встречи")
+            
+            analysis_system_prompt = build_analysis_system_prompt()
+            analysis_user_prompt = build_analysis_prompt(
+                transcription=analysis_transcription,
+                participants_list=participants_list_str,
+                meeting_metadata=meeting_metadata
+            )
 
-        # Используем prompt caching для первого этапа (где большая транскрипция)
-        analysis_result = await self._call_anthropic(
-            system_prompt=analysis_system_prompt,
-            user_prompt=analysis_user_prompt,
-            step_name="Analysis",
-            use_caching=True,
-            transcription_for_caching=analysis_transcription
-        )
+            # Используем prompt caching для первого этапа (где большая транскрипция)
+            analysis_result = await self._call_anthropic(
+                system_prompt=analysis_system_prompt,
+                user_prompt=analysis_user_prompt,
+                step_name="Analysis",
+                use_caching=True,
+                transcription_for_caching=analysis_transcription
+            )
 
-        meeting_type = analysis_result.get('meeting_type', 'general')
-        speaker_mapping = analysis_result.get('speaker_mappings', {})
-        
-        logger.info(f"✅ [Anthropic] ЭТАП 1 завершен. Тип: {meeting_type}")
+            meeting_type = analysis_result.get('meeting_type', 'general')
+            speaker_mapping = analysis_result.get('speaker_mappings', {})
+            
+            logger.info(f"✅ [Anthropic] ЭТАП 1 завершен. Тип: {meeting_type}")
 
         # ЭТАП 2: ГЕНЕРАЦИЯ
         logger.info("🚀 [Anthropic] Запуск ЭТАПА 2: Генерация протокола")
