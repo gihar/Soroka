@@ -231,7 +231,7 @@ class EnhancedTelegramBot:
             
             # 2. Инициализируем базовые шаблоны
             await self.template_service.init_default_templates()
-            logger.info("Базовые шаблоны инициализированы")
+            logger.info("Стандартные шаблоны синхронизированы и готовы к работе")
             
             # 2.5. Инициализируем ML-классификатор шаблонов
             try:

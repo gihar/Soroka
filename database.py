@@ -45,6 +45,7 @@ class Database:
                     is_default BOOLEAN DEFAULT 0,
                     created_by INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     category TEXT,
                     tags TEXT,
                     keywords TEXT,
@@ -161,6 +162,12 @@ class Database:
             try:
                 await db.execute("ALTER TABLE templates ADD COLUMN keywords TEXT")
                 logger.info("Добавлено поле keywords в таблицу templates")
+            except Exception:
+                pass
+            
+            try:
+                await db.execute("ALTER TABLE templates ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                logger.info("Добавлено поле updated_at в таблицу templates")
             except Exception:
                 pass
             
@@ -362,6 +369,56 @@ class Database:
             """, (name, content, description, created_by, is_default, category, tags_json, keywords_json))
             await db.commit()
             return cursor.lastrowid
+
+    async def ensure_templates_updated_at_column(self) -> None:
+        """Проверить наличие столбца updated_at и добавить его при необходимости"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await self._ensure_templates_updated_at_column(db)
+
+    async def _ensure_templates_updated_at_column(self, db) -> None:
+        cursor = await db.execute("PRAGMA table_info(templates)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "updated_at" in columns:
+            return
+        try:
+            await db.execute("ALTER TABLE templates ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            await db.commit()
+            logger.info("Добавлено поле updated_at в таблицу templates (ensure)")
+        except Exception as e:
+            logger.warning(f"Не удалось добавить поле updated_at в таблицу templates: {e}")
+
+    async def update_template(self, template_id: int, *, name: str, content: str,
+                              description: str = None, is_default: bool = False,
+                              category: str = None, tags: List[str] = None,
+                              keywords: List[str] = None) -> bool:
+        """Полностью обновить существующий шаблон"""
+        import json
+        await self.ensure_templates_updated_at_column()
+        async with aiosqlite.connect(self.db_path) as db:
+            tags_json = json.dumps(tags) if tags else None
+            keywords_json = json.dumps(keywords) if keywords else None
+            
+            sql_with_updated_at = """
+                UPDATE templates
+                SET name = ?, description = ?, content = ?, is_default = ?, category = ?, 
+                    tags = ?, keywords = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """
+            params = (name, description, content, is_default, category, tags_json, keywords_json, template_id)
+            try:
+                cursor = await db.execute(sql_with_updated_at, params)
+            except aiosqlite.OperationalError as exc:
+                if "updated_at" not in str(exc).lower():
+                    raise
+                logger.warning("Колонка updated_at недоступна, обновляем шаблон без нее: %s", exc)
+                cursor = await db.execute("""
+                    UPDATE templates
+                    SET name = ?, description = ?, content = ?, is_default = ?, category = ?, 
+                        tags = ?, keywords = ?
+                    WHERE id = ?
+                """, (name, description, content, is_default, category, tags_json, keywords_json, template_id))
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def delete_template(self, telegram_id: int, template_id: int) -> bool:
         """Удалить шаблон, если он принадлежит пользователю и не является базовым"""

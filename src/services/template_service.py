@@ -2,7 +2,7 @@
 Сервис для работы с шаблонами
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from jinja2 import Environment, BaseLoader, TemplateError
 from loguru import logger
 
@@ -154,32 +154,54 @@ class TemplateService:
         return Template(**template_dict)
     
     async def init_default_templates(self) -> None:
-        """Инициализация базовых и библиотечных шаблонов"""
+        """Создание и автообновление базовых шаблонов"""
         try:
-            # Проверяем, есть ли уже шаблоны
+            # Гарантируем, что схема таблицы templates поддерживает auto-update
+            await self.db.ensure_templates_updated_at_column()
             existing_templates = await self.get_all_templates()
+            existing_by_name: Dict[str, Template] = {}
+            for template in existing_templates:
+                stored = existing_by_name.get(template.name)
+                if not stored:
+                    existing_by_name[template.name] = template
+                    continue
+                if not self._is_system_template(stored) and self._is_system_template(template):
+                    existing_by_name[template.name] = template
             
-            # Импортируем библиотеку шаблонов
             from src.services.template_library import TemplateLibrary
-            
-            # Объединяем базовые и библиотечные шаблоны
             library = TemplateLibrary()
-            all_templates = self._get_default_templates() + library.get_all_templates()
+            target_templates = self._get_default_templates() + library.get_all_templates()
             
-            # Создаем только отсутствующие шаблоны по имени
-            existing_names = {t.name for t in existing_templates}
-            templates_to_create = [t for t in all_templates if t["name"] not in existing_names]
+            created_count = 0
+            updated_count = 0
+            skipped_user_templates = 0
             
-            if templates_to_create:
-                for template_data in templates_to_create:
+            for template_data in target_templates:
+                template_name = template_data["name"]
+                existing_template = existing_by_name.get(template_name)
+                
+                if not existing_template:
                     template_create = TemplateCreate(**template_data)
                     await self.create_template(template_create)
-                logger.info(f"Инициализировано {len(templates_to_create)} новых шаблонов")
-            else:
-                logger.info(f"Все шаблоны уже инициализированы ({len(existing_templates)} шаблонов)")
+                    created_count += 1
+                    continue
+                
+                if not self._is_system_template(existing_template):
+                    skipped_user_templates += 1
+                    continue
+                
+                if self._template_needs_update(existing_template, template_data):
+                    await self._update_system_template(existing_template, template_data)
+                    updated_count += 1
             
-            logger.info(f"Всего шаблонов в системе: {len(existing_templates) + len(templates_to_create)}")
-            
+            total_templates = len(existing_templates) + created_count
+            logger.info(
+                "Синхронизация стандартных шаблонов завершена: создано %s, обновлено %s, пропущено пользовательских %s",
+                created_count,
+                updated_count,
+                skipped_user_templates,
+            )
+            logger.info(f"Всего шаблонов в системе: {total_templates}")
         except Exception as e:
             logger.error(f"Ошибка при инициализации шаблонов: {e}")
             raise
@@ -629,3 +651,59 @@ class TemplateService:
                 "is_default": True
             },
         ]
+
+    @staticmethod
+    def _is_system_template(template: Template) -> bool:
+        """Определить, можно ли безопасно обновлять шаблон"""
+        return template.created_by in (None, 0) or template.is_default
+
+    def _template_needs_update(self, existing: Template, new_data: Dict[str, Any]) -> bool:
+        """Понять, отличается ли системный шаблон от эталона"""
+        target_description = new_data["description"] if "description" in new_data else existing.description
+        if (existing.description or "") != (target_description or ""):
+            return True
+        
+        target_content = new_data.get("content", existing.content)
+        if existing.content != target_content:
+            return True
+        
+        target_category = new_data["category"] if "category" in new_data else existing.category
+        if (existing.category or "") != (target_category or ""):
+            return True
+        
+        target_is_default = bool(new_data["is_default"]) if "is_default" in new_data else existing.is_default
+        if bool(existing.is_default) != target_is_default:
+            return True
+        
+        target_tags = new_data["tags"] if "tags" in new_data else existing.tags
+        if not self._lists_equal(existing.tags, target_tags):
+            return True
+        
+        target_keywords = new_data["keywords"] if "keywords" in new_data else existing.keywords
+        if not self._lists_equal(existing.keywords, target_keywords):
+            return True
+        
+        return False
+
+    @staticmethod
+    def _lists_equal(first: Optional[List[str]], second: Optional[List[str]]) -> bool:
+        """Нормализованное сравнение списков"""
+        def normalize(value: Optional[List[str]]) -> List[str]:
+            if not value:
+                return []
+            return list(sorted(value))
+        
+        return normalize(first) == normalize(second)
+
+    async def _update_system_template(self, existing: Template, template_data: Dict[str, Any]) -> None:
+        """Перезаписать шаблон актуальным содержимым"""
+        await self.db.update_template(
+            template_id=existing.id,
+            name=template_data["name"],
+            description=template_data.get("description"),
+            content=template_data.get("content", existing.content),
+            is_default=template_data.get("is_default", existing.is_default),
+            category=template_data.get("category"),
+            tags=template_data.get("tags"),
+            keywords=template_data.get("keywords"),
+        )

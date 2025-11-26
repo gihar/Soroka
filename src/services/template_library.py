@@ -30,8 +30,8 @@ class TemplateLibrary:
                 "content": """ПРОТОКОЛ ПОРУЧЕНИЙ
 ============================================================
 {% if meeting_date %}Дата встречи: {{ meeting_date }}
-{% endif %}{% if managers %}Руководители: {{ managers }}
-{% endif %}{% if participants %}Участники: {{ participants }}
+{% endif %}
+{% if participants %}Участники: {{ participants }}
 {% endif %}
 ============================================================
 
