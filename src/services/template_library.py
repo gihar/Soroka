@@ -21,7 +21,7 @@ class TemplateLibrary:
         return [
             {
                 "id": "od_protocol",
-                "name": "Протокол ОД (Поручения)",
+                "name": "Протокол поручений руководителей",
                 "description": "Специальный формат для протокола поручений руководителей (OD)",
                 "category": "management",
                 "tags": ["поручения", "од", "руководители", "протокол"],
@@ -35,20 +35,11 @@ class TemplateLibrary:
 {% endif %}
 ============================================================
 
-{% if tasks %}
-{% for task in tasks %}
-{{ loop.index }}. {{ task.task_name }}
-{% if task.assignments %}
-{% for assignment in task.assignments %}
-   {{ assignment.instruction }}{% if assignment.manager_name %} (от {{ assignment.manager_name }}){% endif %}.
-{% if assignment.responsible or assignment.deadline %}   {% if assignment.responsible %}Отв. {{ assignment.responsible }}{% endif %}{% if assignment.responsible and assignment.deadline %}. {% endif %}{% if assignment.deadline %}Срок — {{ assignment.deadline }}{% endif %}.
-{% endif %}
-{% endfor %}
+{% if tasks_od %}
+{{ tasks_od }}
 {% else %}
    (Поручений не зафиксировано)
 
-{% endif %}
-{% endfor %}
 {% endif %}
 {% if additional_notes %}
 ============================================================
