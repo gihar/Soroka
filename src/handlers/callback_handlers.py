@@ -1083,7 +1083,7 @@ def setup_callback_handlers(user_service: UserService, template_service: Templat
             state_data = await state.get_data()
             participants_count = len(state_data.get('participants_list', [])) if state_data.get('participants_list') else None
             
-            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count, real_user_id=callback.from_user.id)
             
         except Exception as e:
             logger.error(f"Ошибка в back_to_template_selection_callback: {e}")

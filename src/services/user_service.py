@@ -26,6 +26,21 @@ class UserService:
         except Exception as e:
             logger.error(f"Ошибка при получении пользователя {telegram_id}: {e}")
             raise
+
+    async def get_user_default_template_id(self, telegram_id: int) -> Optional[int]:
+        """Получить ID шаблона по умолчанию пользователя"""
+        try:
+            user_data = await self.db.get_user(telegram_id)
+            if not user_data:
+                logger.debug(f"Пользователь {telegram_id} не найден при запросе default_template_id")
+                return None
+            
+            default_id = user_data.get("default_template_id")
+            logger.debug(f"Пользователь {telegram_id} default_template_id={default_id}")
+            return default_id
+        except Exception as e:
+            logger.error(f"Ошибка при получении default_template_id для пользователя {telegram_id}: {e}")
+            return None
     
     async def create_user(self, user_data: UserCreate) -> User:
         """Создать нового пользователя"""

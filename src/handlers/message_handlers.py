@@ -15,6 +15,7 @@ from loguru import logger
 from services import FileService, TemplateService, ProcessingService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
+from src.exceptions.template import TemplateNotFoundError
 from src.utils.pdf_converter import convert_markdown_to_pdf
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 
@@ -546,13 +547,33 @@ def _extract_file_info(message: Message) -> tuple:
     return file_obj, file_name, content_type
 
 
-async def _show_template_selection_step2(message: Message, template_service: TemplateService, state: FSMContext = None, participants_count: Optional[int] = None):
+async def _show_template_selection_step2(message: Message, template_service: TemplateService, state: FSMContext = None, participants_count: Optional[int] = None, real_user_id: Optional[int] = None):
     """Показать выбор шаблонов (шаг 2)"""
     try:
+        # Детальное логирование для отладки
+        logger.info(f"[DEBUG] _show_template_selection_step2 вызван: message.from_user.id={message.from_user.id}, message.chat.id={message.chat.id}")
+
+        # ИСПРАВЛЕНИЕ: Используем правильный ID пользователя
+        # 1. Если передан real_user_id (из callback), используем его
+        # 2. Иначе используем message.chat.id вместо message.from_user.id
+        # Когда бот редактирует сообщения, message.from_user становится ID бота, а message.chat.id остается ID пользователя
+        if real_user_id:
+            user_id = real_user_id
+            logger.info(f"[DEBUG] Используем переданный real_user_id={user_id}")
+        else:
+            user_id = message.chat.id
+            logger.info(f"[DEBUG] Используем user_id={user_id} (message.chat.id) вместо message.from_user.id={message.from_user.id}")
+
         # Проверяем, есть ли у пользователя шаблон по умолчанию
         from services import UserService
         user_service = UserService()
-        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        default_template_id = await user_service.get_user_default_template_id(user_id)
+        logger.info(f"[DEBUG] get_user_default_template_id вернул: {default_template_id} для пользователя {user_id}")
+
+        if default_template_id is None:
+            logger.debug(f"У пользователя {user_id} нет сохранённого шаблона по умолчанию")
+        else:
+            logger.info(f"[DEBUG] Найден шаблон по умолчанию: {default_template_id} для пользователя {user_id}")
         
         # Создаем клавиатуру с новым меню выбора
         keyboard_buttons = []
@@ -564,18 +585,18 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         )])
         
         # Кнопка 2: Сохранённый шаблон (если есть)
-        if user and user.default_template_id:
+        if default_template_id is not None:
+            default_id = default_template_id
+            button_text = None
             try:
-                if user.default_template_id == 0:
-                    # Если сохранён умный выбор
+                if default_id == 0:
                     button_text = "🤖 Протокол: Умный выбор (по умолчанию)"
                 else:
-                    # Если сохранён конкретный шаблон
-                    default_template = await template_service.get_template_by_id(user.default_template_id)
-                    if default_template:
+                    try:
+                        default_template = await template_service.get_template_by_id(default_id)
                         button_text = f"📋 По шаблону: {default_template.name}"
-                    else:
-                        button_text = None
+                    except TemplateNotFoundError:
+                        button_text = f"📋 По шаблону (ID {default_id})"
                 
                 if button_text:
                     keyboard_buttons.append([InlineKeyboardButton(

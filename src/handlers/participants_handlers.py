@@ -242,7 +242,7 @@ def setup_participants_handlers() -> Router:
             from src.services.template_service import TemplateService
 
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state)
+            await _show_template_selection_step2(callback.message, template_service, state, real_user_id=callback.from_user.id)
             
         except Exception as e:
             logger.error(f"Ошибка при пропуске участников: {e}")
@@ -471,12 +471,16 @@ def setup_participants_handlers() -> Router:
 
             await callback.answer("✅ Информация о встрече подтверждена")
 
+            # Детальное логирование для отладки ID пользователей
+            logger.info(f"[DEBUG] Callback - from_user.id={callback.from_user.id}, message.from_user.id={callback.message.from_user.id}")
+
             # Переходим к выбору шаблона (шаг 2)
             from src.handlers.message_handlers import _show_template_selection_step2
             from src.services.template_service import TemplateService
 
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
+            # Передаем real_user_id из callback для правильного определения пользователя
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count, real_user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
@@ -514,7 +518,7 @@ def setup_participants_handlers() -> Router:
             from src.services.template_service import TemplateService
 
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count, real_user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении информации о встрече: {e}")
@@ -536,7 +540,7 @@ def setup_participants_handlers() -> Router:
             from src.services.template_service import TemplateService
 
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count, real_user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
@@ -568,7 +572,7 @@ def setup_participants_handlers() -> Router:
             from src.services.template_service import TemplateService
 
             template_service = TemplateService()
-            await _show_template_selection_step2(callback.message, template_service, state, participants_count)
+            await _show_template_selection_step2(callback.message, template_service, state, participants_count, real_user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении участников: {e}")
