@@ -171,6 +171,9 @@ class Database:
             except Exception:
                 pass
             
+            # Миграция: синхронизируем владельцев шаблонов (legacy created_by = telegram_id)
+            await self._sync_template_owner_ids(db)
+            
             # Таблица очереди задач
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS queue_tasks (
@@ -375,6 +378,52 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             await self._ensure_templates_updated_at_column(db)
 
+    async def _sync_template_owner_ids(self, db) -> None:
+        """Преобразовать старые значения created_by (telegram_id) в актуальные user_id"""
+        try:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT id, created_by 
+                FROM templates 
+                WHERE created_by IS NOT NULL
+            """)
+            templates = await cursor.fetchall()
+            if not templates:
+                return
+            
+            updated = 0
+            for template in templates:
+                creator_id = template["created_by"]
+                template_id = template["id"]
+                
+                if creator_id is None:
+                    continue
+                
+                # Если created_by уже указывает на существующего пользователя, ничего не делаем
+                cursor = await db.execute("SELECT 1 FROM users WHERE id = ? LIMIT 1", (creator_id,))
+                if await cursor.fetchone():
+                    continue
+                
+                # Legacy: created_by хранит telegram_id
+                cursor = await db.execute(
+                    "SELECT id FROM users WHERE telegram_id = ? LIMIT 1",
+                    (creator_id,)
+                )
+                user_row = await cursor.fetchone()
+                if not user_row:
+                    continue
+                
+                await db.execute(
+                    "UPDATE templates SET created_by = ? WHERE id = ?",
+                    (user_row["id"], template_id)
+                )
+                updated += 1
+            
+            if updated:
+                logger.info(f"Синхронизированы владельцы у {updated} шаблонов")
+        except Exception as e:
+            logger.warning(f"Не удалось синхронизировать владельцев шаблонов: {e}")
+
     async def _ensure_templates_updated_at_column(self, db) -> None:
         cursor = await db.execute("PRAGMA table_info(templates)")
         columns = {row[1] for row in await cursor.fetchall()}
@@ -558,13 +607,34 @@ class Database:
             # Проверяем, что шаблон существует и доступен пользователю
             # template_id = 0 - специальное значение для "Умного выбора", пропускаем проверку
             if template_id != 0:
-                cursor = await db.execute("""
-                    SELECT id FROM templates 
-                    WHERE id = ? AND (created_by = ? OR is_default = 1)
-                """, (template_id, user_id))
+                template_cursor = await db.execute("""
+                    SELECT id, created_by, is_default
+                    FROM templates 
+                    WHERE id = ?
+                """, (template_id,))
+                template_row = await template_cursor.fetchone()
                 
-                if not await cursor.fetchone():
+                if not template_row:
                     return False
+                
+                template_owner = template_row["created_by"]
+                is_system_template = bool(template_row["is_default"])
+                
+                # Проверяем права доступа к шаблону
+                owner_matches_user = template_owner == user_id
+                owner_matches_telegram = template_owner == telegram_id
+                owner_unknown = template_owner is None
+                
+                if not (is_system_template or owner_matches_user or owner_unknown or owner_matches_telegram):
+                    return False
+                
+                # Если шаблон создан пользователем в старых версиях (created_by = telegram_id),
+                # синхронизируем created_by с актуальным user_id владельца
+                if owner_matches_telegram:
+                    await db.execute(
+                        "UPDATE templates SET created_by = ? WHERE id = ?",
+                        (user_id, template_id)
+                    )
             
             # Обновляем предпочтения пользователя
             await db.execute("""
