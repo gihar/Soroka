@@ -260,6 +260,10 @@ class ProtocolDataSchema(BaseModel):
         default_factory=list,
         description="Проблемы или неоднозначности при извлечении"
     )
+    context_used: bool = Field(
+        default=False,
+        description="Использовался ли дополнительный контекст (повестка, проекты)"
+    )
 
     class Config:
         extra = "forbid"

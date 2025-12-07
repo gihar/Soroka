@@ -682,7 +682,10 @@ class OpenAIProvider(LLMProvider):
             analysis_user_prompt = build_analysis_prompt(
                 transcription=analysis_transcription,
                 participants_list=participants_list_str,
-                meeting_metadata=meeting_metadata
+                meeting_metadata=meeting_metadata,
+                # Extract context parameters from kwargs
+                meeting_agenda=kwargs.get('meeting_agenda'),
+                project_list=kwargs.get('project_list')
             )
 
             analysis_result = await self._call_openai(
@@ -706,7 +709,10 @@ class OpenAIProvider(LLMProvider):
             transcription=analysis_transcription, # Используем ту же транскрипцию с метками
             template_variables=template_variables,
             speaker_mapping=speaker_mapping,
-            meeting_type=meeting_type
+            meeting_type=meeting_type,
+            # Extract context parameters from kwargs
+            meeting_agenda=kwargs.get('meeting_agenda'),
+            project_list=kwargs.get('project_list')
         )
 
         generation_result = await self._call_openai(
@@ -840,7 +846,10 @@ class AnthropicProvider(LLMProvider):
             analysis_user_prompt = build_analysis_prompt(
                 transcription=analysis_transcription,
                 participants_list=participants_list_str,
-                meeting_metadata=meeting_metadata
+                meeting_metadata=meeting_metadata,
+                # Extract context parameters from kwargs
+                meeting_agenda=kwargs.get('meeting_agenda'),
+                project_list=kwargs.get('project_list')
             )
 
             # Используем prompt caching для первого этапа (где большая транскрипция)

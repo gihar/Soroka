@@ -536,7 +536,10 @@ def _build_field_specific_rules(template_variables: Dict[str, str]) -> str:
 def build_analysis_prompt(
     transcription: str,
     participants_list: Optional[str] = None,
-    meeting_metadata: Optional[Dict[str, str]] = None
+    meeting_metadata: Optional[Dict[str, str]] = None,
+    # New context parameters
+    meeting_agenda: Optional[str] = None,
+    project_list: Optional[str] = None
 ) -> str:
     """
     Создает промпт для первого запроса:
@@ -547,6 +550,8 @@ def build_analysis_prompt(
         transcription: Текст транскрипции с метками SPEAKER_N
         participants_list: Список участников
         meeting_metadata: Метаданные встречи (дата, время, тема)
+        meeting_agenda: Повестка встречи
+        project_list: Список проектов
 
     Returns:
         Промпт для LLM
@@ -581,7 +586,21 @@ def build_analysis_prompt(
 - Используй контекст высказываний для точного сопоставления
 
 Список участников:
-{participants_list or 'Не предоставлен'}
+{participants_list or 'Не предоставлен'}"""
+
+    # Add context section if provided
+    if meeting_agenda or project_list:
+        context_section = "\n\n## ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ВСТРЕЧИ\n\n"
+
+        if meeting_agenda:
+            context_section += f"**Повестка встречи:**\n{meeting_agenda}\n\n"
+
+        if project_list:
+            context_section += f"**Список проектов:**\n{project_list}\n\n"
+
+        prompt += context_section
+
+    prompt += f"""
 
 СТЕНОГРАММА ВСТРЕЧИ:
 {transcription}"""
@@ -624,7 +643,10 @@ def build_generation_prompt(
     transcription: str,
     template_variables: Dict[str, str],
     speaker_mapping: Optional[Dict[str, str]] = None,
-    meeting_type: str = "general"
+    meeting_type: str = "general",
+    # New context parameters
+    meeting_agenda: Optional[str] = None,
+    project_list: Optional[str] = None
 ) -> str:
     """
     Создает промпт для второго запроса:
@@ -636,6 +658,8 @@ def build_generation_prompt(
         template_variables: Переменные шаблона (ключ -> описание)
         speaker_mapping: Сопоставление спикеров (SPEAKER_N -> Имя)
         meeting_type: Тип встречи
+        meeting_agenda: Повестка встречи
+        project_list: Список проектов
 
     Returns:
         Промпт для LLM
@@ -679,7 +703,29 @@ def build_generation_prompt(
 {formatting_instructions}
 
 СПЕЦИФИЧНЫЕ ПРАВИЛА ПОЛЯМ:
-{field_rules}
+{field_rules}"""
+
+    # Add context section if provided
+    if meeting_agenda or project_list:
+        context_info = {
+            'meeting_agenda': meeting_agenda,
+            'project_list': project_list
+        }
+
+        # Filter out None values
+        context_info = {k: v for k, v in context_info.items() if v}
+
+        if context_info:
+            prompt += "\n\n## ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ АНАЛИЗА\n\n"
+            prompt += "Используй следующую информацию для более точного извлечения данных протокола:\n\n"
+
+            for key, value in context_info.items():
+                if key == 'meeting_agenda':
+                    prompt += f"**Повестка встречи:**\n{value}\n\n"
+                elif key == 'project_list':
+                    prompt += f"**Список проектов:**\n{value}\n\n"
+
+    prompt += f"""
 
 ТРАНСКРИПЦИЯ:
 {transcription}

@@ -1190,7 +1190,10 @@ class ProcessingService(BaseProcessingService):
                     meeting_topic=request.meeting_topic,
                     meeting_date=request.meeting_date,
                     meeting_time=request.meeting_time,
-                    participants=request.participants_list
+                    participants=request.participants_list,
+                    # Add protocol context parameters
+                    meeting_agenda=request.meeting_agenda,
+                    project_list=request.project_list
                 )
 
 
@@ -1210,7 +1213,9 @@ class ProcessingService(BaseProcessingService):
                     request.meeting_topic,
                     request.meeting_date,
                     request.meeting_time,
-                    request.participants_list
+                    request.participants_list,
+                    request.meeting_agenda,
+                    request.project_list
                 )
                 
                 if not llm_result.success:
@@ -1371,7 +1376,8 @@ class ProcessingService(BaseProcessingService):
 
     async def _generate_llm_response(self, transcription_result, template,
                                    template_variables, llm_provider, openai_model_key=None, speaker_mapping=None,
-                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None):
+                                   meeting_topic=None, meeting_date=None, meeting_time=None, participants=None,
+                                   meeting_agenda=None, project_list=None):
         """Генерация ответа LLM с постобработкой"""
         llm_result = await self.llm_service.generate_protocol_with_fallback(
             llm_provider, transcription_result.transcription, template_variables,
@@ -1381,7 +1387,9 @@ class ProcessingService(BaseProcessingService):
             meeting_topic=meeting_topic,
             meeting_date=meeting_date,
             meeting_time=meeting_time,
-            participants=participants
+            participants=participants,
+            meeting_agenda=meeting_agenda,
+            project_list=project_list
         )
         
         # Постобработка результатов - проверяем и исправляем неправильные JSON-структуры

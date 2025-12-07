@@ -23,6 +23,11 @@ class ProcessingRequest(BaseModel):
     meeting_topic: Optional[str] = Field(None, description="Тема встречи")
     meeting_date: Optional[str] = Field(None, description="Дата встречи")
     meeting_time: Optional[str] = Field(None, description="Время встречи")
+    # New optional context fields
+    meeting_agenda: Optional[str] = Field(None, description="Повестка встречи")
+    project_list: Optional[str] = Field(None, description="Список проектов")
+    # Feature flag for context usage
+    use_context: bool = Field(True, description="Использовать дополнительный контекст")
 
 
 class TranscriptionResult(BaseModel):

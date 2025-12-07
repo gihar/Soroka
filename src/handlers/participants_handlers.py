@@ -3,12 +3,13 @@
 """
 
 import os
+from typing import Optional, Dict
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 
-from src.handlers.participants_states import ParticipantsInput
+from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 from src.exceptions.file import FileError
@@ -52,6 +53,12 @@ async def show_participants_menu(message: Message, user_service: UserService):
             callback_data="auto_extract_meeting_info"
         )])
 
+        # Кнопка добавления дополнительной информации
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="📝 Добавить доп. информацию",
+            callback_data="add_protocol_info"
+        )])
+
         # Кнопка пропуска
         keyboard_buttons.append([InlineKeyboardButton(
             text="⏭ Пропустить (без имен)",
@@ -83,6 +90,37 @@ async def show_participants_menu(message: Message, user_service: UserService):
     except Exception as e:
         logger.error(f"Ошибка при показе меню участников: {e}")
         await message.answer("❌ Произошла ошибка при загрузке меню.")
+
+
+async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dict):
+    """Menu for inputting additional protocol information"""
+    try:
+        keyboard_buttons = [
+            [InlineKeyboardButton(text="📋 Повестка встречи", callback_data="input_meeting_agenda")],
+            [InlineKeyboardButton(text="📊 Список проектов", callback_data="input_project_list")],
+            [InlineKeyboardButton(text="✅ Готово", callback_data="protocol_info_complete")],
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
+        ]
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+        message_text = (
+            "📝 **Дополнительная информация к протоколу**\n\n"
+            "Добавьте контекст для улучшения качества протокола:\n\n"
+            "📋 **Повестка встречи** - основные темы и вопросы для обсуждения\n"
+            "📊 **Список проектов** - названия проектов, упоминаемых во встрече\n\n"
+            "Выберите действие:"
+        )
+
+        await callback_query.message.edit_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при показе меню доп. информации: {e}")
+        await callback_query.message.edit_text("❌ Произошла ошибка при загрузке меню.")
 
 
 def setup_participants_handlers() -> Router:
@@ -588,7 +626,105 @@ def setup_participants_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при отмене: {e}")
-    
+
+    # Обработчики для дополнительной информации о протоколе
+    @router.callback_query(F.data == "add_protocol_info")
+    async def handle_add_protocol_info(callback: CallbackQuery, state: FSMContext):
+        """Handler for 'Add protocol info' button"""
+        try:
+            await callback.answer()
+            await show_protocol_info_menu(callback, {})
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении доп. информации: {e}")
+
+    @router.callback_query(F.data.startswith("input_"))
+    async def handle_protocol_info_input(callback: CallbackQuery, state: FSMContext):
+        """Handle different types of protocol information input"""
+        try:
+            await callback.answer()
+            info_type = callback.data.replace("input_", "")
+
+            # Set FSM state for text input
+            if info_type == "meeting_agenda":
+                await state.set_state(ProtocolInfoState.waiting_agenda)
+                prompt_text = "📋 **Введите повестку встречи**\n\nПеречислите основные темы и вопросы для обсуждения:"
+            elif info_type == "project_list":
+                await state.set_state(ProtocolInfoState.waiting_project_list)
+                prompt_text = "📊 **Введите список проектов**\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
+            else:
+                return
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
+            ])
+
+            await callback.message.answer(
+                prompt_text,
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка при обработке ввода доп. информации: {e}")
+
+    @router.message(F.state.in_state({ProtocolInfoState.waiting_agenda, ProtocolInfoState.waiting_project_list}))
+    async def handle_protocol_info_text(message: Message, state: FSMContext):
+        """Handle text input for protocol information"""
+        try:
+            current_state = await state.get_state()
+            user_data = await state.get_data()
+
+            # Store the information
+            if current_state == ProtocolInfoState.waiting_agenda:
+                user_data.setdefault('protocol_info', {})['meeting_agenda'] = message.text
+            elif current_state == ProtocolInfoState.waiting_project_list:
+                user_data.setdefault('protocol_info', {})['project_list'] = message.text
+
+            await state.set_data(user_data)
+            await state.clear()
+
+            # Show protocol info menu again for more input
+            # For now, we'll go back to participants menu
+            # In a real implementation, you might want to keep track of the context
+            await show_participants_menu(message, user_service)
+
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении доп. информации: {e}")
+
+    @router.callback_query(F.data == "protocol_info_complete")
+    async def handle_protocol_info_complete(callback: CallbackQuery, state: FSMContext):
+        """When user finishes entering protocol info"""
+        try:
+            await callback.answer()
+            # Store protocol info and return to participants menu
+            user_data = await state.get_data()
+            await state.clear()
+
+            await show_participants_menu(callback.message, user_service)
+
+        except Exception as e:
+            logger.error(f"Ошибка при завершении ввода доп. информации: {e}")
+
+    @router.callback_query(F.data == "skip_protocol_info")
+    async def handle_skip_protocol_info(callback: CallbackQuery, state: FSMContext):
+        """When user skips protocol info input"""
+        try:
+            await callback.answer()
+            await state.clear()
+            await show_participants_menu(callback.message, user_service)
+
+        except Exception as e:
+            logger.error(f"Ошибка при пропуске доп. информации: {e}")
+
     return router
 
+
+async def get_protocol_info_from_state(state: FSMContext) -> Optional[Dict]:
+    """Extract protocol information from user state"""
+    try:
+        user_data = await state.get_data()
+        return user_data.get('protocol_info')
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении протокольной информации из состояния: {e}")
+        return None
 
