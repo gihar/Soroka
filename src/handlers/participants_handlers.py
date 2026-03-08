@@ -727,4 +727,3 @@ async def get_protocol_info_from_state(state: FSMContext) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Ошибка при извлечении протокольной информации из состояния: {e}")
         return None
-

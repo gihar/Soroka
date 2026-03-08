@@ -1983,6 +1983,9 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         logger.info(f"  meeting_topic: {data.get('meeting_topic')}")
         logger.info(f"  meeting_date: {data.get('meeting_date')}")
         logger.info(f"  meeting_time: {data.get('meeting_time')}")
+        protocol_info = (data.get('protocol_info') or {})
+        logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
+        logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
         
         # Проверяем наличие LLM (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
@@ -2033,7 +2036,9 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             participants_list=data.get('participants_list'),
             meeting_topic=data.get('meeting_topic'),
             meeting_date=data.get('meeting_date'),
-            meeting_time=data.get('meeting_time')
+            meeting_time=data.get('meeting_time'),
+            meeting_agenda=protocol_info.get('meeting_agenda'),
+            project_list=protocol_info.get('project_list')
         )
         
         # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания

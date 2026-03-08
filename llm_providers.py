@@ -358,6 +358,8 @@ def _build_user_prompt(
     meeting_date: Optional[str] = None,
     meeting_time: Optional[str] = None,
     participants: Optional[List[Dict[str, str]]] = None,
+    meeting_agenda: Optional[str] = None,
+    project_list: Optional[str] = None,
 ) -> str:
     """
     Формирует пользовательский промпт с контекстом и требованиями к формату.
@@ -515,6 +517,25 @@ def _build_user_prompt(
 
 
     
+    # Блок дополнительного контекста (повестка, проекты)
+    context_section = ""
+    if meeting_agenda or project_list:
+        context_info = {
+            'meeting_agenda': meeting_agenda,
+            'project_list': project_list
+        }
+        context_info = {k: v for k, v in context_info.items() if v}
+
+        if context_info:
+            context_section += "\n\n## ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ АНАЛИЗА\n\n"
+            context_section += "Используй следующую информацию для более точного извлечения данных протокола:\n\n"
+
+            for key, value in context_info.items():
+                if key == 'meeting_agenda':
+                    context_section += f"**Повестка встречи:**\n{value}\n\n"
+                elif key == 'project_list':
+                    context_section += f"**Список проектов:**\n{value}\n\n"
+
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
 
     # Основной пользовательский промпт
@@ -522,6 +543,7 @@ def _build_user_prompt(
         "═══════════════════════════════════════════════════════════\n"
         "ИСХОДНЫЕ ДАННЫЕ ДЛЯ АНАЛИЗА\n"
         "═══════════════════════════════════════════════════════════\n\n"
+        f"{context_section}"
         f"{transcription_text}\n"
         f"{participants_info}"
         f"{meeting_info}"
@@ -874,7 +896,9 @@ class AnthropicProvider(LLMProvider):
             transcription=analysis_transcription,
             template_variables=template_variables,
             speaker_mapping=speaker_mapping,
-            meeting_type=meeting_type
+            meeting_type=meeting_type,
+            meeting_agenda=kwargs.get('meeting_agenda'),
+            project_list=kwargs.get('project_list')
         )
 
         # Тоже используем caching, так как транскрипция та же
@@ -969,6 +993,8 @@ class YandexGPTProvider(LLMProvider):
         meeting_date = kwargs.get('meeting_date')
         meeting_time = kwargs.get('meeting_time')
         participants = kwargs.get('participants')
+        meeting_agenda = kwargs.get('meeting_agenda')
+        project_list = kwargs.get('project_list')
 
         # Унифицированные системный и пользовательский промпты
         system_prompt = _build_system_prompt()
@@ -981,7 +1007,9 @@ class YandexGPTProvider(LLMProvider):
             meeting_topic,
             meeting_date,
             meeting_time,
-            participants
+            participants,
+            meeting_agenda,
+            project_list
         )
         
         headers = {
