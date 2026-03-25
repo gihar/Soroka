@@ -712,19 +712,6 @@ class Database:
                            for row in by_type}
             }
     
-    # Методы для работы с метриками производительности
-    async def save_performance_metric(self, name: str, value: float, unit: str, 
-                                     tags: Optional[Dict[str, str]] = None):
-        """Сохранить метрику производительности"""
-        import json
-        async with aiosqlite.connect(self.db_path) as db:
-            tags_json = json.dumps(tags) if tags else None
-            await db.execute("""
-                INSERT INTO performance_metrics (name, value, unit, tags)
-                VALUES (?, ?, ?, ?)
-            """, (name, value, unit, tags_json))
-            await db.commit()
-    
     async def save_processing_metric(self, metric_data: Dict[str, Any]) -> int:
         """Сохранить метрику обработки файла"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -848,16 +835,6 @@ class Database:
             logger.error(f"Ошибка при обновлении message_id задачи: {e}")
             return False
     
-    async def get_queue_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """Получить задачу по ID"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute("""
-                SELECT * FROM queue_tasks WHERE task_id = ?
-            """, (task_id,))
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-    
     async def get_pending_queue_tasks(self) -> List[Dict[str, Any]]:
         """Получить все задачи в статусе queued, отсортированные по приоритету и времени создания"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -869,19 +846,6 @@ class Database:
             """)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
-    
-    async def delete_queue_task(self, task_id: str) -> bool:
-        """Удалить задачу из очереди"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                cursor = await db.execute("""
-                    DELETE FROM queue_tasks WHERE task_id = ?
-                """, (task_id,))
-                await db.commit()
-                return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Ошибка при удалении задачи: {e}")
-            return False
     
     async def cleanup_completed_queue_tasks(self, hours: int = 24) -> int:
         """Очистить завершенные задачи старше N часов"""
@@ -924,91 +888,6 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при обновлении списка участников: {e}")
             return False
-    
-    async def get_user_saved_participants(self, telegram_id: int) -> Optional[str]:
-        """Получить сохраненный список участников пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Проверяем наличие колонки
-                cursor = await db.execute("PRAGMA table_info(users)")
-                columns = await cursor.fetchall()
-                column_names = [col[1] for col in columns]
-                
-                if 'saved_participants' not in column_names:
-                    return None
-                
-                cursor = await db.execute("""
-                    SELECT saved_participants FROM users WHERE telegram_id = ?
-                """, (telegram_id,))
-                row = await cursor.fetchone()
-                return row[0] if row else None
-        except Exception as e:
-            logger.error(f"Ошибка при получении списка участников: {e}")
-            return None
-    
-    async def save_pending_message(self, user_id: int, chat_id: int, message_type: str, 
-                                 content: str, parse_mode: str = None, reply_markup: str = None,
-                                 file_path: str = None, caption: str = None) -> int:
-        """Сохранить неотправленное сообщение в БД"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                cursor = await db.execute("""
-                    INSERT INTO pending_messages 
-                    (user_id, chat_id, message_type, content, parse_mode, reply_markup, file_path, caption)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (user_id, chat_id, message_type, content, parse_mode, reply_markup, file_path, caption))
-                await db.commit()
-                return cursor.lastrowid
-        except Exception as e:
-            logger.error(f"Ошибка сохранения неотправленного сообщения: {e}")
-            return None
-    
-    async def get_pending_messages(self, user_id: int = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """Получить неотправленные сообщения"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                if user_id:
-                    cursor = await db.execute("""
-                        SELECT * FROM pending_messages 
-                        WHERE user_id = ? 
-                        ORDER BY created_at ASC 
-                        LIMIT ?
-                    """, (user_id, limit))
-                else:
-                    cursor = await db.execute("""
-                        SELECT * FROM pending_messages 
-                        ORDER BY created_at ASC 
-                        LIMIT ?
-                    """, (limit,))
-                
-                rows = await cursor.fetchall()
-                columns = [description[0] for description in cursor.description]
-                return [dict(zip(columns, row)) for row in rows]
-        except Exception as e:
-            logger.error(f"Ошибка получения неотправленных сообщений: {e}")
-            return []
-    
-    async def update_pending_message_retry(self, message_id: int, retry_count: int):
-        """Обновить счетчик попыток отправки"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    UPDATE pending_messages 
-                    SET retry_count = ?, last_retry_at = CURRENT_TIMESTAMP 
-                    WHERE id = ?
-                """, (retry_count, message_id))
-                await db.commit()
-        except Exception as e:
-            logger.error(f"Ошибка обновления счетчика попыток: {e}")
-    
-    async def delete_pending_message(self, message_id: int):
-        """Удалить неотправленное сообщение после успешной отправки"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("DELETE FROM pending_messages WHERE id = ?", (message_id,))
-                await db.commit()
-        except Exception as e:
-            logger.error(f"Ошибка удаления неотправленного сообщения: {e}")
 
 
 # Глобальный экземпляр базы данных

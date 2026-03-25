@@ -19,7 +19,7 @@ from src.performance.cache_system import performance_cache, cache_transcription,
 from src.performance.metrics import metrics_collector, PerformanceTimer, performance_timer, ProcessingMetrics
 from src.performance.async_optimization import (
     task_pool, thread_manager, optimized_file_processing,
-    OptimizedHTTPClient, async_lru_cache
+    OptimizedHTTPClient
 )
 from src.performance.memory_management import memory_optimizer
 from src.reliability.middleware import monitoring_middleware

@@ -34,7 +34,7 @@ except ImportError:
     logger.warning("Groq SDK недоступен")
 
 try:
-    from diarization import diarization_service, DiarizationResult
+    from src.services.diarization_service import diarization_service, DiarizationResult
     DIARIZATION_AVAILABLE = True
 except ImportError:
     DIARIZATION_AVAILABLE = False

@@ -12,8 +12,7 @@ from .metrics import (
 )
 from .async_optimization import (
     task_pool, thread_manager, AsyncTaskPool, ThreadPoolManager,
-    OptimizedHTTPClient, optimized_file_processing, 
-    optimize_io_operations, async_lru_cache
+    OptimizedHTTPClient, optimized_file_processing
 )
 from .memory_management import (
     memory_optimizer, resource_manager, MemoryMonitor,
@@ -43,8 +42,6 @@ __all__ = [
     "ThreadPoolManager", 
     "OptimizedHTTPClient",
     "optimized_file_processing",
-    "optimize_io_operations",
-    "async_lru_cache",
     
     # Memory management
     "memory_optimizer",

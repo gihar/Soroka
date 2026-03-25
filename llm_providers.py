@@ -1197,38 +1197,5 @@ async def generate_protocol(
     )
 
 
-async def generate_protocol_consolidated_simplified(
-    manager: 'LLMManager',
-    provider_name: str,
-    transcription: str,
-    template_variables: Dict[str, str],
-    participants_list: Optional[str] = None,
-    **kwargs
-) -> Dict[str, Any]:
-    """
-    Упрощенная версия консолидированного метода без сложной логики
-    """
-    logger.info("Используем упрощенный консолидированный метод")
-
-    # Извлекаем базовые параметры
-    meeting_metadata = {
-        'meeting_topic': kwargs.get('meeting_topic', ''),
-        'meeting_date': kwargs.get('meeting_date', ''),
-        'meeting_time': kwargs.get('meeting_time', ''),
-        'participants': kwargs.get('participants', participants_list or '')
-    }
-
-    # Используем основной консолидированный метод
-    return await generate_protocol(
-        manager=manager,
-        provider_name=provider_name,
-        transcription=transcription,
-        template_variables=template_variables,
-        participants_list=participants_list,
-        meeting_metadata=meeting_metadata,
-        **kwargs
-    )
-
-
 # Глобальный экземпляр менеджера LLM
 llm_manager = LLMManager()
