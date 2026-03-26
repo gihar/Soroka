@@ -226,14 +226,14 @@ async def cached_response_fallback(cache_key: str = None, *args, **kwargs) -> st
     return "📄 Показываем последний сохраненный результат."
 
 
-def _simplified_extraction_handler(provider=None, transcription: str = "", template_variables: Dict[str, Any] | None = None,
-                                  diarization_data: Dict[str, Any] | None = None, *args, **kwargs) -> Dict[str, str]:
+def _simplified_extraction_handler(provider=None, transcription: str = "", template_variables: Optional[Dict[str, Any]] = None,
+                                  diarization_data: Optional[Dict[str, Any]] = None, *args, **kwargs) -> Dict[str, str]:
     """Обработчик fallback: упрощённое извлечение из транскрипта"""
     return _simple_text_extraction(transcription or "")
 
 
-def _template_only_handler(provider=None, transcription: str = "", template_variables: Dict[str, Any] | None = None,
-                           diarization_data: Dict[str, Any] | None = None, *args, **kwargs) -> Dict[str, str]:
+def _template_only_handler(provider=None, transcription: str = "", template_variables: Optional[Dict[str, Any]] = None,
+                           diarization_data: Optional[Dict[str, Any]] = None, *args, **kwargs) -> Dict[str, str]:
     """Обработчик fallback: только шаблонные поля без анализа"""
     return _template_only_response()
 
