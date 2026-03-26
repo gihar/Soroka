@@ -3,7 +3,7 @@
 """
 
 from .command_handlers import setup_command_handlers
-from .callback_handlers import setup_callback_handlers
+from .callbacks import setup_callback_handlers
 from .message_handlers import setup_message_handlers
 from .template_handlers import setup_template_handlers
 
