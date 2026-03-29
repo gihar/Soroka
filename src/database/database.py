@@ -216,6 +216,9 @@ class Database:
                 )
             """)
             
+            # Миграция: консолидация шаблонов (27 -> 7)
+            await self._consolidate_templates(db)
+
             await db.commit()
             logger.info("База данных инициализирована")
     
@@ -423,6 +426,38 @@ class Database:
                 logger.info(f"Синхронизированы владельцы у {updated} шаблонов")
         except Exception as e:
             logger.warning(f"Не удалось синхронизировать владельцев шаблонов: {e}")
+
+    async def _consolidate_templates(self, db):
+        """One-time migration: reduce templates from 27 to 7, remove categories."""
+        # Check if migration already ran
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM templates WHERE category IS NOT NULL AND category != ''"
+        )
+        row = await cursor.fetchone()
+        if row[0] == 0:
+            return  # Already migrated
+
+        logger.info("Running template consolidation migration (27 -> 7)...")
+
+        # Merge OD template duplicates: redirect history from 31 to 22
+        await db.execute("UPDATE processing_history SET template_id = 22 WHERE template_id = 31")
+
+        # Reset user defaults pointing to templates being deleted
+        deleted_ids = (7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 31)
+        placeholders = ",".join("?" * len(deleted_ids))
+        await db.execute(
+            f"UPDATE users SET default_template_id = NULL WHERE default_template_id IN ({placeholders})",
+            deleted_ids
+        )
+
+        # Delete templates
+        await db.execute(f"DELETE FROM templates WHERE id IN ({placeholders})", deleted_ids)
+
+        # Clear category on remaining templates
+        await db.execute("UPDATE templates SET category = NULL")
+
+        await db.commit()
+        logger.info("Template consolidation migration complete")
 
     async def _ensure_templates_updated_at_column(self, db) -> None:
         cursor = await db.execute("PRAGMA table_info(templates)")
