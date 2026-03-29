@@ -12,6 +12,34 @@ from src.utils.telegram_safe import safe_edit_text
 from .helpers import _safe_callback_answer
 
 
+async def _build_flat_template_keyboard(template_service: TemplateService,
+                                         callback_prefix: str,
+                                         back_button: tuple[str, str] | None = None
+                                         ) -> tuple[InlineKeyboardMarkup, list]:
+    """Build a flat template list keyboard.
+
+    Returns (keyboard, templates) tuple.
+    """
+    templates = await template_service.get_all_templates()
+    templates.sort(key=lambda t: (not t.is_default, t.name))
+
+    keyboard_buttons = [
+        [InlineKeyboardButton(
+            text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+            callback_data=f"{callback_prefix}{t.id}"
+        )] for t in templates
+    ]
+
+    if back_button:
+        keyboard_buttons.append([InlineKeyboardButton(
+            text=back_button[0],
+            callback_data=back_button[1]
+        )])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    return keyboard, templates
+
+
 def setup_template_callbacks(user_service: UserService, template_service: TemplateService,
                               llm_service: EnhancedLLMService, processing_service: ProcessingService) -> Router:
     """Настройка обработчиков callback запросов для выбора шаблонов"""
@@ -22,10 +50,8 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     async def select_template_once_callback(callback: CallbackQuery, state: FSMContext):
         """Разовый выбор шаблона без сохранения по умолчанию"""
         try:
-            # Немедленно отвечаем на callback query
             await _safe_callback_answer(callback)
 
-            # Получаем все шаблоны
             templates = await template_service.get_all_templates()
 
             if not templates:
@@ -36,61 +62,18 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 )
                 return
 
-            # Группируем шаблоны по категориям
-            from collections import defaultdict
-            categories = defaultdict(list)
-            for template in templates:
-                category = template.category or 'general'
-                categories[category].append(template)
-
-            # Создаем клавиатуру с категориями
-            category_names = {
-                'management': '👔 Управленческие',
-                'product': '🚀 Продуктовые',
-                'educational': '📚 Учебные',
-                'technical': '⚙️ Технические',
-                'general': '📋 Общие',
-                'sales': '💼 Продажи'
-            }
-
-            # Порядок отображения категорий
-            category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
-
-            keyboard_buttons = []
-
-            # Сортируем категории согласно заданному порядку
-            sorted_categories = []
-            # Сначала добавляем категории из списка порядка
-            for cat in category_order:
-                if cat in categories:
-                    sorted_categories.append((cat, categories[cat]))
-
-            # Затем добавляем остальные категории (если есть), отсортированные по алфавиту
-            for cat, tmpls in sorted(categories.items()):
-                if cat not in category_order:
-                    sorted_categories.append((cat, tmpls))
-
-            # Добавляем кнопки категорий
-            for category, cat_templates in sorted_categories:
-                category_name = category_names.get(category, f'📁 {category.title()}')
-                keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{category_name} ({len(cat_templates)})",
-                    callback_data=f"select_category_{category}"
-                )])
-
-            # Добавляем кнопку "Все шаблоны"
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="📝 Все шаблоны",
-                callback_data="select_category_all"
-            )])
-
+            templates.sort(key=lambda t: (not t.is_default, t.name))
+            keyboard_buttons = [
+                [InlineKeyboardButton(
+                    text=t.name,
+                    callback_data=f"select_template_id_{t.id}"
+                )] for t in templates
+            ]
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "📋 **Выберите категорию шаблонов:**\n\n"
-                "Выбранный шаблон будет использован только для текущей обработки.",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
+                "📋 **Выберите шаблон:**\n\nШаблон будет использован для текущей обработки.",
+                reply_markup=keyboard, parse_mode="Markdown"
             )
 
         except Exception as e:
@@ -99,52 +82,24 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data.startswith("select_category_"))
     async def select_category_callback(callback: CallbackQuery, state: FSMContext):
-        """Показать шаблоны категории для разового использования"""
+        """Backward-compat: show flat template list (categories removed)"""
         try:
             await _safe_callback_answer(callback)
 
-            category = callback.data.replace("select_category_", "")
+            keyboard, templates = await _build_flat_template_keyboard(
+                template_service,
+                callback_prefix="select_template_id_",
+            )
 
-            # Получаем все шаблоны
-            all_templates = await template_service.get_all_templates()
-
-            # Фильтруем по категории
-            if category == "all":
-                templates = all_templates
-                category_title = "Все шаблоны"
-            else:
-                templates = [t for t in all_templates if (t.category or 'general') == category]
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'educational': '📚 Учебные',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-                category_title = category_names.get(category, category.title())
-
-            # Сортируем шаблоны
-            templates.sort(key=lambda t: (not t.is_default, t.name))
-
-            # Создаем клавиатуру с шаблонами
-            keyboard_buttons = [
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"select_template_id_{t.id}"
-                )] for t in templates
-            ]
-
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="⬅️ Назад к категориям",
-                callback_data="select_template_once"
-            )])
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            if not templates:
+                await safe_edit_text(callback.message,
+                    "❌ **Шаблоны не найдены**\n\nОбратитесь к администратору.",
+                    parse_mode="Markdown"
+                )
+                return
 
             await safe_edit_text(callback.message,
-                f"📋 **{category_title}**\n\n"
-                f"Выберите шаблон ({len(templates)}):",
+                f"📋 **Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -259,51 +214,16 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data.startswith("template_category_"))
     async def template_category_callback(callback: CallbackQuery):
-        """Обработчик выбора категории шаблонов"""
+        """Backward-compat: flat template list for set-default flow (categories removed)"""
         try:
-            category = callback.data.replace("template_category_", "")
-
-            # Получаем все шаблоны
-            all_templates = await template_service.get_all_templates()
-
-            # Фильтруем по категории
-            if category == "all":
-                templates = all_templates
-                category_title = "Все шаблоны"
-            else:
-                templates = [t for t in all_templates if (t.category or 'general') == category]
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'educational': '📚 Учебные',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-                category_title = category_names.get(category, category.title())
-
-            # Сортируем шаблоны: is_default сначала, затем по имени
-            templates.sort(key=lambda t: (not t.is_default, t.name))
-
-            # Создаем клавиатуру с шаблонами
-            keyboard_buttons = [
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"set_default_template_{t.id}"
-                )] for t in templates
-            ]
-
-            keyboard_buttons.extend([
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к категориям",
-                    callback_data="settings_default_template"
-                )]
-            ])
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            keyboard, templates = await _build_flat_template_keyboard(
+                template_service,
+                callback_prefix="set_default_template_",
+                back_button=("⬅️ Назад", "settings_default_template"),
+            )
 
             await safe_edit_text(callback.message,
-                f"📝 **{category_title}**\n\n"
+                f"📝 **Все шаблоны**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон для установки по умолчанию:",
                 reply_markup=keyboard
@@ -316,48 +236,16 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data.startswith("file_template_category_"))
     async def file_template_category_callback(callback: CallbackQuery, state: FSMContext):
-        """Обработчик выбора категории шаблонов для файла"""
+        """Backward-compat: flat template list for file flow (categories removed)"""
         try:
-            category = callback.data.replace("file_template_category_", "")
-
-            # Получаем все шаблоны
-            all_templates = await template_service.get_all_templates()
-
-            # Фильтруем по категории
-            if category == "all":
-                templates = all_templates
-                category_title = "Все шаблоны"
-            else:
-                templates = [t for t in all_templates if (t.category or 'general') == category]
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-                category_title = category_names.get(category, category.title())
-
-            # Сортируем шаблоны: is_default сначала, затем по имени
-            templates.sort(key=lambda t: (not t.is_default, t.name))
-
-            # Создаем клавиатуру с шаблонами
-            keyboard_buttons = [
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"select_template_{t.id}"
-                )] for t in templates
-            ]
-
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="⬅️ Назад к категориям",
-                callback_data="back_to_template_categories"
-            )])
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            keyboard, templates = await _build_flat_template_keyboard(
+                template_service,
+                callback_prefix="select_template_",
+                back_button=("⬅️ Назад", "back_to_template_categories"),
+            )
 
             await safe_edit_text(callback.message,
-                f"📝 **{category_title}**\n\n"
+                f"📝 **Все шаблоны**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон:",
                 reply_markup=keyboard
@@ -370,25 +258,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data == "back_to_template_categories")
     async def back_to_template_categories_callback(callback: CallbackQuery, state: FSMContext):
-        """Возврат к выбору категорий шаблонов"""
+        """Возврат к плоскому списку шаблонов (categories removed)"""
         try:
             templates = await template_service.get_all_templates()
-
-            # Группируем шаблоны по категориям
-            from collections import defaultdict
-            categories = defaultdict(list)
-            for template in templates:
-                category = template.category or 'general'
-                categories[category].append(template)
-
-            # Создаем клавиатуру с категориями
-            category_names = {
-                'management': '👔 Управленческие',
-                'product': '🚀 Продуктовые',
-                'technical': '⚙️ Технические',
-                'general': '📋 Общие',
-                'sales': '💼 Продажи'
-            }
+            templates.sort(key=lambda t: (not t.is_default, t.name))
 
             keyboard_buttons = []
 
@@ -398,26 +271,18 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 callback_data="smart_template_selection"
             )])
 
-            # Добавляем категории
-            for category, cat_templates in sorted(categories.items()):
-                category_name = category_names.get(category, f'📁 {category.title()}')
+            # Плоский список шаблонов
+            for t in templates:
                 keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{category_name} ({len(cat_templates)})",
-                    callback_data=f"file_template_category_{category}"
+                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    callback_data=f"select_template_{t.id}"
                 )])
-
-            # Добавляем кнопку "Все шаблоны"
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="📝 Все шаблоны",
-                callback_data="file_template_category_all"
-            )])
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
                 "📝 **Выберите шаблон для протокола:**\n\n"
-                "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
-                "📁 **Категории** - выберите тип встречи",
+                "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -554,51 +419,18 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data.startswith("quick_category_"))
     async def quick_category_callback(callback: CallbackQuery, state: FSMContext):
-        """Обработчик выбора категории для быстрой установки шаблона"""
+        """Backward-compat: flat template list for quick-set flow (categories removed)"""
         try:
             await _safe_callback_answer(callback)
 
-            category = callback.data.replace("quick_category_", "")
-
-            # Получаем все шаблоны
-            all_templates = await template_service.get_all_templates()
-
-            # Фильтруем по категории
-            if category == "all":
-                templates = all_templates
-                category_title = "Все шаблоны"
-            else:
-                templates = [t for t in all_templates if (t.category or 'general') == category]
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-                category_title = category_names.get(category, category.title())
-
-            # Сортируем шаблоны
-            templates.sort(key=lambda t: (not t.is_default, t.name))
-
-            # Создаем клавиатуру с шаблонами
-            keyboard_buttons = [
-                [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
-                    callback_data=f"quick_template_{t.id}"
-                )] for t in templates
-            ]
-
-            keyboard_buttons.append([InlineKeyboardButton(
-                text="⬅️ Назад к категориям",
-                callback_data="quick_set_default"
-            )])
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            keyboard, templates = await _build_flat_template_keyboard(
+                template_service,
+                callback_prefix="quick_template_",
+                back_button=("⬅️ Назад", "quick_set_default"),
+            )
 
             await safe_edit_text(callback.message,
-                f"⚙️ **{category_title}**\n\n"
-                f"Выберите шаблон ({len(templates)}):",
+                f"⚙️ **Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
