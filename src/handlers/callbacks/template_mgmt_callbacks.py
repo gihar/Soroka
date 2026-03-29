@@ -20,58 +20,33 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
     @router.callback_query(F.data.startswith("view_template_category_"))
     async def view_template_category_callback(callback: CallbackQuery):
-        """Обработчик просмотра шаблонов по категории"""
+        """Show flat template list for viewing (backward-compat for category callbacks)"""
         try:
-            category = callback.data.replace("view_template_category_", "")
-
-            # Получаем все шаблоны
-            all_templates = await template_service.get_all_templates()
-
-            # Фильтруем по категории
-            if category == "all":
-                templates = all_templates
-                category_title = "Все шаблоны"
-            else:
-                templates = [t for t in all_templates if (t.category or 'general') == category]
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-                category_title = category_names.get(category, category.title())
-
-            # Сортируем шаблоны: is_default сначала, затем по имени
+            templates = await template_service.get_all_templates()
             templates.sort(key=lambda t: (not t.is_default, t.name))
 
-            # Создаем клавиатуру с шаблонами
             keyboard_buttons = [
                 [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    text=t.name,
                     callback_data=f"view_template_{t.id}"
                 )] for t in templates
             ]
-
-            keyboard_buttons.extend([
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к категориям",
-                    callback_data="back_to_templates"
-                )]
-            ])
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data="back_to_templates"
+            )])
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
             await safe_edit_text(callback.message,
-                f"📝 **{category_title}**\n\n"
-                f"Найдено шаблонов: {len(templates)}",
-                reply_markup=keyboard
+                f"📝 **Шаблоны** ({len(templates)})",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
             )
             await callback.answer()
 
         except Exception as e:
             logger.error(f"Ошибка в view_template_category_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке шаблонов")
+            await callback.answer("❌ Ошибка при загрузке шаблонов")
 
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
