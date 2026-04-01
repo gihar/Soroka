@@ -243,76 +243,50 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                     reply_markup=keyboard
                 )
             else:
-                # Группируем шаблоны по категориям
-                from collections import defaultdict
-                categories = defaultdict(list)
-                for template in all_templates:
-                    category = template.category or 'general'
-                    categories[category].append(template)
-
-                # Создаем клавиатуру с категориями
-                category_names = {
-                    'management': '👔 Управленческие',
-                    'product': '🚀 Продуктовые',
-                    'educational': '📚 Учебные',
-                    'technical': '⚙️ Технические',
-                    'general': '📋 Общие',
-                    'sales': '💼 Продажи'
-                }
-
-                # Порядок отображения категорий
-                category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
-
+                # Flat template list in 2 columns, no categories
                 keyboard_buttons = []
 
-                # ПЕРВАЯ кнопка - Умный выбор (рекомендуется)
+                # Smart selection — full width
                 keyboard_buttons.append([InlineKeyboardButton(
                     text="🤖 Умный выбор (рекомендуется)",
-                    callback_data="set_default_template_0"  # 0 = умный выбор
+                    callback_data="set_default_template_0"
                 )])
 
-                # Сортируем категории согласно заданному порядку
-                sorted_categories = []
-                # Сначала добавляем категории из списка порядка
-                for cat in category_order:
-                    if cat in categories:
-                        sorted_categories.append((cat, categories[cat]))
+                # Templates in 2-column grid
+                # Default templates first, then alphabetical
+                sorted_templates = sorted(
+                    all_templates,
+                    key=lambda t: (not t.is_default, t.name)
+                )
 
-                # Затем добавляем остальные категории (если есть), отсортированные по алфавиту
-                for cat, tmpls in sorted(categories.items()):
-                    if cat not in category_order:
-                        sorted_categories.append((cat, tmpls))
+                row = []
+                for template in sorted_templates:
+                    star = "⭐ " if template.is_default else ""
+                    row.append(InlineKeyboardButton(
+                        text=f"{star}{template.name}",
+                        callback_data=f"set_default_template_{template.id}"
+                    ))
+                    if len(row) == 2:
+                        keyboard_buttons.append(row)
+                        row = []
+                if row:
+                    keyboard_buttons.append(row)
 
-                # Категории шаблонов
-                for category, tmpls in sorted_categories:
-                    category_name = category_names.get(category, f'📁 {category.title()}')
-                    keyboard_buttons.append([InlineKeyboardButton(
-                        text=f"{category_name} ({len(tmpls)})",
-                        callback_data=f"template_category_{category}"
-                    )])
-
-                keyboard_buttons.extend([
-                    [InlineKeyboardButton(
-                        text="📝 Все шаблоны",
-                        callback_data="template_category_all"
-                    )],
-                    [InlineKeyboardButton(
-                        text="🔄 Сбросить шаблон по умолчанию",
-                        callback_data="reset_default_template"
-                    )],
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings"
-                    )]
-                ])
+                # Footer buttons
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text="🔄 Сбросить шаблон по умолчанию",
+                    callback_data="reset_default_template"
+                )])
+                keyboard_buttons.append([InlineKeyboardButton(
+                    text="⬅️ Назад к настройкам",
+                    callback_data="back_to_settings"
+                )])
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
                 await safe_edit_text(callback.message,
                     "📝 **Шаблон по умолчанию**\n\n"
-                    "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
-                    "📁 **Категории** - выберите конкретный шаблон\n\n"
-                    "Выберите режим работы:",
+                    "Выберите шаблон или доверьте выбор ИИ:",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
                 )
