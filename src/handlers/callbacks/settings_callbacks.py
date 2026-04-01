@@ -235,6 +235,72 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.error(f"Ошибка в settings_reset_callback: {e}")
             await callback.answer("❌ Произошла ошибка при сбросе настроек")
 
+    @router.callback_query(F.data == "settings_stats")
+    async def settings_stats_callback(callback: CallbackQuery):
+        """Показ статистики из меню настроек"""
+        try:
+            from database import db
+            from reliability.middleware import monitoring_middleware
+            from datetime import datetime
+
+            user_stats = await db.get_user_stats(callback.from_user.id)
+            system_stats = monitoring_middleware.get_stats()
+
+            if user_stats:
+                total_files = user_stats.get('total_files', 0)
+                active_days = user_stats.get('active_days', 0)
+                favorite_templates = user_stats.get('favorite_templates', [])
+                llm_providers = user_stats.get('llm_providers', [])
+
+                stats_text = "📊 **Ваша статистика**\n\n"
+                stats_text += f"🔄 **Обработано файлов:** {total_files}\n"
+                stats_text += f"📅 **Активных дней:** {active_days}\n"
+
+                if user_stats.get('first_file_date'):
+                    try:
+                        first_date = datetime.fromisoformat(
+                            user_stats['first_file_date'].replace('Z', '+00:00')
+                        )
+                        days_since = (datetime.now() - first_date.replace(tzinfo=None)).days
+                        stats_text += f"🎯 **Дней с начала:** {days_since}\n"
+                    except Exception:
+                        pass
+
+                if favorite_templates:
+                    stats_text += "\n📝 **Популярные шаблоны:**\n"
+                    for t in favorite_templates[:3]:
+                        stats_text += f"• {t['name']}: {t['count']} раз\n"
+
+                if llm_providers:
+                    stats_text += "\n🤖 **AI модели:**\n"
+                    for p in llm_providers[:3]:
+                        name = p['llm_provider'].title() if p['llm_provider'] else '?'
+                        stats_text += f"• {name}: {p['count']} раз\n"
+            else:
+                stats_text = "📊 **Статистика**\n\nОбработано файлов: 0\n🚀 Отправьте файл для обработки!\n"
+
+            # System stats only for admins
+            from src.utils.admin_utils import is_admin
+            if is_admin(callback.from_user.id):
+                stats_text += (
+                    f"\n🌐 **Система:**\n"
+                    f"• Запросов: {system_stats.get('total_requests', 0)}\n"
+                    f"• Пользователей: {system_stats.get('active_users', 0)}\n"
+                    f"• Среднее время: {system_stats.get('average_processing_time', 0):.1f}с\n"
+                )
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+            ])
+
+            await safe_edit_text(callback.message, stats_text,
+                                reply_markup=keyboard, parse_mode="Markdown")
+            await callback.answer()
+
+        except Exception as e:
+            logger.error(f"Ошибка в settings_stats_callback: {e}")
+            await callback.answer("❌ Ошибка при загрузке статистики")
+
     @router.callback_query(F.data == "back_to_settings")
     async def back_to_settings_callback(callback: CallbackQuery):
         """Обработчик возврата к главному меню настроек"""

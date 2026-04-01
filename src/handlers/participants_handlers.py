@@ -7,6 +7,7 @@ from typing import Optional, Dict
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 from loguru import logger
 
 from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
@@ -22,14 +23,8 @@ async def show_participants_menu(message: Message, user_service: UserService):
         user = await user_service.get_user_by_telegram_id(message.from_user.id)
         
         keyboard_buttons = []
-        
-        # Кнопка для ввода нового списка
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="✍️ Ввести новый список",
-            callback_data="input_new_participants"
-        )])
-        
-        # Если есть сохраненный список - показываем кнопку
+
+        # Saved participants — show first if available
         if user and user.saved_participants:
             try:
                 saved = participants_service.participants_from_json(user.saved_participants)
@@ -40,45 +35,25 @@ async def show_participants_menu(message: Message, user_service: UserService):
                     )])
             except Exception:
                 pass
-        
-        # Кнопка для загрузки файла
+
+        # Add new participants
         keyboard_buttons.append([InlineKeyboardButton(
-            text="📎 Загрузить файл (.txt, .csv)",
-            callback_data="upload_participants_file"
-        )])
-        
-        # Кнопка автоматического извлечения
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="🔍 Автоматически извлечь из текста",
-            callback_data="auto_extract_meeting_info"
+            text="👥 Добавить участников",
+            callback_data="input_new_participants"
         )])
 
-        # Кнопка добавления дополнительной информации
+        # Skip
         keyboard_buttons.append([InlineKeyboardButton(
-            text="📝 Добавить доп. информацию",
-            callback_data="add_protocol_info"
-        )])
-
-        # Кнопка пропуска
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="⏭ Пропустить (без имен)",
+            text="⏭ Без участников",
             callback_data="skip_participants"
         )])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-        
+
         message_text = (
-            "👥 **Добавление участников встречи**\n\n"
-            "Вы можете указать список участников для более точного протокола. "
-            "ИИ автоматически сопоставит говорящих с участниками.\n\n"
-            "**Способы добавления:**\n\n"
-            "🔍 **Автоматически извлечь** - из email или текста с информацией о встрече\n\n"
-            "📝 **Ручной ввод** - текст или файл:\n"
-            "• Текст (один участник на строку):\n"
-            "  `Иван Петров, менеджер`\n"
-            "  `Мария Иванова`\n\n"
-            "• Файл .txt или .csv\n\n"
-            "Выберите действие:"
+            "👥 **Участники встречи**\n\n"
+            "Укажите участников для точной атрибуции в протоколе.\n"
+            "Введите имена в любом формате — по одному на строку."
         )
         
         await message.answer(
@@ -667,7 +642,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при обработке ввода доп. информации: {e}")
 
-    @router.message(F.state.in_state({ProtocolInfoState.waiting_agenda, ProtocolInfoState.waiting_project_list}))
+    @router.message(StateFilter(ProtocolInfoState.waiting_agenda, ProtocolInfoState.waiting_project_list))
     async def handle_protocol_info_text(message: Message, state: FSMContext):
         """Handle text input for protocol information"""
         try:
@@ -681,11 +656,8 @@ def setup_participants_handlers() -> Router:
                 user_data.setdefault('protocol_info', {})['project_list'] = message.text
 
             await state.set_data(user_data)
-            await state.clear()
+            await state.set_state(None)  # exit FSM state, keep file data intact
 
-            # Show protocol info menu again for more input
-            # For now, we'll go back to participants menu
-            # In a real implementation, you might want to keep track of the context
             await show_participants_menu(message, user_service)
 
         except Exception as e:
@@ -696,9 +668,8 @@ def setup_participants_handlers() -> Router:
         """When user finishes entering protocol info"""
         try:
             await callback.answer()
-            # Store protocol info and return to participants menu
-            user_data = await state.get_data()
-            await state.clear()
+            # Return to participants menu, keep file data intact
+            await state.set_state(None)
 
             await show_participants_menu(callback.message, user_service)
 
@@ -710,7 +681,7 @@ def setup_participants_handlers() -> Router:
         """When user skips protocol info input"""
         try:
             await callback.answer()
-            await state.clear()
+            await state.set_state(None)  # keep file data intact
             await show_participants_menu(callback.message, user_service)
 
         except Exception as e:

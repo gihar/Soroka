@@ -26,12 +26,8 @@ class QuickActionsUI:
         
         keyboard = [
             [
-                KeyboardButton(text="📤 Загрузить файл"),
-                KeyboardButton(text="📝 Мои шаблоны")
-            ],
-            [
-                KeyboardButton(text="⚙️ Настройки"),
-                KeyboardButton(text="📊 Статистика")
+                KeyboardButton(text="📝 Мои шаблоны"),
+                KeyboardButton(text="⚙️ Настройки")
             ],
             [
                 KeyboardButton(text="❓ Помощь"),
@@ -156,12 +152,18 @@ class QuickActionsUI:
             ],
             [
                 InlineKeyboardButton(
+                    text="📊 Статистика",
+                    callback_data="settings_stats"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔄 Сбросить настройки",
                     callback_data="settings_reset"
                 )
             ]
         ]
-        
+
         return InlineKeyboardMarkup(inline_keyboard=buttons)
     
     @staticmethod
@@ -428,29 +430,24 @@ def setup_quick_actions_handlers() -> Router:
                         provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
                         stats_text += f"• {provider_name}: {provider['count']} раз\n"
                 
-                # Системная статистика
-                stats_text += f"\n🌐 **Общая статистика системы:**\n"
-                stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
-                stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
-                stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
-                
-                if system_stats.get('error_rate', 0) > 0:
-                    stats_text += f"• Процент ошибок: {system_stats.get('error_rate', 0):.1f}%\n"
-                else:
-                    stats_text += f"• ✅ Система работает стабильно\n"
-                
+                # System stats only for admins
+                from src.utils.admin_utils import is_admin
+                if is_admin(message.from_user.id):
+                    stats_text += f"\n🌐 **Общая статистика системы:**\n"
+                    stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
+                    stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
+                    stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
+                    if system_stats.get('error_rate', 0) > 0:
+                        stats_text += f"• Процент ошибок: {system_stats.get('error_rate', 0):.1f}%\n"
+                    else:
+                        stats_text += f"• ✅ Система работает стабильно\n"
+
             else:
-                # Новый пользователь
-                stats_text = f"📊 **Добро пожаловать!**\n\n"
-                stats_text += f"🔄 **Обработано файлов:** 0\n"
-                stats_text += f"📅 **Активных дней:** 0\n\n"
-                stats_text += f"🚀 Отправьте свой первый файл для обработки!\n\n"
-                
-                # Системная статистика для новых пользователей
-                stats_text += f"🌐 **Статистика системы:**\n"
-                stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
-                stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
-                stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
+                stats_text = (
+                    "📊 **Статистика**\n\n"
+                    "🔄 **Обработано файлов:** 0\n"
+                    "🚀 Отправьте свой первый файл для обработки!"
+                )
             
             await message.answer(stats_text, parse_mode="Markdown")
             

@@ -83,11 +83,24 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
             logger.info(f"Файл сохранен в состояние: file_id={file_obj.file_id}, file_name={file_name}")
             
-            # Показываем детальное меню добавления участников
-            from src.handlers.participants_handlers import show_participants_menu
-            from services import UserService
-            user_service = UserService()
-            await show_participants_menu(message, user_service)
+            # Show quick action menu: fast process or configure
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🚀 Быстрая обработка",
+                    callback_data="quick_process_file"
+                )],
+                [InlineKeyboardButton(
+                    text="⚙️ Настроить",
+                    callback_data="configure_file_processing"
+                )]
+            ])
+            await message.answer(
+                "📎 **Файл получен**\n\n"
+                "🚀 **Быстрая обработка** — умный шаблон + сохранённые настройки\n"
+                "⚙️ **Настроить** — выбрать участников, шаблон, ИИ",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")

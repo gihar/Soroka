@@ -224,6 +224,67 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             logger.error(f"Ошибка в set_transcription_mode_callback: {e}")
             await callback.answer("❌ Произошла ошибка при изменении режима транскрипции")
 
+    @router.callback_query(F.data == "quick_process_file")
+    async def quick_process_file_callback(callback: CallbackQuery, state: FSMContext):
+        """Quick process: skip participants/template/LLM selection, use defaults"""
+        try:
+            data = await state.get_data()
+            has_file = (data.get('file_id') or data.get('file_path')) and data.get('file_name')
+            if not has_file:
+                await callback.answer("❌ Файл не найден. Отправьте файл заново.")
+                return
+
+            # Get user preferences
+            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+
+            # Template: user's default or smart selection (0)
+            template_id = 0
+            if user and getattr(user, 'default_template_id', None):
+                template_id = user.default_template_id
+
+            # LLM: user's preferred or first available
+            available = llm_service.get_available_providers()
+            if not available:
+                await safe_edit_text(callback.message,
+                    "❌ Нет доступных LLM провайдеров.")
+                return
+
+            llm_provider = None
+            if user and user.preferred_llm and user.preferred_llm in available:
+                llm_provider = user.preferred_llm
+            else:
+                llm_provider = next(iter(available))
+
+            # Set state and process
+            await state.update_data(
+                template_id=template_id,
+                use_smart_selection=(template_id == 0),
+                llm_provider=llm_provider,
+                participants_list=None
+            )
+
+            await safe_edit_text(callback.message,
+                "🚀 **Быстрая обработка**\n\n⏳ Начинаю обработку...")
+            await _safe_callback_answer(callback)
+            await _process_file(callback, state, processing_service)
+
+        except Exception as e:
+            logger.error(f"Ошибка в quick_process_file_callback: {e}")
+            await callback.answer("❌ Ошибка при запуске обработки")
+
+    @router.callback_query(F.data == "configure_file_processing")
+    async def configure_file_processing_callback(callback: CallbackQuery):
+        """Configure: show participants menu (full flow)"""
+        try:
+            from src.handlers.participants_handlers import show_participants_menu
+            # Remove original keyboard to prevent re-triggering quick_process
+            await safe_edit_text(callback.message, "⚙️ Настройка обработки...")
+            await show_participants_menu(callback.message, user_service)
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в configure_file_processing_callback: {e}")
+            await callback.answer("❌ Ошибка при загрузке настроек")
+
     @router.callback_query(F.data.startswith("cancel_task_"))
     async def cancel_task_handler(callback: CallbackQuery, state: FSMContext):
         """Обработчик отмены задачи"""
