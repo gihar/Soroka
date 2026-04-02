@@ -5,7 +5,6 @@
 import os
 import asyncio
 import tempfile
-import whisper
 import httpx
 import shutil
 import psutil
@@ -18,13 +17,20 @@ from src.exceptions.processing import TranscriptionError, CloudTranscriptionErro
 from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
 
-# Leopard (Picovoice) STT
-try:
-    import pvleopard
-    LEOPARD_AVAILABLE = True
-except ImportError:
-    LEOPARD_AVAILABLE = False
-    logger.warning("pvleopard (Leopard STT) недоступен")
+# Leopard (Picovoice) STT — lazy import for faster startup
+LEOPARD_AVAILABLE = None  # resolved on first use
+
+
+def _check_leopard_available():
+    global LEOPARD_AVAILABLE
+    if LEOPARD_AVAILABLE is None:
+        try:
+            import pvleopard  # noqa: F401
+            LEOPARD_AVAILABLE = True
+        except ImportError:
+            LEOPARD_AVAILABLE = False
+            logger.warning("pvleopard (Leopard STT) недоступен")
+    return LEOPARD_AVAILABLE
 
 try:
     from groq import Groq
@@ -105,6 +111,7 @@ class TranscriptionService:
                 logger.warning(f"Высокое использование памяти при загрузке модели: {memory_status['system']['percent']:.1f}%")
             
             try:
+                import whisper
                 self.whisper_model = whisper.load_model(model_size)
                 logger.info("Модель Whisper загружена")
             except Exception as e:
@@ -480,7 +487,7 @@ class TranscriptionService:
 
     async def _transcribe_with_leopard(self, file_path: str) -> tuple[str, dict]:
         """Транскрипция через Picovoice Leopard (локально)"""
-        if not LEOPARD_AVAILABLE:
+        if not _check_leopard_available():
             raise TranscriptionError("pvleopard не установлен", file_path)
         if not settings.picovoice_access_key:
             raise TranscriptionError("PICOVOICE_ACCESS_KEY не задан", file_path)
@@ -496,6 +503,7 @@ class TranscriptionService:
                 if getattr(settings, "leopard_model_path", None):
                     create_kwargs["model_path"] = settings.leopard_model_path
 
+                import pvleopard
                 leopard = pvleopard.create(**create_kwargs)
                 transcript, _words = leopard.process_file(path)
                 return transcript.strip()
