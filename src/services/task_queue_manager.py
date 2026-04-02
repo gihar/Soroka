@@ -449,8 +449,8 @@ class TaskQueueManager:
                         import tempfile as tmp
                         temp_path = tmp.mktemp(suffix='.pdf')
                         try:
-                            from src.utils.pdf_converter import convert_markdown_to_pdf
-                            convert_markdown_to_pdf(result.protocol_text, temp_path)
+                            from src.utils.pdf_converter import convert_markdown_to_pdf_async
+                            await convert_markdown_to_pdf_async(result.protocol_text, temp_path)
                         except Exception as e:
                             logger.error(f"Ошибка конвертации в PDF: {e}")
                             # Если не получилось, сохраняем как markdown файл

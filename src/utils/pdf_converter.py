@@ -259,3 +259,9 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
             story.append(Paragraph(_format_inline(stripped), styles['Body']))
 
     doc.build(story)
+
+
+async def convert_markdown_to_pdf_async(markdown_text: str, output_path: str) -> None:
+    """Async wrapper — runs PDF generation in thread pool to avoid blocking event loop."""
+    from src.performance.async_optimization import thread_manager
+    await thread_manager.run_in_thread(convert_markdown_to_pdf, markdown_text, output_path)
