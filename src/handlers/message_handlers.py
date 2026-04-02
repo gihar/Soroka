@@ -16,7 +16,6 @@ from services import FileService, TemplateService, ProcessingService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.exceptions.template import TemplateNotFoundError
-from src.utils.pdf_converter import convert_markdown_to_pdf
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 

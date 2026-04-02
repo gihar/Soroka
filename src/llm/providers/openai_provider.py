@@ -98,7 +98,7 @@ class OpenAIProvider(LLMProvider):
                 user_prompt=analysis_user_prompt,
                 schema=MEETING_ANALYSIS_SCHEMA,
                 step_name="Analysis",
-                model=selected_model
+                model=settings.analysis_stage_model
             )
 
             meeting_type = analysis_result.get('meeting_type', 'general')
@@ -109,7 +109,7 @@ class OpenAIProvider(LLMProvider):
         # Stage 2: Generation
         logger.info("Запуск ЭТАПА 2: Генерация протокола")
 
-        generation_system_prompt = build_generation_system_prompt()
+        generation_system_prompt = build_generation_system_prompt(template_variables=template_variables)
         generation_user_prompt = build_generation_prompt(
             transcription=analysis_transcription,
             template_variables=template_variables,

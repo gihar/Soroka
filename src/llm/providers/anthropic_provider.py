@@ -94,7 +94,7 @@ class AnthropicProvider(LLMProvider):
         # Stage 2: Generation
         logger.info("[Anthropic] Запуск ЭТАПА 2: Генерация протокола")
 
-        generation_system_prompt = build_generation_system_prompt()
+        generation_system_prompt = build_generation_system_prompt(template_variables=template_variables)
         generation_user_prompt = build_generation_prompt(
             transcription=analysis_transcription,
             template_variables=template_variables,

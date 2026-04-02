@@ -331,7 +331,7 @@ class ProcessingService(BaseProcessingService):
                 temp_file_path, request, processing_metrics, progress_tracker
             )
 
-            # Этап 2.3: Сопоставление спикеров с участниками
+            # Этап 2.3 + 2.5: Параллельное выполнение speaker mapping и выбора шаблона
             logger.info(
                 f"Проверка условий для speaker mapping: "
                 f"participants_list={request.participants_list is not None} "
@@ -339,82 +339,25 @@ class ProcessingService(BaseProcessingService):
                 f"diarization={transcription_result.diarization is not None}"
             )
 
-            request_meeting_type = None
-
-            if request.participants_list and transcription_result.diarization:
-                try:
-                    from src.services.speaker_mapping_service import speaker_mapping_service
-
-                    logger.info(
-                        f"НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ И ОПРЕДЕЛЕНИЯ ТИПА ВСТРЕЧИ: "
-                        f"{len(request.participants_list)} участников"
-                    )
-                    logger.info("Список участников для сопоставления:")
-                    for i, p in enumerate(request.participants_list[:5], 1):
-                        logger.info(f"  {i}. {p.get('name')} ({p.get('role', 'без роли')})")
-                    if len(request.participants_list) > 5:
-                        logger.info(
-                            f"  ... и еще {len(request.participants_list) - 5} участников"
-                        )
-
-                    speaker_mapping, meeting_type = (
-                        await speaker_mapping_service.map_speakers_to_participants(
-                            diarization_data=transcription_result.diarization,
-                            participants=request.participants_list,
-                            transcription_text=transcription_result.transcription,
-                            llm_provider=request.llm_provider,
-                        )
-                    )
-
-                    logger.info(
-                        f"СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров "
-                        f"сопоставлено, тип встречи: {meeting_type}"
-                    )
-                    if speaker_mapping:
-                        logger.info("Результаты сопоставления:")
-                        for speaker_id, name in speaker_mapping.items():
-                            logger.info(f"  {speaker_id} -> {name}")
-                    else:
-                        logger.warning(
-                            "Speaker mapping вернул пустой результат - "
-                            "протокол будет генерироваться без сопоставления спикеров"
-                        )
-
-                    # Проверяем, нужно ли показывать UI подтверждения
-                    if settings.enable_speaker_mapping_confirmation:
-                        pause_result = await self._handle_speaker_mapping_confirmation(
-                            request, transcription_result, speaker_mapping,
-                            meeting_type, temp_file_path, processing_metrics,
-                            progress_tracker,
-                        )
-                        if pause_result is None:
-                            # Обработка приостановлена
-                            return None
-                    else:
-                        logger.warning(
-                            "UI подтверждения включен, но progress_tracker отсутствует "
-                            "- продолжаю без паузы"
-                        )
-
-                    request.speaker_mapping = speaker_mapping
-                    request_meeting_type = meeting_type
-
-                except Exception as e:
-                    logger.error(
-                        f"ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True
-                    )
-                    request.speaker_mapping = None
-            else:
-                if not request.participants_list:
-                    logger.info("Speaker mapping пропущен: список участников не предоставлен")
-                elif not transcription_result.diarization:
-                    logger.warning("Speaker mapping пропущен: диаризация не выполнена")
-                request.speaker_mapping = None
-
-            # Этап 2.5: Умный выбор шаблона после транскрипции
-            template = await self._suggest_template_if_needed(
-                request, transcription_result, progress_tracker
+            mapping_result, template = await asyncio.gather(
+                self._run_speaker_mapping(request, transcription_result),
+                self._suggest_template_if_needed(request, transcription_result, progress_tracker),
             )
+
+            # Обработка результатов speaker mapping
+            speaker_mapping, request_meeting_type = mapping_result
+            if speaker_mapping:
+                if settings.enable_speaker_mapping_confirmation:
+                    pause_result = await self._handle_speaker_mapping_confirmation(
+                        request, transcription_result, speaker_mapping,
+                        request_meeting_type, temp_file_path, processing_metrics,
+                        progress_tracker,
+                    )
+                    if pause_result is None:
+                        return None
+                request.speaker_mapping = speaker_mapping
+            else:
+                request.speaker_mapping = None
 
             if not template:
                 raise ProcessingError(
@@ -1008,6 +951,72 @@ class ProcessingService(BaseProcessingService):
                     "unknown",
                     "unexpected_error",
                 )
+
+    # ------------------------------------------------------------------
+    # Speaker mapping (extracted for parallel execution)
+    # ------------------------------------------------------------------
+
+    async def _run_speaker_mapping(
+        self,
+        request: ProcessingRequest,
+        transcription_result: Any,
+    ) -> tuple:
+        """Run speaker mapping if conditions are met.
+
+        Returns (speaker_mapping, meeting_type) or ({}, None).
+        """
+        if not (request.participants_list and transcription_result.diarization):
+            if not request.participants_list:
+                logger.info("Speaker mapping пропущен: список участников не предоставлен")
+            elif not transcription_result.diarization:
+                logger.warning("Speaker mapping пропущен: диаризация не выполнена")
+            return ({}, None)
+
+        try:
+            from src.services.speaker_mapping_service import speaker_mapping_service
+
+            logger.info(
+                f"НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ И ОПРЕДЕЛЕНИЯ ТИПА ВСТРЕЧИ: "
+                f"{len(request.participants_list)} участников"
+            )
+            logger.info("Список участников для сопоставления:")
+            for i, p in enumerate(request.participants_list[:5], 1):
+                logger.info(f"  {i}. {p.get('name')} ({p.get('role', 'без роли')})")
+            if len(request.participants_list) > 5:
+                logger.info(
+                    f"  ... и еще {len(request.participants_list) - 5} участников"
+                )
+
+            speaker_mapping, meeting_type = (
+                await speaker_mapping_service.map_speakers_to_participants(
+                    diarization_data=transcription_result.diarization,
+                    participants=request.participants_list,
+                    transcription_text=transcription_result.transcription,
+                    llm_provider=request.llm_provider,
+                )
+            )
+
+            logger.info(
+                f"СОПОСТАВЛЕНИЕ ЗАВЕРШЕНО: {len(speaker_mapping)} спикеров "
+                f"сопоставлено, тип встречи: {meeting_type}"
+            )
+            if speaker_mapping:
+                logger.info("Результаты сопоставления:")
+                for speaker_id, name in speaker_mapping.items():
+                    logger.info(f"  {speaker_id} -> {name}")
+            else:
+                logger.warning(
+                    "Speaker mapping вернул пустой результат - "
+                    "протокол будет генерироваться без сопоставления спикеров"
+                )
+
+            return (speaker_mapping, meeting_type)
+
+        except Exception as e:
+            logger.error(
+                f"ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True
+            )
+            return ({}, None)
 
     # ------------------------------------------------------------------
     # Template suggestion
