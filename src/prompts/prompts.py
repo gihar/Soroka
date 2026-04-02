@@ -330,7 +330,6 @@ def build_generation_prompt(
     """
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     type_instructions = _get_type_specific_instructions(meeting_type)
-    field_rules = _build_field_specific_rules(template_variables)
 
     parts = [f"Извлеки данные из транскрипции для протокола. Тип встречи: {meeting_type}"]
 
@@ -348,14 +347,11 @@ def build_generation_prompt(
         mapping_str = "\n".join([f"{k} = {v}" for k, v in speaker_mapping.items()])
         parts.append(f"<speakers>\n{mapping_str}\n</speakers>")
 
-    # Fields and rules
+    # Fields (rules are now in system prompt for caching)
     parts.append(f"<fields>\n{variables_str}\n</fields>")
 
     if type_instructions:
         parts.append(type_instructions.strip())
-
-    if field_rules:
-        parts.append(f"<field_rules>\n{field_rules}\n</field_rules>")
 
     # Transcription last (largest block)
     parts.append(f"<transcription>\n{transcription}\n</transcription>")
@@ -365,12 +361,17 @@ def build_generation_prompt(
     return "\n\n".join(parts)
 
 
-def build_generation_system_prompt() -> str:
+def build_generation_system_prompt(
+    template_variables: Optional[Dict[str, str]] = None,
+) -> str:
     """
     Системный промпт для второго запроса (извлечение данных).
-    Compact, primacy zone structure aligned with single-pass system prompt.
+
+    Field-specific rules are included in the system prompt (stable per template)
+    so that OpenAI can cache the prefix and reduce token costs on repeated calls
+    with the same template.
     """
-    return (
+    base = (
         "Ты — профессиональный протоколист. Извлекай данные из транскрипции "
         "и заполняй поля протокола.\n\n"
 
@@ -394,6 +395,13 @@ def build_generation_system_prompt() -> str:
         "- decisions, tasks — точные формулировки с ответственными\n"
         "- participants — полный список"
     )
+
+    if template_variables:
+        field_rules = _build_field_specific_rules(template_variables)
+        if field_rules:
+            base += f"\n\nПРАВИЛА ДЛЯ ПОЛЕЙ:\n{field_rules}"
+
+    return base
 
 
 def _get_type_specific_instructions(meeting_type: str) -> str:
