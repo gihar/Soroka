@@ -573,7 +573,7 @@ class SpeakerMappingService:
                 async def _call_openai():
                     return await asyncio.to_thread(
                         client.chat.completions.create,
-                        model=cfg.openai_model,
+                        model=cfg.speaker_mapping_model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}

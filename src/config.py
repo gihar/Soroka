@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(None, description="API ключ OpenAI")
     openai_base_url: Optional[str] = Field(None, description="Базовый URL для OpenAI API")
     openai_model: str = Field("gpt-3.5-turbo", description="Модель OpenAI для генерации")
-    
+    speaker_mapping_model: str = Field("gpt-4o-mini", description="Модель для сопоставления спикеров (легкая задача)")
+    analysis_stage_model: str = Field("gpt-4o-mini", description="Модель для Stage 1 анализа (тип встречи, классификация)")
+
     # Наборы моделей OpenAI с собственными базовыми URL (по одному API ключу)
     # Формат переменной окружения OPENAI_MODELS: JSON-массив объектов вида
     # [

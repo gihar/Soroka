@@ -98,7 +98,7 @@ class OpenAIProvider(LLMProvider):
                 user_prompt=analysis_user_prompt,
                 schema=MEETING_ANALYSIS_SCHEMA,
                 step_name="Analysis",
-                model=selected_model
+                model=settings.analysis_stage_model
             )
 
             meeting_type = analysis_result.get('meeting_type', 'general')
