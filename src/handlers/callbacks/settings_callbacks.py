@@ -53,12 +53,14 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
     async def settings_openai_model_callback(callback: CallbackQuery):
         """Обработчик меню выбора модели OpenAI"""
         try:
-            from config import settings as app_settings
-            models = getattr(app_settings, 'openai_models', [])
-            if not models or len(models) == 0:
+            from src.database.model_preset_repo import ModelPresetRepository
+            from database import db as app_db
+            repo = ModelPresetRepository(app_db)
+            presets = await repo.get_available_for_user(callback.from_user.id)
+            if not presets:
                 await safe_edit_text(callback.message,
-                    "❌ Не настроены модели OpenAI.\n\n"
-                    "Добавьте переменную окружения `OPENAI_MODELS` с перечнем пресетов.",
+                    "❌ Нет доступных моделей.\n\n"
+                    "Используйте /add_model чтобы добавить модель.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
                     ])
@@ -70,9 +72,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
 
             keyboard_rows = []
-            for p in models:
-                label = f"{'✅ ' if selected_key == p.key else ''}{p.name}"
-                keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"set_openai_model_{p.key}")])
+            for p in presets:
+                label = f"{'✅ ' if selected_key == p['key'] else ''}{p['name']}"
+                keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"set_openai_model_{p['key']}")])
             keyboard_rows.append([InlineKeyboardButton(text="🔄 Сбросить выбор модели", callback_data="reset_openai_model_preference")])
             keyboard_rows.append([InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")])
 
@@ -92,11 +94,13 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             model_key = callback.data.replace("set_openai_model_", "")
             await user_service.update_user_openai_model_preference(callback.from_user.id, model_key)
-            # Находим человекочитаемое имя модели из настроек
+            # Находим человекочитаемое имя модели из БД
             try:
-                from config import settings as app_settings
-                preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == model_key), None)
-                model_name = preset.name if preset else model_key
+                from src.database.model_preset_repo import ModelPresetRepository
+                from database import db as app_db
+                repo = ModelPresetRepository(app_db)
+                preset = await repo.get_by_key(model_key)
+                model_name = preset['name'] if preset else model_key
             except Exception:
                 model_name = model_key
             await safe_edit_text(callback.message,
