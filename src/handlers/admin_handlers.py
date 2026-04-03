@@ -919,7 +919,16 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         base_url = match.group(3)
         api_key = match.group(4)  # may be None
 
+        # Валидация base_url
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ('https', 'http'):
+            await message.answer("❌ base_url должен начинаться с https:// или http://")
+            return
+
         key = re.sub(r'[^a-zA-Z0-9_-]', '_', model_id)
+        if len(key) > 40:
+            key = key[:40]
 
         try:
             repo = ModelPresetRepository(db)

@@ -25,9 +25,11 @@ class OpenAIProvider(LLMProvider):
         self.default_client = None
         self.http_client = None
         self._client_cache = {}
+        self._http_clients = []  # track for cleanup
         if settings.openai_api_key:
             openai.api_key = settings.openai_api_key
             self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            self._http_clients.append(self.http_client)
             self.default_client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
@@ -46,6 +48,7 @@ class OpenAIProvider(LLMProvider):
 
         if cache_key not in self._client_cache:
             http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            self._http_clients.append(http_client)
             self._client_cache[cache_key] = openai.OpenAI(
                 api_key=api_key,
                 base_url=base_url,
@@ -54,6 +57,16 @@ class OpenAIProvider(LLMProvider):
             logger.info(f"Создан клиент для {base_url}")
 
         return self._client_cache[cache_key]
+
+    def close(self):
+        """Close all cached HTTP clients."""
+        for client in self._http_clients:
+            try:
+                client.close()
+            except Exception:
+                pass
+        self._http_clients.clear()
+        self._client_cache.clear()
 
     def is_available(self) -> bool:
         return self.default_client is not None and settings.openai_api_key is not None

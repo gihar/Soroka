@@ -93,15 +93,22 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         """Устанавливает предпочитаемую модель OpenAI"""
         try:
             model_key = callback.data.replace("set_openai_model_", "")
+
+            # Проверяем, что модель доступна этому пользователю (защита от IDOR)
+            from src.database.model_preset_repo import ModelPresetRepository
+            from database import db as app_db
+            repo = ModelPresetRepository(app_db)
+            allowed = await repo.get_available_for_user(callback.from_user.id)
+            if not any(p['key'] == model_key for p in allowed):
+                await callback.answer("❌ Модель недоступна", show_alert=True)
+                return
+
             await user_service.update_user_openai_model_preference(callback.from_user.id, model_key)
-            # Находим человекочитаемое имя модели из БД
             try:
-                from src.database.model_preset_repo import ModelPresetRepository
-                from database import db as app_db
-                repo = ModelPresetRepository(app_db)
                 preset = await repo.get_by_key(model_key)
                 model_name = preset['name'] if preset else model_key
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Не удалось получить название модели {model_key}: {e}")
                 model_name = model_key
             await safe_edit_text(callback.message,
                 f"✅ Модель OpenAI обновлена: {model_name}.\n\n"
