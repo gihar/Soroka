@@ -78,7 +78,7 @@ class LLMGenerationService:
                 openai_model_key = None
 
             # Определяем название используемой модели
-            llm_model_name = self.get_model_display_name(request.llm_provider, openai_model_key)  # noqa: F841
+            llm_model_name = await self.get_model_display_name(request.llm_provider, openai_model_key)  # noqa: F841
 
             # Извлекаем анализ диаризации если есть
             diarization_analysis = None
@@ -319,21 +319,34 @@ class LLMGenerationService:
                 'next_sprint_plans': '',
             }
 
-    def get_model_display_name(
+    async def get_model_display_name(
         self, provider: str, openai_model_key: Optional[str] = None
     ) -> str:
         """Получить читаемое название модели"""
+        if provider == "openai" and openai_model_key:
+            # Try DB first
+            try:
+                from src.database.model_preset_repo import ModelPresetRepository
+                from database import db
+                repo = ModelPresetRepository(db)
+                preset = await repo.get_by_key(openai_model_key)
+                if preset:
+                    return preset['name']
+            except Exception:
+                pass
+
+            # Fallback to config
+            try:
+                preset = next(
+                    (p for p in settings.openai_models if p.key == openai_model_key),
+                    None,
+                )
+                if preset:
+                    return preset.name
+            except Exception:
+                pass
+
         if provider == "openai":
-            if openai_model_key:
-                try:
-                    preset = next(
-                        (p for p in settings.openai_models if p.key == openai_model_key),
-                        None,
-                    )
-                    if preset:
-                        return preset.name
-                except Exception:
-                    pass
             return settings.openai_model or "GPT-4o"
 
         return provider.capitalize()
