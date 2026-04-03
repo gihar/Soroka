@@ -22,19 +22,41 @@ class OpenAIProvider(LLMProvider):
     """Provider for OpenAI GPT."""
 
     def __init__(self):
-        self.client = None
+        self.default_client = None
         self.http_client = None
+        self._client_cache = {}
         if settings.openai_api_key:
             openai.api_key = settings.openai_api_key
             self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
-            self.client = openai.OpenAI(
+            self.default_client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
                 http_client=self.http_client
             )
 
+    def _get_client(self, preset: dict = None):
+        """Get or create an OpenAI client for the given preset."""
+        if not preset:
+            return self.default_client
+
+        base_url = preset.get('base_url') or settings.openai_base_url
+        api_key = preset.get('api_key') or settings.openai_api_key
+
+        cache_key = (base_url, hash(api_key) if api_key else None)
+
+        if cache_key not in self._client_cache:
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            self._client_cache[cache_key] = openai.OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                http_client=http_client,
+            )
+            logger.info(f"Создан клиент для {base_url}")
+
+        return self._client_cache[cache_key]
+
     def is_available(self) -> bool:
-        return self.client is not None and settings.openai_api_key is not None
+        return self.default_client is not None and settings.openai_api_key is not None
 
     async def generate_protocol(self, transcription: str, template_variables: Dict[str, str],
                                 diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
@@ -66,13 +88,24 @@ class OpenAIProvider(LLMProvider):
 
         selected_model = settings.openai_model
         openai_model_key = kwargs.get('openai_model_key')
+        preset_dict = None
 
         if openai_model_key:
             try:
-                preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
-                if preset:
-                    selected_model = preset.model
-                    logger.info(f"Используется пользовательская модель: {selected_model} (ключ: {openai_model_key})")
+                from src.database.model_preset_repo import ModelPresetRepository
+                from src.database import db
+                repo = ModelPresetRepository(db)
+                preset_dict = await repo.get_by_key(openai_model_key)
+
+                if preset_dict:
+                    selected_model = preset_dict['model']
+                    logger.info(f"Используется модель из БД: {selected_model} (ключ: {openai_model_key})")
+                else:
+                    preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
+                    if preset:
+                        selected_model = preset.model
+                        preset_dict = {'base_url': preset.base_url, 'api_key': None}
+                        logger.info(f"Используется модель из конфига: {selected_model} (ключ: {openai_model_key})")
             except Exception as e:
                 logger.warning(f"Не удалось определить модель по ключу {openai_model_key}: {e}")
 
@@ -109,6 +142,8 @@ class OpenAIProvider(LLMProvider):
         # Stage 2: Generation
         logger.info("Запуск ЭТАПА 2: Генерация протокола")
 
+        client = self._get_client(preset_dict)
+
         generation_system_prompt = build_generation_system_prompt(template_variables=template_variables)
         generation_user_prompt = build_generation_prompt(
             transcription=analysis_transcription,
@@ -124,7 +159,8 @@ class OpenAIProvider(LLMProvider):
             user_prompt=generation_user_prompt,
             schema=PROTOCOL_DATA_SCHEMA,
             step_name="Generation",
-            model=selected_model
+            model=selected_model,
+            client=client
         )
 
         protocol_data = generation_result.get('protocol_data', {})
@@ -139,9 +175,10 @@ class OpenAIProvider(LLMProvider):
         return final_result
 
     async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any],
-                           step_name: str, model: str = None) -> Dict[str, Any]:
+                           step_name: str, model: str = None, client=None) -> Dict[str, Any]:
         """Helper method for OpenAI API calls."""
         selected_model = model or settings.openai_model
+        active_client = client or self.default_client
 
         extra_headers = {}
         if settings.http_referer:
@@ -153,7 +190,7 @@ class OpenAIProvider(LLMProvider):
 
         async def _api_call():
             return await asyncio.to_thread(
-                self.client.chat.completions.create,
+                active_client.chat.completions.create,
                 model=selected_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
