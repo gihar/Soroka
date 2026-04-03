@@ -228,7 +228,12 @@ class EnhancedTelegramBot:
             # 1. Инициализируем базу данных
             await db.init_db()
             logger.info("База данных инициализирована")
-            
+
+            # 1.5. Синхронизация пресетов моделей из .env в БД
+            from src.database.model_preset_repo import ModelPresetRepository
+            model_preset_repo = ModelPresetRepository(db)
+            await model_preset_repo.sync_from_config()
+
             # 2. Инициализируем базовые шаблоны
             await self.template_service.init_default_templates()
             logger.info("Стандартные шаблоны синхронизированы и готовы к работе")
