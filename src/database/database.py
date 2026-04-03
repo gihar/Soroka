@@ -216,6 +216,21 @@ class Database:
                 )
             """)
             
+            # Таблица пресетов моделей
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS model_presets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    api_key TEXT,
+                    admin_only BOOLEAN DEFAULT 0,
+                    is_enabled BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Миграция: консолидация шаблонов (27 -> 7)
             await self._consolidate_templates(db)
 
