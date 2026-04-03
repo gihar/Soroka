@@ -904,12 +904,14 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             )
             return
 
-        pattern = r'(\S+)\s+"([^"]+)"\s+(\S+)(?:\s+(\S+))?'
-        match = re.match(pattern, args_str)
+        # Support both: /add_model id "Name" url  AND  /add_model id Name url
+        pattern_quoted = r'(\S+)\s+"([^"]+)"\s+(\S+)(?:\s+(\S+))?'
+        pattern_simple = r'(\S+)\s+(\S+)\s+(https?://\S+)(?:\s+(\S+))?'
+        match = re.match(pattern_quoted, args_str) or re.match(pattern_simple, args_str)
         if not match:
             await message.answer(
                 "❌ Неверный формат. Используйте:\n"
-                "`/add_model model_id \"Название\" base_url [api_key]`",
+                "`/add_model model_id Название base_url [api_key]`",
                 parse_mode="Markdown",
             )
             return
