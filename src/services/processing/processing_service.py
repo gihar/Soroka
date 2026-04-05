@@ -108,8 +108,8 @@ class ProcessingService(BaseProcessingService):
     def _get_template_variables_from_template(self, template):
         return self.llm_gen.get_template_variables_from_template(template)
 
-    def _get_model_display_name(self, provider, openai_model_key=None):
-        return self.llm_gen.get_model_display_name(provider, openai_model_key)
+    async def _get_model_display_name(self, provider, openai_model_key=None):
+        return await self.llm_gen.get_model_display_name(provider, openai_model_key)
 
     async def _generate_llm_response(self, *args, **kwargs):
         return await self.llm_gen.generate_llm_response(*args, **kwargs)
@@ -402,7 +402,7 @@ class ProcessingService(BaseProcessingService):
             openai_model_key = None
             if request.llm_provider == 'openai':
                 openai_model_key = getattr(user, 'preferred_openai_model_key', None)
-            llm_model_display_name = self._get_model_display_name(
+            llm_model_display_name = await self._get_model_display_name(
                 request.llm_provider, openai_model_key
             )
 
@@ -744,7 +744,7 @@ class ProcessingService(BaseProcessingService):
             openai_model_key = None
             if request.llm_provider == 'openai' and user:
                 openai_model_key = getattr(user, 'preferred_openai_model_key', None)
-            llm_model_display_name = self._get_model_display_name(
+            llm_model_display_name = await self._get_model_display_name(
                 request.llm_provider, openai_model_key
             )
 

@@ -312,6 +312,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 • `/reset_reliability` - сброс компонентов надежности
 • `/transcription_mode` - переключение режима транскрипции
 
+**Управление моделями:**
+• `/models` - список моделей с inline-управлением
+• `/add_model` - добавить модель
+
 **Очистка файлов:**
 • `/cleanup` - статистика файлов и настройки очистки
 • `/cleanup_force` - принудительная очистка всех временных файлов
@@ -321,9 +325,9 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
 **Примечание:** Административные команды доступны только авторизованным пользователям.
         """
-        
+
         await message.answer(help_text, parse_mode="Markdown")
-    
+
     @router.message(Command("performance"))
     async def performance_handler(message: Message):
         """Обработчик команды /performance - статистика производительности"""
@@ -769,6 +773,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 • `/reset_reliability` - сброс компонентов надежности
 • `/transcription_mode` - переключение режима транскрипции
 
+**Управление моделями:**
+• `/models` - список моделей с inline-управлением
+• `/add_model` - добавить модель
+
 **Очистка файлов:**
 • `/cleanup` - статистика файлов и настройки очистки
 • `/cleanup_force` - принудительная очистка всех временных файлов
@@ -778,7 +786,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
 **Примечание:** Административные команды доступны только авторизованным пользователям.
         """
-        
+
         await safe_edit_text(callback.message, help_text, parse_mode="Markdown")
     
     @router.callback_query(F.data == "admin_back_to_main")
@@ -787,18 +795,332 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         if not is_admin(callback.from_user.id):
             await callback.answer("❌ Недостаточно прав", show_alert=True)
             return
-        
+
         await callback.answer()
-        
+
         from src.ux.quick_actions import QuickActionsUI
-        
+
         # Показываем меню администратора заново
         keyboard = QuickActionsUI.create_admin_menu()
-        await safe_edit_text(callback.message, 
+        await safe_edit_text(callback.message,
             "🔧 **Меню администратора**\n\n"
             "Выберите действие:",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
-    
+
+    # ============================================================================
+    # Управление моделями — /add_model, /models и inline-обработчики
+    # ============================================================================
+
+    async def _render_models_list(presets):
+        """Build text and keyboard for the models list view."""
+        if not presets:
+            text = "📋 **Список моделей**\n\nМоделей пока нет. Используйте /add\\_model или синхронизируйте из .env."
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🔄 Синхр. из .env",
+                    callback_data="admin_models_sync",
+                )],
+            ])
+            return text, keyboard
+
+        lines = ["📋 **Список моделей**\n"]
+        buttons = []
+        for p in presets:
+            if not p.get("is_enabled"):
+                icon = "⛔"
+            elif p.get("admin_only"):
+                icon = "🔒"
+            else:
+                icon = "✅"
+            lines.append(f"{icon} {p['name']}")
+            buttons.append([InlineKeyboardButton(
+                text=f"{icon} {p['name']}",
+                callback_data=f"admin_model_{p['key']}",
+            )])
+
+        buttons.append([InlineKeyboardButton(
+            text="🔄 Синхр. из .env",
+            callback_data="admin_models_sync",
+        )])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        text = "\n".join(lines)
+        return text, keyboard
+
+    async def _render_model_detail(preset):
+        """Build text and keyboard for a single model detail card."""
+        key = preset["key"]
+        api_key_status = "✅ задан" if preset.get("api_key") else "❌ не задан"
+        enabled_label = "✅ включена" if preset.get("is_enabled") else "⛔ выключена"
+        access_label = "🔒 только админы" if preset.get("admin_only") else "👥 все пользователи"
+
+        text = (
+            f"🤖 **{preset['name']}**\n\n"
+            f"**Key:** `{key}`\n"
+            f"**Model ID:** `{preset['model']}`\n"
+            f"**Base URL:** `{preset['base_url']}`\n"
+            f"**API Key:** {api_key_status}\n"
+            f"**Статус:** {enabled_label}\n"
+            f"**Доступ:** {access_label}"
+        )
+
+        toggle_text = "⛔ Выключить" if preset.get("is_enabled") else "✅ Включить"
+        access_text = "👥 Для всех" if preset.get("admin_only") else "🔒 Только админы"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=toggle_text, callback_data=f"admin_model_toggle_{key}"),
+                InlineKeyboardButton(text=access_text, callback_data=f"admin_model_access_{key}"),
+            ],
+            [
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"admin_model_delete_{key}"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_models_list"),
+            ],
+        ])
+        return text, keyboard
+
+    @router.message(Command("add_model"))
+    async def add_model_handler(message: Message):
+        """Добавление модели: /add_model model_id \"Name\" base_url [api_key]"""
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+
+        import re
+        from database import db
+        from src.database.model_preset_repo import ModelPresetRepository
+
+        raw_args = (message.text or "").split(maxsplit=1)
+        args_str = raw_args[1].strip() if len(raw_args) > 1 else ""
+
+        if not args_str:
+            await message.answer(
+                "📖 **Использование:**\n"
+                "`/add_model model_id \"Название\" base_url [api_key]`\n\n"
+                "**Пример:**\n"
+                '`/add_model gpt-4o "GPT-4o" https://api.openai.com/v1 sk-xxx`',
+                parse_mode="Markdown",
+            )
+            return
+
+        # Support both: /add_model id "Name" url  AND  /add_model id Name url
+        pattern_quoted = r'(\S+)\s+"([^"]+)"\s+(\S+)(?:\s+(\S+))?'
+        pattern_simple = r'(\S+)\s+(\S+)\s+(https?://\S+)(?:\s+(\S+))?'
+        match = re.match(pattern_quoted, args_str) or re.match(pattern_simple, args_str)
+        if not match:
+            await message.answer(
+                "❌ Неверный формат. Используйте:\n"
+                "`/add_model model_id Название base_url [api_key]`",
+                parse_mode="Markdown",
+            )
+            return
+
+        model_id = match.group(1)
+        name = match.group(2)
+        base_url = match.group(3)
+        api_key = match.group(4)  # may be None
+
+        # Валидация base_url
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ('https', 'http'):
+            await message.answer("❌ base_url должен начинаться с https:// или http://")
+            return
+
+        key = re.sub(r'[^a-zA-Z0-9_-]', '_', model_id)
+        if len(key) > 40:
+            key = key[:40]
+
+        try:
+            repo = ModelPresetRepository(db)
+            await repo.upsert(key, name, model_id, base_url, api_key)
+
+            api_display = "задан" if api_key else "не задан (используется существующий)"
+            await message.answer(
+                f"✅ Модель добавлена/обновлена\n\n"
+                f"**Key:** `{key}`\n"
+                f"**Название:** {name}\n"
+                f"**Model ID:** `{model_id}`\n"
+                f"**Base URL:** `{base_url}`\n"
+                f"**API Key:** {api_display}",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в add_model_handler: {e}")
+            await message.answer(f"❌ Ошибка при добавлении модели: {e}")
+
+    @router.message(Command("models"))
+    async def models_handler(message: Message):
+        """Список всех моделей с inline-кнопками."""
+        if not is_admin(message.from_user.id):
+            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            repo = ModelPresetRepository(db)
+            presets = await repo.get_all()
+            text, keyboard = await _render_models_list(presets)
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в models_handler: {e}")
+            await message.answer(f"❌ Ошибка при получении списка моделей: {e}")
+
+    @router.callback_query(F.data.startswith("admin_model_toggle_"))
+    async def admin_model_toggle_callback(callback: CallbackQuery):
+        """Переключить is_enabled для модели."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            key = callback.data.replace("admin_model_toggle_", "", 1)
+            repo = ModelPresetRepository(db)
+            preset = await repo.get_by_key(key)
+            if not preset:
+                await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
+                return
+
+            new_value = 0 if preset.get("is_enabled") else 1
+            await repo.update_field(key, "is_enabled", new_value)
+
+            updated = await repo.get_by_key(key)
+            text, keyboard = await _render_model_detail(updated)
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_model_toggle_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
+    @router.callback_query(F.data.startswith("admin_model_access_"))
+    async def admin_model_access_callback(callback: CallbackQuery):
+        """Переключить admin_only для модели."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            key = callback.data.replace("admin_model_access_", "", 1)
+            repo = ModelPresetRepository(db)
+            preset = await repo.get_by_key(key)
+            if not preset:
+                await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
+                return
+
+            new_value = 0 if preset.get("admin_only") else 1
+            await repo.update_field(key, "admin_only", new_value)
+
+            updated = await repo.get_by_key(key)
+            text, keyboard = await _render_model_detail(updated)
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_model_access_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
+    @router.callback_query(F.data.startswith("admin_model_delete_"))
+    async def admin_model_delete_callback(callback: CallbackQuery):
+        """Удалить модель и вернуться к списку."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            key = callback.data.replace("admin_model_delete_", "", 1)
+            repo = ModelPresetRepository(db)
+            deleted = await repo.delete(key)
+
+            if not deleted:
+                await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
+                return
+
+            presets = await repo.get_all()
+            text, keyboard = await _render_models_list(presets)
+            text = f"🗑 Модель `{key}` удалена.\n\n{text}"
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_model_delete_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
+    @router.callback_query(F.data.startswith("admin_model_"))
+    async def admin_model_detail_callback(callback: CallbackQuery):
+        """Карточка модели (детальный просмотр)."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            key = callback.data.replace("admin_model_", "", 1)
+            repo = ModelPresetRepository(db)
+            preset = await repo.get_by_key(key)
+            if not preset:
+                await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
+                return
+
+            text, keyboard = await _render_model_detail(preset)
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_model_detail_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
+    @router.callback_query(F.data == "admin_models_sync")
+    async def admin_models_sync_callback(callback: CallbackQuery):
+        """Синхронизировать модели из .env конфига."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            repo = ModelPresetRepository(db)
+            count = await repo.sync_from_config()
+
+            presets = await repo.get_all()
+            text, keyboard = await _render_models_list(presets)
+            text = f"🔄 Синхронизировано моделей: {count}\n\n{text}"
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_models_sync_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка синхронизации: {e}")
+
+    @router.callback_query(F.data == "admin_models_list")
+    async def admin_models_list_callback(callback: CallbackQuery):
+        """Вернуться к списку моделей (inline)."""
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from database import db
+            from src.database.model_preset_repo import ModelPresetRepository
+
+            await callback.answer()
+            repo = ModelPresetRepository(db)
+            presets = await repo.get_all()
+            text, keyboard = await _render_models_list(presets)
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_models_list_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
     return router
