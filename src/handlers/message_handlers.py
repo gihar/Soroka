@@ -155,99 +155,34 @@ def setup_message_handlers(file_service: FileService, template_service: Template
 
 
 async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_service, processing_service):
-    """Показать выбор LLM для обработки файла"""
+    """LLM selection is gone — go straight to processing.
+
+    Kept under its original name to avoid call-site churn; it now just sets the
+    provider to 'openai' in state and starts processing.
+    """
     try:
-        # Получаем данные из состояния
         state_data = await state.get_data()
+        template_id = state_data.get('template_id')
         file_id = state_data.get('file_id')
         file_path = state_data.get('file_path')
-        file_name = state_data.get('file_name')
-        template_id = state_data.get('template_id')
-        is_external_file = state_data.get('is_external_file', False)
-        
-        # Проверяем наличие файла (либо file_id для Telegram файлов, либо file_path для внешних файлов)
+
         if not template_id:
             await message.answer("❌ Ошибка: шаблон не выбран")
             return
-            
         if not file_id and not file_path:
             await message.answer("❌ Ошибка: файл не найден")
             return
-        
-        # Получаем доступные LLM провайдеры
-        available_providers = llm_service.get_available_providers()
-        
-        if not available_providers:
-            await message.answer("❌ Нет доступных LLM провайдеров. Проверьте конфигурацию API ключей.")
-            return
-        
-        # Проверяем, есть ли у пользователя сохранённые предпочтения LLM
-        from services import UserService
-        user_service = UserService()
-        user = await user_service.get_user_by_telegram_id(message.from_user.id)
-        
-        if user and user.preferred_llm is not None:
-            preferred_llm = user.preferred_llm
-            # Проверяем, что предпочитаемый LLM доступен
-            if preferred_llm in available_providers:
-                # Сохраняем в состояние и сразу начинаем обработку
-                await state.update_data(llm_provider=preferred_llm)
-                
-                # Формируем отображаемое имя: для OpenAI показываем название модели (без префикса провайдера)
-                llm_display = available_providers[preferred_llm]
-                if preferred_llm == 'openai':
-                    try:
-                        from config import settings as app_settings
-                        selected_key = getattr(user, 'preferred_openai_model_key', None)
-                        preset = None
-                        if selected_key:
-                            preset = next((p for p in getattr(app_settings, 'openai_models', []) if p.key == selected_key), None)
-                        if not preset:
-                            models = getattr(app_settings, 'openai_models', [])
-                            if models:
-                                preset = models[0]
-                        if preset and getattr(preset, 'name', None):
-                            llm_display = preset.name
-                    except Exception:
-                        pass
 
-                text = (
-                    f"🤖 **Используется LLM: {llm_display}**\n\n"
-                    f"⏳ Начинаю обработку файла..."
-                )
-                await message.answer(text, parse_mode="Markdown")
-                
-                # Начинаем обработку файла
-                await _start_file_processing(message, state, processing_service)
-                return
-        
-        # Если предпочтений нет или предпочитаемый LLM недоступен, показываем выбор
-        current_llm = user.preferred_llm if user else 'openai'
-        
-        # Создаем клавиатуру для выбора LLM
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=f"{'✅ ' if provider_key == current_llm else ''}🤖 {provider_name}",
-                callback_data=f"select_llm_{provider_key}"
-            )]
-            for provider_key, provider_name in available_providers.items()
-        ])
-        
-        # Определяем тип файла для отображения
-        file_type = "внешний файл" if is_external_file else "файл"
-        
+        await state.update_data(llm_provider='openai')
+
         await message.answer(
-            f"🤖 **Выберите ИИ для обработки:**\n\n"
-            f"Файл: {file_name}\n"
-            f"Тип: {file_type}\n\n"
-            f"Выберите модель искусственного интеллекта:",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
+            "⏳ Начинаю обработку файла...",
+            parse_mode="Markdown",
         )
-        
+        await _start_file_processing(message, state, processing_service)
     except Exception as e:
-        logger.error(f"Ошибка при показе выбора LLM: {e}")
-        await message.answer("❌ Произошла ошибка при загрузке доступных ИИ.")
+        logger.error(f"Ошибка в _show_llm_selection_for_file: {e}")
+        await message.answer("❌ Произошла ошибка при запуске обработки.")
 
 
 async def _start_file_processing(message: Message, state: FSMContext, processing_service):
