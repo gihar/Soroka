@@ -231,6 +231,38 @@ class Database:
                 )
             """)
 
+            # Таблица глобальных настроек приложения (key-value)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_by INTEGER
+                )
+            """)
+
+            # Seed active_model_key from first enabled preset (idempotent)
+            cursor = await db.execute(
+                "SELECT value FROM app_settings WHERE key = 'active_model_key'"
+            )
+            existing = await cursor.fetchone()
+            if existing is None:
+                cursor = await db.execute(
+                    "SELECT key FROM model_presets WHERE is_enabled = 1 "
+                    "ORDER BY created_at LIMIT 1"
+                )
+                preset_row = await cursor.fetchone()
+                if preset_row is not None:
+                    await db.execute(
+                        "INSERT INTO app_settings (key, value, updated_by) "
+                        "VALUES ('active_model_key', ?, NULL)",
+                        (preset_row[0],),
+                    )
+                    logger.info(
+                        f"Seeded active_model_key = '{preset_row[0]}' "
+                        "from first enabled preset"
+                    )
+
             # Миграция: консолидация шаблонов (27 -> 7)
             await self._consolidate_templates(db)
 
