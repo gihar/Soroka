@@ -40,14 +40,7 @@ class Settings(BaseSettings):
     # Если не задано, автоматически формируется 1 пресет из OPENAI_MODEL и OPENAI_BASE_URL
     
     openai_models: List[OpenAIModelPreset] = Field(default_factory=list, description="Список пресетов моделей OpenAI")
-    
-    # Anthropic Claude
-    anthropic_api_key: Optional[str] = Field(None, description="API ключ Anthropic")
-    
-    # Yandex GPT
-    yandex_api_key: Optional[str] = Field(None, description="API ключ Yandex GPT")
-    yandex_folder_id: Optional[str] = Field(None, description="ID папки Yandex Cloud")
-    
+
     # LLM Таймауты
     llm_timeout_seconds: float = Field(30.0, description="Общий таймаут ожидания ответа от LLM (в секундах)")
     

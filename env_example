@@ -33,13 +33,6 @@ LLM_TIMEOUT_SECONDS=30
 HTTP_REFERER=https://github.com/gihar/Soroka
 X_TITLE=Soroka
 
-# Anthropic Claude
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-
-# Yandex GPT
-YANDEX_API_KEY=your_yandex_api_key_here
-YANDEX_FOLDER_ID=your_yandex_folder_id_here
-
 # =============================================================================
 # БАЗА ДАННЫХ
 # =============================================================================
