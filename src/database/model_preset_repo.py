@@ -105,11 +105,10 @@ class ModelPresetRepository:
                 f"Allowed fields: {', '.join(sorted(_ALLOWED_FIELDS))}"
             )
 
-        # Block disabling the active preset
-        if field == "is_enabled" and int(value) == 0:
-            await self._check_not_active(key, operation="отключить")
-
         async with aiosqlite.connect(self._db.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            if field == "is_enabled" and int(value) == 0:
+                await self._raise_if_active(db, key, operation="отключить")
             cursor = await db.execute(
                 f"UPDATE model_presets SET {field} = ? WHERE key = ?",
                 (value, key),
@@ -122,8 +121,9 @@ class ModelPresetRepository:
 
         Raises `ActivePresetDeletionError` if `key` is the globally active model.
         """
-        await self._check_not_active(key, operation="удалить")
         async with aiosqlite.connect(self._db.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await self._raise_if_active(db, key, operation="удалить")
             cursor = await db.execute(
                 "DELETE FROM model_presets WHERE key = ?",
                 (key,),
@@ -131,15 +131,18 @@ class ModelPresetRepository:
             await db.commit()
             return cursor.rowcount > 0
 
-    async def _check_not_active(self, key: str, operation: str) -> None:
+    async def _raise_if_active(self, db, key: str, operation: str) -> None:
         """Raise ActivePresetDeletionError if `key` is the globally active preset.
 
-        `operation` is interpolated into the error message ("удалить" / "отключить").
+        Uses the open transaction `db` so the check and the mutation that follows
+        run under a single write lock.
         """
-        from src.database.app_settings_repo import AppSettingsRepository
-        app_settings_repo = AppSettingsRepository(self._db)
-        active_key = await app_settings_repo.get_active_model_key()
-        if active_key == key:
+        cursor = await db.execute(
+            "SELECT value FROM app_settings WHERE key = 'active_model_key'"
+        )
+        row = await cursor.fetchone()
+        if row is not None and row[0] == key:
+            await db.rollback()
             raise ActivePresetDeletionError(
                 f"Нельзя {operation} активный пресет '{key}'. "
                 "Сначала выберите другой пресет в /settings → Модель ИИ."
