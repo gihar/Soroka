@@ -323,12 +323,35 @@ class EnhancedTelegramBot:
             for warning in warnings:
                 logger.warning(f"  - {warning}")
         
-        # Проверяем доступность LLM провайдеров
-        available_providers = self.llm_service.get_available_providers()
-        logger.info(f"Доступные LLM провайдеры: {list(available_providers.keys())}")
-        
-        if not available_providers:
-            logger.error("Нет доступных LLM провайдеров!")
+        # Проверяем доступность LLM провайдера (OpenAI) и наличие активного пресета
+        try:
+            from llm_providers import llm_manager
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database.database import db as app_db
+
+            openai_available = llm_manager.providers["openai"].is_available()
+            logger.info(f"OpenAI провайдер доступен: {openai_available}")
+            if not openai_available:
+                logger.error("OpenAI провайдер недоступен (нет API ключа)!")
+
+            app_settings_repo = AppSettingsRepository(app_db)
+            preset_repo = ModelPresetRepository(app_db)
+            active_key = await app_settings_repo.get_active_model_key()
+            active_preset = (
+                await preset_repo.get_by_key(active_key) if active_key else None
+            )
+            if not active_preset or not active_preset.get("is_enabled"):
+                logger.error(
+                    "Активный пресет модели не настроен или отключён — "
+                    "обработка будет недоступна до настройки админом"
+                )
+            else:
+                logger.info(
+                    f"Активная модель: {active_preset.get('name')} ({active_preset.get('key')})"
+                )
+        except Exception as e:
+            logger.warning(f"Не удалось проверить доступность LLM: {e}")
         
         # Проверяем статус flood control
         try:

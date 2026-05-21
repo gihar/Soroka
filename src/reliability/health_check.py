@@ -105,24 +105,24 @@ class LLMHealthCheck(HealthCheck):
         
         try:
             from llm_providers import llm_manager
-            
-            available_providers = llm_manager.get_available_providers()
-            provider_count = len(available_providers)
-            
+
+            openai_provider = llm_manager.providers.get("openai")
+            is_available = bool(openai_provider and openai_provider.is_available())
+            available_providers = {"openai": "OpenAI"} if is_available else {}
+
             response_time = time.time() - start_time
-            
-            if provider_count == 0:
+
+            if not is_available:
                 return HealthCheckResult(
                     status=HealthStatus.UNHEALTHY,
-                    message="Нет доступных LLM провайдеров",
+                    message="OpenAI провайдер недоступен",
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )
             else:
-                # 1 или более провайдеров - это нормально
                 return HealthCheckResult(
                     status=HealthStatus.HEALTHY,
-                    message=f"Доступно {provider_count} LLM провайдер{'ов' if provider_count > 1 else ''}",
+                    message="Доступен OpenAI провайдер",
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )
