@@ -57,69 +57,38 @@ def setup_command_handlers(user_service: UserService, template_service: Template
     
     @router.message(Command("settings"))
     async def settings_handler(message: Message):
-        """Обработчик команды /settings"""
+        """Обработчик команды /settings."""
         try:
-            user = await user_service.get_user_by_telegram_id(message.from_user.id)
-            available_providers = llm_service.get_available_providers()
-            
-            if not available_providers:
-                await message.answer(
-                    "❌ Нет доступных LLM провайдеров. "
-                    "Проверьте конфигурацию API ключей."
-                )
-                return
-            
-            current_llm = user.preferred_llm if user else 'openai'
-            # Готовим информацию о выбранной модели OpenAI (если применимо)
-            from config import settings as app_settings
-            openai_model_name = None
-            try:
-                if current_llm == 'openai' and getattr(app_settings, 'openai_models', None):
-                    selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
-                    # Выбираем текущий пресет: выбранный пользователем или дефолтный первый
-                    preset = None
-                    if selected_key:
-                        preset = next((p for p in app_settings.openai_models if p.key == selected_key), None)
-                    if not preset and len(app_settings.openai_models) > 0:
-                        preset = app_settings.openai_models[0]
-                    if preset:
-                        openai_model_name = preset.name
-            except Exception:
-                openai_model_name = None
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"{'✅ ' if provider_key == current_llm else ''}{provider_name}",
-                    callback_data=f"set_llm_{provider_key}"
-                )]
-                for provider_key, provider_name in available_providers.items()
-            ] + [
-                [InlineKeyboardButton(
-                    text="🔄 Сбросить предпочтения (спрашивать каждый раз)",
-                    callback_data="reset_llm_preference"
-                )]
-            ])
-            
-            # Определяем статус автоматического выбора
-            auto_select_status = "включён" if user and user.preferred_llm is not None else "выключен"
-            
-            base_text = (
-                f"⚙️ **Настройки бота**\n\n"
-                f"Текущий LLM: {available_providers.get(current_llm, 'Не настроен')}\n"
-                f"Автоматический выбор: {auto_select_status}\n"
-            )
-            if openai_model_name:
-                base_text += f"Модель OpenAI: {openai_model_name}\n\n"
-            else:
-                base_text += "\n"
-            base_text += "Выберите LLM провайдера:"
+            from src.utils.admin_utils import is_admin as _is_admin
+            from src.ux.quick_actions import QuickActionsUI
 
-            await message.answer(
-                base_text,
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            
+            is_admin_user = _is_admin(message.from_user.id)
+            keyboard = QuickActionsUI.create_settings_menu(is_admin=is_admin_user)
+
+            text = "⚙️ **Настройки бота**\n\n"
+
+            if is_admin_user:
+                # Admins see the currently active model name (read-only line)
+                try:
+                    from src.database.app_settings_repo import AppSettingsRepository
+                    from src.database.model_preset_repo import ModelPresetRepository
+                    from database import db as app_db
+
+                    active_key = await AppSettingsRepository(app_db).get_active_model_key()
+                    if active_key:
+                        preset = await ModelPresetRepository(app_db).get_by_key(active_key)
+                        if preset:
+                            text += f"Активная модель: {preset['name']}\n\n"
+                        else:
+                            text += "⚠️ Активная модель не найдена\n\n"
+                    else:
+                        text += "⚠️ Активная модель не настроена\n\n"
+                except Exception as e:
+                    logger.warning(f"Не удалось загрузить активную модель: {e}")
+
+            text += "Настройте бота под ваши предпочтения:"
+
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в settings_handler: {e}")
             await message.answer("❌ Произошла ошибка при загрузке настроек.")
