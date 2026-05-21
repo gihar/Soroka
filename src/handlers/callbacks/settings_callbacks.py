@@ -317,8 +317,11 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         """Обработчик возврата к главному меню настроек"""
         try:
             from ux.quick_actions import QuickActionsUI
+            from src.utils.admin_utils import is_admin as _is_admin
 
-            keyboard = QuickActionsUI.create_settings_menu()
+            keyboard = QuickActionsUI.create_settings_menu(
+                is_admin=_is_admin(callback.from_user.id)
+            )
 
             await safe_edit_text(callback.message,
                 "⚙️ **Настройки бота**\n\n"
