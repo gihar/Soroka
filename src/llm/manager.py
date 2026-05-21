@@ -1,6 +1,5 @@
 """LLM provider manager — single-provider (OpenAI-compatible)."""
 from typing import Dict, Any, Optional
-from loguru import logger
 
 from src.llm.providers.openai_provider import OpenAIProvider
 
@@ -39,7 +38,7 @@ class LLMManager:
 
 
 async def generate_protocol(
-    manager: 'LLMManager',
+    manager: LLMManager,
     preset: Dict[str, Any],
     transcription: str,
     template_variables: Dict[str, str],
