@@ -396,4 +396,56 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.error(f"Ошибка в settings_active_model_callback: {e}")
             await callback.answer("❌ Не удалось загрузить список моделей")
 
+    @router.callback_query(F.data.startswith("set_active_model_"))
+    async def set_active_model_callback(callback: CallbackQuery):
+        """Apply admin's choice of active model (admin only)."""
+        from src.utils.admin_utils import is_admin
+        if not is_admin(callback.from_user.id):
+            logger.warning(
+                f"Non-admin {callback.from_user.id} attempted set_active_model"
+            )
+            await callback.answer(
+                "❌ Доступно только администратору", show_alert=True
+            )
+            return
+
+        try:
+            preset_key = callback.data.replace("set_active_model_", "", 1)
+
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.exceptions.configuration import AdminConfigurationError
+            from database import db as app_db
+
+            app_settings_repo = AppSettingsRepository(app_db)
+            preset_repo = ModelPresetRepository(app_db)
+
+            try:
+                await app_settings_repo.set_active_model_key(
+                    preset_key, admin_id=callback.from_user.id
+                )
+            except AdminConfigurationError as e:
+                await callback.answer(f"❌ {e.message}", show_alert=True)
+                return
+
+            preset = await preset_repo.get_by_key(preset_key)
+            model_name = preset["name"] if preset else preset_key
+
+            await safe_edit_text(
+                callback.message,
+                f"✅ Активная модель: **{model_name}**\n\n"
+                "Бот будет использовать эту модель для всех обработок.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="⬅️ Назад к настройкам",
+                        callback_data="back_to_settings",
+                    )]
+                ]),
+                parse_mode="Markdown",
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в set_active_model_callback: {e}")
+            await callback.answer("❌ Не удалось сохранить выбор модели")
+
     return router
