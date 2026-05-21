@@ -815,6 +815,11 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_models_list(presets):
         """Build text and keyboard for the models list view."""
+        from src.database.app_settings_repo import AppSettingsRepository
+        from database import db as app_db
+
+        active_key = await AppSettingsRepository(app_db).get_active_model_key()
+
         if not presets:
             text = "📋 **Список моделей**\n\nМоделей пока нет. Используйте /add\\_model или синхронизируйте из .env."
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -828,15 +833,17 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
         lines = ["📋 **Список моделей**\n"]
         buttons = []
         for p in presets:
+            active_marker = " ⭐" if p["key"] == active_key else ""
             if not p.get("is_enabled"):
                 icon = "⛔"
             elif p.get("admin_only"):
                 icon = "🔒"
             else:
                 icon = "✅"
-            lines.append(f"{icon} {p['name']}")
+            label = f"{icon} {p['name']}{active_marker}"
+            lines.append(label)
             buttons.append([InlineKeyboardButton(
-                text=f"{icon} {p['name']}",
+                text=label,
                 callback_data=f"admin_model_{p['key']}",
             )])
 
@@ -850,10 +857,17 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_model_detail(preset):
         """Build text and keyboard for a single model detail card."""
+        from src.database.app_settings_repo import AppSettingsRepository
+        from database import db as app_db
+
+        active_key = await AppSettingsRepository(app_db).get_active_model_key()
+        is_active = preset["key"] == active_key
+
         key = preset["key"]
         api_key_status = "✅ задан" if preset.get("api_key") else "❌ не задан"
         enabled_label = "✅ включена" if preset.get("is_enabled") else "⛔ выключена"
         access_label = "🔒 только админы" if preset.get("admin_only") else "👥 все пользователи"
+        active_label = "⭐ да" if is_active else "—"
 
         text = (
             f"🤖 **{preset['name']}**\n\n"
@@ -862,13 +876,20 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             f"**Base URL:** `{preset['base_url']}`\n"
             f"**API Key:** {api_key_status}\n"
             f"**Статус:** {enabled_label}\n"
-            f"**Доступ:** {access_label}"
+            f"**Доступ:** {access_label}\n"
+            f"**Активная:** {active_label}"
         )
 
         toggle_text = "⛔ Выключить" if preset.get("is_enabled") else "✅ Включить"
         access_text = "👥 Для всех" if preset.get("admin_only") else "🔒 Только админы"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        rows = []
+        if not is_active and preset.get("is_enabled"):
+            rows.append([InlineKeyboardButton(
+                text="▶️ Сделать активной",
+                callback_data=f"set_active_model_{key}",
+            )])
+        rows.extend([
             [
                 InlineKeyboardButton(text=toggle_text, callback_data=f"admin_model_toggle_{key}"),
                 InlineKeyboardButton(text=access_text, callback_data=f"admin_model_access_{key}"),
@@ -878,7 +899,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_models_list"),
             ],
         ])
-        return text, keyboard
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
     @router.message(Command("add_model"))
     async def add_model_handler(message: Message):
@@ -988,8 +1009,14 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
                 await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
                 return
 
+            from src.exceptions.configuration import ActivePresetDeletionError
+
             new_value = 0 if preset.get("is_enabled") else 1
-            await repo.update_field(key, "is_enabled", new_value)
+            try:
+                await repo.update_field(key, "is_enabled", new_value)
+            except ActivePresetDeletionError as e:
+                await safe_edit_text(callback.message, f"❌ {e.message}")
+                return
 
             updated = await repo.get_by_key(key)
             text, keyboard = await _render_model_detail(updated)
@@ -1041,7 +1068,13 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             await callback.answer()
             key = callback.data.replace("admin_model_delete_", "", 1)
             repo = ModelPresetRepository(db)
-            deleted = await repo.delete(key)
+            from src.exceptions.configuration import ActivePresetDeletionError
+
+            try:
+                deleted = await repo.delete(key)
+            except ActivePresetDeletionError as e:
+                await safe_edit_text(callback.message, f"❌ {e.message}")
+                return
 
             if not deleted:
                 await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
