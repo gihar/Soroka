@@ -64,50 +64,6 @@ class UserService:
             logger.error(f"Ошибка при создании пользователя {user_data.telegram_id}: {e}")
             raise UserCreationError(user_data.telegram_id, str(e))
     
-    async def update_user_llm_preference(self, telegram_id: int, llm_provider: Optional[str]) -> User:
-        """Обновить предпочтения LLM пользователя"""
-        try:
-            # Проверяем, что пользователь существует
-            user = await self.get_user_by_telegram_id(telegram_id)
-            if not user:
-                raise UserNotFoundError(telegram_id)
-            
-            # Обновляем предпочтения
-            await self.db.update_user_llm_preference(telegram_id, llm_provider)
-            
-            # Возвращаем обновленного пользователя
-            updated_user = await self.get_user_by_telegram_id(telegram_id)
-            if not updated_user:
-                raise UserNotFoundError(telegram_id)
-            
-            logger.info(f"Обновлены предпочтения LLM для пользователя {telegram_id}: {llm_provider}")
-            return updated_user
-            
-        except UserNotFoundError:
-            raise
-
-    async def update_user_openai_model_preference(self, telegram_id: int, model_key: Optional[str]) -> User:
-        """Обновить предпочтение модели OpenAI пользователя"""
-        try:
-            user = await self.get_user_by_telegram_id(telegram_id)
-            if not user:
-                raise UserNotFoundError(telegram_id)
-            
-            await self.db.update_user_openai_model_preference(telegram_id, model_key)
-            updated_user = await self.get_user_by_telegram_id(telegram_id)
-            if not updated_user:
-                raise UserNotFoundError(telegram_id)
-            logger.info(f"Обновлена модель OpenAI для пользователя {telegram_id}: {model_key}")
-            return updated_user
-        except UserNotFoundError:
-            raise
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении модели OpenAI для пользователя {telegram_id}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении предпочтений LLM для пользователя {telegram_id}: {e}")
-            raise
-
     async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]) -> User:
         """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
         try:

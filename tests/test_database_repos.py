@@ -18,22 +18,6 @@ async def test_get_nonexistent_user(user_repo):
 
 
 @pytest.mark.asyncio
-async def test_update_llm_preference(user_repo):
-    await user_repo.create_user(telegram_id=12345)
-    await user_repo.update_llm_preference(12345, "anthropic")
-    user = await user_repo.get_user(12345)
-    assert user["preferred_llm"] == "anthropic"
-
-
-@pytest.mark.asyncio
-async def test_update_openai_model_preference(user_repo):
-    await user_repo.create_user(telegram_id=12345)
-    await user_repo.update_openai_model_preference(12345, "gpt-4o")
-    user = await user_repo.get_user(12345)
-    assert user["preferred_openai_model_key"] == "gpt-4o"
-
-
-@pytest.mark.asyncio
 async def test_update_protocol_output_preference(user_repo):
     await user_repo.create_user(telegram_id=12345)
     await user_repo.update_protocol_output_preference(12345, "file")
