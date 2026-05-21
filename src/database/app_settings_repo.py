@@ -56,21 +56,35 @@ class AppSettingsRepository:
         Raises `AdminConfigurationError` if the preset does not exist or is disabled.
         """
         async with aiosqlite.connect(self._db.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
                 "SELECT is_enabled FROM model_presets WHERE key = ?",
                 (preset_key,),
             )
             row = await cursor.fetchone()
             if row is None:
+                await db.rollback()
                 raise AdminConfigurationError(
                     f"Пресет '{preset_key}' не существует"
                 )
             if not row[0]:
+                await db.rollback()
                 raise AdminConfigurationError(
                     f"Пресет '{preset_key}' отключён и не может быть активным"
                 )
+            await db.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_by, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_by = excluded.updated_by,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (_ACTIVE_MODEL_KEY, preset_key, admin_id),
+            )
+            await db.commit()
 
-        await self.set(_ACTIVE_MODEL_KEY, preset_key, admin_id=admin_id)
         logger.info(
             f"active_model_key set to '{preset_key}' by admin {admin_id}"
         )
