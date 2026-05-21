@@ -4,6 +4,8 @@ import aiosqlite
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
+from src.exceptions.configuration import ActivePresetDeletionError
+
 
 # Whitelist of fields allowed in update_field
 _ALLOWED_FIELDS = frozenset({
@@ -95,12 +97,17 @@ class ModelPresetRepository:
 
         Returns True when a row was affected.
         Raises ValueError if the field name is not in the whitelist.
+        Raises ActivePresetDeletionError when disabling the active preset.
         """
         if field not in _ALLOWED_FIELDS:
             raise ValueError(
                 f"Field '{field}' is not allowed. "
                 f"Allowed fields: {', '.join(sorted(_ALLOWED_FIELDS))}"
             )
+
+        # Block disabling the active preset
+        if field == "is_enabled" and int(value) == 0:
+            await self._check_not_active(key, operation="отключить")
 
         async with aiosqlite.connect(self._db.db_path) as db:
             cursor = await db.execute(
@@ -111,7 +118,11 @@ class ModelPresetRepository:
             return cursor.rowcount > 0
 
     async def delete(self, key: str) -> bool:
-        """Delete a preset by key. Returns True if a row was deleted."""
+        """Delete a preset by key. Returns True if a row was deleted.
+
+        Raises `ActivePresetDeletionError` if `key` is the globally active model.
+        """
+        await self._check_not_active(key, operation="удалить")
         async with aiosqlite.connect(self._db.db_path) as db:
             cursor = await db.execute(
                 "DELETE FROM model_presets WHERE key = ?",
@@ -119,6 +130,20 @@ class ModelPresetRepository:
             )
             await db.commit()
             return cursor.rowcount > 0
+
+    async def _check_not_active(self, key: str, operation: str) -> None:
+        """Raise ActivePresetDeletionError if `key` is the globally active preset.
+
+        `operation` is interpolated into the error message ("удалить" / "отключить").
+        """
+        from src.database.app_settings_repo import AppSettingsRepository
+        app_settings_repo = AppSettingsRepository(self._db)
+        active_key = await app_settings_repo.get_active_model_key()
+        if active_key == key:
+            raise ActivePresetDeletionError(
+                f"Нельзя {operation} активный пресет '{key}'. "
+                "Сначала выберите другой пресет в /settings → Модель ИИ."
+            )
 
     async def sync_from_config(self) -> int:
         """Import presets from settings.openai_models into DB via upsert.
