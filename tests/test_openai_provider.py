@@ -45,3 +45,22 @@ def test_invalidate_cache_for_missing_entry_is_noop():
     p._http_clients = []
 
     p.invalidate_cache_for(base_url="nope", api_key_hash=None)  # must not raise
+
+
+def test_invalidate_cache_for_base_url_clears_all_matching():
+    """invalidate_cache_for_base_url removes every entry for the given base_url."""
+    OpenAIProvider = _load_real_openai_provider()
+
+    p = OpenAIProvider.__new__(OpenAIProvider)
+    p.default_client = None
+    p._client_cache = {
+        ("https://a.com/v1", 1): "x",
+        ("https://a.com/v1", 2): "y",
+        ("https://b.com/v1", 3): "z",
+    }
+    p._http_clients = []
+
+    p.invalidate_cache_for_base_url("https://a.com/v1")
+    assert ("https://a.com/v1", 1) not in p._client_cache
+    assert ("https://a.com/v1", 2) not in p._client_cache
+    assert ("https://b.com/v1", 3) in p._client_cache

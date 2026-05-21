@@ -92,6 +92,19 @@ class ModelPresetRepository:
             )
             await db.commit()
 
+        # Invalidate any cached OpenAI client built from a previous version of this
+        # preset, so the next request rebuilds with current base_url/api_key.
+        # Best-effort: never block the upsert on cache invalidation errors.
+        try:
+            from src.llm import llm_manager
+            provider = llm_manager.providers.get("openai")
+            if provider is not None:
+                provider.invalidate_cache_for_base_url(base_url)
+        except Exception as e:
+            logger.warning(
+                f"Failed to invalidate OpenAI client cache for preset '{key}': {e}"
+            )
+
     async def update_field(self, key: str, field: str, value: Any) -> bool:
         """Update a single field for a preset identified by key.
 

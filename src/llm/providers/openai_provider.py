@@ -79,6 +79,14 @@ class OpenAIProvider(LLMProvider):
         if client is not None:
             logger.info(f"Invalidated OpenAI client cache for {base_url}")
 
+    def invalidate_cache_for_base_url(self, base_url: str) -> None:
+        """Remove all cached OpenAI clients for the given base_url, regardless of api_key."""
+        keys_to_remove = [k for k in self._client_cache if k[0] == base_url]
+        for k in keys_to_remove:
+            self._client_cache.pop(k)
+        if keys_to_remove:
+            logger.info(f"Invalidated {len(keys_to_remove)} OpenAI client(s) for {base_url}")
+
     def is_available(self) -> bool:
         return self.default_client is not None and settings.openai_api_key is not None
 
