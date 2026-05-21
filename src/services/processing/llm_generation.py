@@ -61,7 +61,17 @@ class LLMGenerationService:
         """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
         from src.models.processing import ProcessingRequest  # noqa: F811
 
-        # Создаем ключ кэша на основе транскрипции и шаблона
+        # Резолвим активную модель (глобальная админ-настройка) до построения cache key
+        from src.database.app_settings_repo import AppSettingsRepository
+        from src.database.model_preset_repo import ModelPresetRepository
+        from database import db as app_db
+
+        app_settings_repo = AppSettingsRepository(app_db)
+        preset_repo = ModelPresetRepository(app_db)
+        active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
+        llm_model_name = active_preset["name"]  # noqa: F841
+
+        # Создаем ключ кэша на основе модели, транскрипции и шаблона
         transcription_hash = hash(str(transcription_result.transcription))
         template_hash = hash(str(template))
         participants_hash = (
@@ -71,7 +81,7 @@ class LLMGenerationService:
             )) if request.participants_list else "none"
         )
         cache_key = (
-            f"llm:{request.llm_provider}:{transcription_hash}:{template_hash}:{participants_hash}"
+            f"llm:{active_preset['key']}:{transcription_hash}:{template_hash}:{participants_hash}"
         )
 
         # Проверяем кэш
@@ -87,16 +97,6 @@ class LLMGenerationService:
 
             # Подготавливаем данные для LLM
             template_variables = self.get_template_variables_from_template(template)
-
-            # Резолвим активную модель (глобальная админ-настройка)
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
-            from database import db as app_db
-
-            app_settings_repo = AppSettingsRepository(app_db)
-            preset_repo = ModelPresetRepository(app_db)
-            active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
-            llm_model_name = active_preset["name"]  # noqa: F841
 
             # Извлекаем анализ диаризации если есть
             diarization_analysis = None
