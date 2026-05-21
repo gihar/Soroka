@@ -241,23 +241,20 @@ class Database:
                 )
             """)
 
-            # Seed active_model_key from first enabled preset (idempotent)
+            # Seed active_model_key from first enabled preset (idempotent).
+            # INSERT OR IGNORE makes concurrent startups safe.
             cursor = await db.execute(
-                "SELECT value FROM app_settings WHERE key = 'active_model_key'"
+                "SELECT key FROM model_presets WHERE is_enabled = 1 "
+                "ORDER BY created_at, id LIMIT 1"
             )
-            existing = await cursor.fetchone()
-            if existing is None:
+            preset_row = await cursor.fetchone()
+            if preset_row is not None:
                 cursor = await db.execute(
-                    "SELECT key FROM model_presets WHERE is_enabled = 1 "
-                    "ORDER BY created_at LIMIT 1"
+                    "INSERT OR IGNORE INTO app_settings (key, value, updated_by) "
+                    "VALUES ('active_model_key', ?, NULL)",
+                    (preset_row[0],),
                 )
-                preset_row = await cursor.fetchone()
-                if preset_row is not None:
-                    await db.execute(
-                        "INSERT INTO app_settings (key, value, updated_by) "
-                        "VALUES ('active_model_key', ?, NULL)",
-                        (preset_row[0],),
-                    )
+                if cursor.rowcount > 0:
                     logger.info(
                         f"Seeded active_model_key = '{preset_row[0]}' "
                         "from first enabled preset"
