@@ -334,4 +334,66 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.error(f"Ошибка в back_to_settings_callback: {e}")
             await callback.answer("❌ Произошла ошибка при возврате к настройкам")
 
+    @router.callback_query(F.data == "settings_active_model")
+    async def settings_active_model_callback(callback: CallbackQuery):
+        """Show the active-model picker (admin only)."""
+        from src.utils.admin_utils import is_admin
+        if not is_admin(callback.from_user.id):
+            logger.warning(
+                f"Non-admin {callback.from_user.id} attempted to open settings_active_model"
+            )
+            await callback.answer(
+                "❌ Доступно только администратору", show_alert=True
+            )
+            return
+
+        try:
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database.app_settings_repo import AppSettingsRepository
+            from database import db as app_db
+
+            preset_repo = ModelPresetRepository(app_db)
+            app_settings_repo = AppSettingsRepository(app_db)
+
+            presets = await preset_repo.get_enabled()
+            if not presets:
+                await safe_edit_text(
+                    callback.message,
+                    "❌ Нет доступных моделей.\n\n"
+                    "Используйте /add_model чтобы добавить модель.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="⬅️ Назад к настройкам",
+                            callback_data="back_to_settings",
+                        )]
+                    ]),
+                )
+                await callback.answer()
+                return
+
+            active_key = await app_settings_repo.get_active_model_key()
+            rows = []
+            for p in presets:
+                marker = "✅ " if p["key"] == active_key else ""
+                rows.append([InlineKeyboardButton(
+                    text=f"{marker}{p['name']}",
+                    callback_data=f"set_active_model_{p['key']}",
+                )])
+            rows.append([InlineKeyboardButton(
+                text="⬅️ Назад к настройкам",
+                callback_data="back_to_settings",
+            )])
+
+            await safe_edit_text(
+                callback.message,
+                "🤖 **Модель ИИ**\n\n"
+                "Выберите модель, которая будет использоваться ботом:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                parse_mode="Markdown",
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в settings_active_model_callback: {e}")
+            await callback.answer("❌ Не удалось загрузить список моделей")
+
     return router
