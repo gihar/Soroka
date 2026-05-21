@@ -15,9 +15,29 @@ from src.performance.cache_system import performance_cache, cache_llm_response
 from src.performance.metrics import metrics_collector, PerformanceTimer
 from src.performance.async_optimization import task_pool
 from src.exceptions.processing import ProcessingError
+from src.exceptions.configuration import AdminConfigurationError
 from src.services.protocol_validator import protocol_validator
 
 from .protocol_formatter import ProtocolFormatter
+
+
+async def resolve_active_preset(app_settings_repo, preset_repo) -> Dict[str, Any]:
+    """Return the currently active model preset.
+
+    Raises `AdminConfigurationError` when no key is set or the referenced preset
+    is missing/disabled.
+    """
+    active_key = await app_settings_repo.get_active_model_key()
+    if not active_key:
+        raise AdminConfigurationError(
+            "Активная модель не настроена администратором"
+        )
+    preset = await preset_repo.get_by_key(active_key)
+    if not preset or not preset.get("is_enabled"):
+        raise AdminConfigurationError(
+            f"Активная модель '{active_key}' недоступна"
+        )
+    return preset
 
 
 class LLMGenerationService:
@@ -68,17 +88,15 @@ class LLMGenerationService:
             # Подготавливаем данные для LLM
             template_variables = self.get_template_variables_from_template(template)
 
-            # Определяем ключ пресета модели OpenAI
-            openai_model_key = None
-            try:
-                user = await self._user_service.get_user_by_telegram_id(request.user_id)
-                if user and request.llm_provider == 'openai':
-                    openai_model_key = getattr(user, 'preferred_openai_model_key', None)
-            except Exception:
-                openai_model_key = None
+            # Резолвим активную модель (глобальная админ-настройка)
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
+            from database import db as app_db
 
-            # Определяем название используемой модели
-            llm_model_name = await self.get_model_display_name(request.llm_provider, openai_model_key)  # noqa: F841
+            app_settings_repo = AppSettingsRepository(app_db)
+            preset_repo = ModelPresetRepository(app_db)
+            active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
+            llm_model_name = active_preset["name"]  # noqa: F841
 
             # Извлекаем анализ диаризации если есть
             diarization_analysis = None
@@ -139,14 +157,13 @@ class LLMGenerationService:
 
                 llm_result_data = await generate_protocol(
                     manager=llm_manager,
-                    provider_name=request.llm_provider,
+                    preset=active_preset,
                     transcription=transcription_text,
                     template_variables=template_variables,
                     diarization_data=transcription_result.diarization,
                     diarization_analysis=diarization_analysis,
                     participants_list=participants_list,
                     meeting_metadata=meeting_metadata,
-                    openai_model_key=openai_model_key,
                     speaker_mapping=request.speaker_mapping,
                     meeting_type=meeting_type,
                     meeting_topic=request.meeting_topic,
@@ -167,8 +184,7 @@ class LLMGenerationService:
                     transcription_result,
                     template,
                     template_variables,
-                    request.llm_provider,
-                    openai_model_key,
+                    active_preset,
                     request.speaker_mapping,
                     request.meeting_topic,
                     request.meeting_date,
@@ -319,45 +335,18 @@ class LLMGenerationService:
                 'next_sprint_plans': '',
             }
 
-    async def get_model_display_name(
-        self, provider: str, openai_model_key: Optional[str] = None
-    ) -> str:
-        """Получить читаемое название модели"""
-        if provider == "openai" and openai_model_key:
-            # Try DB first
-            try:
-                from src.database.model_preset_repo import ModelPresetRepository
-                from database import db
-                repo = ModelPresetRepository(db)
-                preset = await repo.get_by_key(openai_model_key)
-                if preset:
-                    return preset['name']
-            except Exception:
-                pass
-
-            # Fallback to config
-            try:
-                preset = next(
-                    (p for p in settings.openai_models if p.key == openai_model_key),
-                    None,
-                )
-                if preset:
-                    return preset.name
-            except Exception:
-                pass
-
-        if provider == "openai":
-            return settings.openai_model or "GPT-4o"
-
-        return provider.capitalize()
+    async def get_model_display_name(self, preset: Optional[Dict[str, Any]] = None) -> str:
+        """Return a human-readable name for the active model preset."""
+        if preset:
+            return preset.get("name") or preset.get("model") or "GPT"
+        return settings.openai_model or "GPT-4o"
 
     async def generate_llm_response(
         self,
         transcription_result,
         template,
         template_variables,
-        llm_provider,
-        openai_model_key=None,
+        preset,
         speaker_mapping=None,
         meeting_topic=None,
         meeting_date=None,
@@ -366,15 +355,14 @@ class LLMGenerationService:
         meeting_agenda=None,
         project_list=None,
     ):
-        """Генерация ответа LLM с постобработкой"""
-        llm_result = await self._llm_service.generate_protocol_with_fallback(
-            llm_provider,
-            transcription_result.transcription,
-            template_variables,
-            transcription_result.diarization
+        """Генерация ответа LLM с постобработкой."""
+        llm_result = await self._llm_service.generate_protocol_with_preset(
+            preset=preset,
+            transcription=transcription_result.transcription,
+            template_variables=template_variables,
+            diarization_data=transcription_result.diarization
             if hasattr(transcription_result, 'diarization')
             else None,
-            openai_model_key=openai_model_key,
             speaker_mapping=speaker_mapping,
             meeting_topic=meeting_topic,
             meeting_date=meeting_date,
