@@ -7,8 +7,8 @@ from src.exceptions.processing import LLMError
 from src.reliability import (
     RetryManager, LLM_RETRY_CONFIG,
     CircuitBreaker, CircuitBreakerConfig, DEFAULT_CIRCUIT_BREAKER_CONFIG,
-    RateLimiter, global_rate_limiter, OPENAI_API_LIMIT,
-    FallbackManager, create_llm_fallback_manager,
+    global_rate_limiter, OPENAI_API_LIMIT,
+    create_llm_fallback_manager,
 )
 from config import settings
 from llm_providers import llm_manager
@@ -85,9 +85,11 @@ class EnhancedLLMService:
             elif exec_info.get('mode') == 'cache':
                 logger.info("Возвращён результат из кеша fallback-менеджера")
             return result
+        except LLMError:
+            raise
         except Exception as e:
             logger.error(f"LLM не сработал: {e}")
-            raise LLMError(str(e), "openai", preset.get("model"))
+            raise LLMError(str(e), "openai", preset.get("model")) from e
 
     def get_reliability_stats(self) -> Dict[str, Any]:
         return {

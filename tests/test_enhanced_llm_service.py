@@ -42,3 +42,6 @@ async def test_generate_protocol_with_preset_delegates(monkeypatch):
         diarization_data=None,
     )
     assert result == {"ok": True}
+    fake_manager.generate_protocol.assert_called_once()
+    _, kwargs = fake_manager.generate_protocol.call_args
+    assert kwargs.get("preset") == preset
