@@ -10,8 +10,8 @@ import os
 import aiofiles
 from loguru import logger
 
-from src.performance.cache_system import performance_cache
 from database import db
+from src.performance.cache_system import performance_cache
 
 
 class ProcessingHistoryService:

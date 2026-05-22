@@ -2,14 +2,14 @@
 Сервисы бота
 """
 
-from .user_service import UserService
-from .template_service import TemplateService
-from .file_service import FileService
-from .transcription_service import TranscriptionService
-from .speechmatics_service import SpeechmaticsService
-from .enhanced_llm_service import EnhancedLLMService
-from .processing import ProcessingService
 from .base_processing_service import BaseProcessingService
+from .enhanced_llm_service import EnhancedLLMService
+from .file_service import FileService
+from .processing import ProcessingService
+from .speechmatics_service import SpeechmaticsService
+from .template_service import TemplateService
+from .transcription_service import TranscriptionService
+from .user_service import UserService
 
 __all__ = [
     "UserService",

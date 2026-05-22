@@ -2,12 +2,11 @@
 Сервис для периодической очистки временных файлов
 """
 
-import os
 import asyncio
-import time
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional
+
 from loguru import logger
 
 from config import settings
@@ -118,7 +117,7 @@ class CleanupService:
         try:
             # Проверяем, что файл не открыт другими процессами
             # В Unix-системах можно попробовать открыть файл в режиме записи
-            with open(file_path, 'r+b') as f:
+            with open(file_path, 'r+b'):
                 pass
             return True
         except (PermissionError, OSError):

@@ -2,13 +2,13 @@
 Сервис для работы с URL файлами (Google Drive, Яндекс.Диск)
 """
 
-import re
 import os
+import re
 import tempfile
+from typing import Optional, Tuple
+from urllib.parse import urlparse
+
 import aiohttp
-import asyncio
-from typing import Tuple, Optional
-from urllib.parse import urlparse, parse_qs
 from loguru import logger
 
 from config import settings
@@ -168,9 +168,9 @@ class URLService:
             logger.error(f"Неожиданная ошибка в get_file_info: {e}")
             logger.error(f"Тип исключения в get_file_info: {type(e).__name__}")
             if isinstance(e, FileSizeError):
-                logger.error(f"=== FileSizeError ПЕРЕХВАЧЕНА В get_file_info ===")
-                logger.error(f"FileSizeError выбрасывается в get_file_info!")
-                logger.error(f"Пробрасываем FileSizeError из get_file_info")
+                logger.error("=== FileSizeError ПЕРЕХВАЧЕНА В get_file_info ===")
+                logger.error("FileSizeError выбрасывается в get_file_info!")
+                logger.error("Пробрасываем FileSizeError из get_file_info")
             raise
     
     async def _get_google_drive_file_info(self, url: str) -> Tuple[str, int, str]:
@@ -315,7 +315,7 @@ class URLService:
         """Валидация файла по его информации"""
         # Проверка размера
         if file_size > settings.max_external_file_size:
-            logger.error(f"=== FileSizeError ВЫБРАСЫВАЕТСЯ В validate_file_by_info ===")
+            logger.error("=== FileSizeError ВЫБРАСЫВАЕТСЯ В validate_file_by_info ===")
             logger.error(f"Размер файла: {file_size}, лимит: {settings.max_external_file_size}")
             error = FileSizeError(
                 file_size,

@@ -9,40 +9,36 @@ This is the orchestrator that delegates to:
 
 import asyncio
 import json
-import time
 import os
-from typing import Dict, Any, Optional
+import time
 from datetime import datetime
+from typing import Any, Dict, Optional
 from uuid import uuid4
+
 from loguru import logger
 
-from src.services.base_processing_service import BaseProcessingService
-from src.models.processing import ProcessingRequest, ProcessingResult
-from src.exceptions.processing import ProcessingError
-from src.performance.cache_system import performance_cache, cache_transcription
-from src.performance.metrics import metrics_collector, PerformanceTimer, performance_timer, ProcessingMetrics
-from src.performance.async_optimization import (
-    task_pool, thread_manager, optimized_file_processing,
-    OptimizedHTTPClient
-)
-from src.performance.memory_management import memory_optimizer
-from src.reliability.middleware import monitoring_middleware
+from config import settings
 from database import db
-from src.utils.telegram_safe import safe_send_message
+from src.exceptions.processing import ProcessingError
+from src.models.processing import ProcessingRequest, ProcessingResult
+from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
+from src.performance.cache_system import cache_transcription, performance_cache
+from src.performance.memory_management import memory_optimizer
+from src.performance.metrics import PerformanceTimer, ProcessingMetrics, metrics_collector, performance_timer
+from src.reliability.middleware import monitoring_middleware
+from src.services.base_processing_service import BaseProcessingService
+from src.services.diarization_analyzer import diarization_analyzer
+from src.services.smart_template_selector import smart_selector
 
 # Новые сервисы для улучшения качества
 from src.services.transcription_preprocessor import get_preprocessor
-from src.services.diarization_analyzer import diarization_analyzer
-from src.services.protocol_validator import protocol_validator
+from src.utils.telegram_safe import safe_send_message
 
-from src.services.smart_template_selector import smart_selector
-from llm_providers import llm_manager
-from config import settings
+from .llm_generation import LLMGenerationService
+from .processing_history import ProcessingHistoryService
 
 # Extracted modules
 from .protocol_formatter import ProtocolFormatter
-from .llm_generation import LLMGenerationService
-from .processing_history import ProcessingHistoryService
 
 
 class ProcessingService(BaseProcessingService):
@@ -396,9 +392,9 @@ class ProcessingService(BaseProcessingService):
                 asyncio.create_task(self._cleanup_temp_file(temp_file_path))
 
             # Определяем название модели для результата
+            from database import db as app_db
             from src.database.app_settings_repo import AppSettingsRepository
             from src.database.model_preset_repo import ModelPresetRepository
-            from database import db as app_db
             from src.services.processing.llm_generation import resolve_active_preset
 
             try:
@@ -603,8 +599,8 @@ class ProcessingService(BaseProcessingService):
         Returns:
             ProcessingResult с готовым протоколом
         """
-        from src.services.mapping_state_cache import mapping_state_cache
         from src.models.processing import ProcessingRequest, TranscriptionResult
+        from src.services.mapping_state_cache import mapping_state_cache
         from src.ux.progress_tracker import ProgressFactory
 
         try:
@@ -744,9 +740,9 @@ class ProcessingService(BaseProcessingService):
                 asyncio.create_task(self._cleanup_temp_file(temp_file_path))
 
             # Определяем название модели
+            from database import db as app_db
             from src.database.app_settings_repo import AppSettingsRepository
             from src.database.model_preset_repo import ModelPresetRepository
-            from database import db as app_db
             from src.services.processing.llm_generation import resolve_active_preset
 
             try:
@@ -772,8 +768,8 @@ class ProcessingService(BaseProcessingService):
             )
 
             # Отправляем результат пользователю
-            from src.services.task_queue_manager import TaskQueueManager
             from src.models.task_queue import QueuedTask, TaskPriority
+            from src.services.task_queue_manager import TaskQueueManager
 
             task_queue_manager = TaskQueueManager()
 
@@ -1323,7 +1319,7 @@ class ServiceFactory:
         """Предварительный прогрев систем"""
         logger.info("Прогрев оптимизированных систем...")
 
-        async with OptimizedHTTPClient() as client:
+        async with OptimizedHTTPClient():
             pass
 
         await thread_manager.run_in_thread(lambda: True)

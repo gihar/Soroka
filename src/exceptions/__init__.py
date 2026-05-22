@@ -3,11 +3,11 @@
 """
 
 from .base import BotException
-from .user import UserNotFoundError, UserCreationError
-from .template import TemplateNotFoundError, TemplateValidationError
-from .processing import ProcessingError, TranscriptionError, LLMError, LLMInsufficientCreditsError
+from .configuration import ActivePresetDeletionError, AdminConfigurationError
 from .file import FileError, FileSizeError, FileTypeError
-from .configuration import AdminConfigurationError, ActivePresetDeletionError
+from .processing import LLMError, LLMInsufficientCreditsError, ProcessingError, TranscriptionError
+from .template import TemplateNotFoundError, TemplateValidationError
+from .user import UserCreationError, UserNotFoundError
 
 __all__ = [
     "BotException",

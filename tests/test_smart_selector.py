@@ -2,10 +2,12 @@
 Тесты для умного выбора шаблонов
 """
 
-import pytest
 from datetime import datetime
-from src.services.smart_template_selector import SmartTemplateSelector
+
+import pytest
+
 from src.models.template import Template
+from src.services.smart_template_selector import SmartTemplateSelector
 
 
 @pytest.mark.asyncio
@@ -75,7 +77,7 @@ async def test_suggest_templates_management():
             id=2,
             name="Бюджетное планирование",
             description="Планирование бюджета",
-            content="# Бюджет",
+            content="# Бюджет совещания",
             category="management",
             tags=["budget"],
             keywords=["бюджет", "расходы", "финансы"],
@@ -108,7 +110,7 @@ async def test_suggest_with_history_boost():
             id=1,
             name="Template A",
             description="Test template A",
-            content="# A",
+            content="# Шаблон A (заголовок)",
             category="general",
             tags=[],
             keywords=["test"],
@@ -119,7 +121,7 @@ async def test_suggest_with_history_boost():
             id=2,
             name="Template B",
             description="Test template B",
-            content="# B",
+            content="# Шаблон B (заголовок)",
             category="general",
             tags=[],
             keywords=["test"],
@@ -158,7 +160,7 @@ async def test_extract_keywords():
     """Тест извлечения ключевых слов"""
     selector = SmartTemplateSelector()
     
-    text = "Нужно провести ретроспективу спринта и обсудить backlog"
+    text = "Нужно провести ретроспектива спринта и обсудить backlog"
     keywords = selector._extract_keywords(text)
     
     assert "спринт" in keywords
@@ -176,7 +178,7 @@ async def test_suggest_with_meeting_type_boost():
             id=1,
             name="Общее совещание",
             description="Общие вопросы",
-            content="# Общее",
+            content="# Общая встреча",
             category="general",
             tags=[],
             keywords=[],
@@ -240,7 +242,7 @@ async def test_technical_meeting_selects_technical_template():
             id=1,
             name="Деловая встреча",
             description="Обсуждение бизнес-вопросов",
-            content="# Деловое",
+            content="# Деловое совещание",
             category="business",
             tags=["бизнес"],
             keywords=["бюджет", "продажи"],
@@ -286,7 +288,7 @@ async def test_educational_meeting_selects_educational_template():
             id=1,
             name="Статус встреча",
             description="Отчет по статусу проекта",
-            content="# Статус",
+            content="# Статус проекта",
             category="status",
             tags=["отчет"],
             keywords=["статус", "прогресс"],

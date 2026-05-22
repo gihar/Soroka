@@ -2,8 +2,9 @@
 Утилиты для работы с правами администратора
 """
 
-from config import settings
 from loguru import logger
+
+from config import settings
 
 
 def is_admin(user_id: int) -> bool:

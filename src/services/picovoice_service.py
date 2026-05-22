@@ -2,14 +2,11 @@
 Сервис для диаризации через Picovoice Falcon (локальная библиотека)
 """
 
-import os
-import json
-import tempfile
-import shutil
-from typing import Optional, List, Dict, Any, Tuple
-from pathlib import Path
-from loguru import logger
 import asyncio
+from pathlib import Path
+from typing import Optional
+
+from loguru import logger
 
 from config import settings
 from src.models.processing import DiarizationData

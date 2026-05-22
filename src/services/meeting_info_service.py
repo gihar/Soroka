@@ -3,8 +3,9 @@
 """
 
 import re
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
 from loguru import logger
 
 from src.models.meeting_info import MeetingInfo, MeetingParticipant
@@ -253,7 +254,8 @@ class MeetingInfoService:
 
         if match:
             # Для многострочных паттернов берем только первую группу
-            if pattern_name in ['email_to', 'participants_cc', 'email_when']:
+            if pattern_name in ['email_to', 'participants_cc', 'email_when',
+                                'email_subject', 'meeting_topic']:
                 return match.group(1).strip()
             else:
                 return match.group(0).replace(f'{pattern_name.split("_")[0]}:', '').strip()

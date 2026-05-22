@@ -1,20 +1,21 @@
 """OpenAI GPT provider."""
 import asyncio
+from typing import Any, Dict, Optional
+
 import httpx
 import openai
-from typing import Dict, Any, Optional
 from loguru import logger
 
 from src.config import settings
 from src.llm.base import LLMProvider
 from src.llm.json_utils import safe_json_parse
+from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import (
     build_analysis_prompt,
     build_analysis_system_prompt,
     build_generation_prompt,
-    build_generation_system_prompt
+    build_generation_system_prompt,
 )
-from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
 

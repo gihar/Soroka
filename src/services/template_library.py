@@ -2,7 +2,7 @@
 Библиотека профессиональных шаблонов для встреч
 """
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 
 class TemplateLibrary:

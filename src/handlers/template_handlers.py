@@ -2,15 +2,15 @@
 Обработчики для работы с шаблонами
 """
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services import TemplateService
-from models.template import TemplateCreate
 from exceptions import TemplateValidationError
+from models.template import TemplateCreate
+from services import TemplateService
 from src.utils.telegram_safe import safe_edit_text
 
 

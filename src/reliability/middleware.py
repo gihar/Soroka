@@ -3,17 +3,17 @@ Middleware для мониторинга и обработки ошибок
 """
 
 import time
-import asyncio
-from typing import Callable, Any, Dict, Optional
 from functools import wraps
+from typing import Any, Callable, Dict, Optional
+
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, User, Update, Message
 from aiogram.exceptions import TelegramRetryAfter
+from aiogram.types import Message, TelegramObject, User
 from loguru import logger
 
 from src.exceptions import BotException
 from src.reliability.health_check import health_checker
-from src.reliability.rate_limiter import global_rate_limiter, USER_REQUEST_LIMIT, RateLimitExceeded
+from src.reliability.rate_limiter import USER_REQUEST_LIMIT, RateLimitExceeded, global_rate_limiter
 
 
 class ErrorHandlingMiddleware(BaseMiddleware):

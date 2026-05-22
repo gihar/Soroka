@@ -2,11 +2,11 @@
 
 from aiogram import Router
 
+from .processing_callbacks import setup_processing_callbacks
+from .settings_callbacks import setup_settings_callbacks
+from .speaker_mapping_callbacks import setup_speaker_mapping_callbacks
 from .template_callbacks import setup_template_callbacks
 from .template_mgmt_callbacks import setup_template_mgmt_callbacks
-from .settings_callbacks import setup_settings_callbacks
-from .processing_callbacks import setup_processing_callbacks
-from .speaker_mapping_callbacks import setup_speaker_mapping_callbacks
 
 
 def setup_callback_handlers(user_service, template_service, llm_service, processing_service) -> Router:

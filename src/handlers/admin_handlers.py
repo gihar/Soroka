@@ -2,16 +2,16 @@
 Обработчики административных команд
 """
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile
+from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from api.monitoring import monitoring_api
+from config import settings
 from reliability.health_check import health_checker
 from services.enhanced_llm_service import EnhancedLLMService
 from services.processing_service import ProcessingService
-from config import settings
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_edit_text
 
@@ -198,8 +198,8 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             json_stats = monitoring_api.export_stats_json()
             
             # Сохраняем во временный файл
-            import tempfile
             import os
+            import tempfile
             
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
                 f.write(json_stats)
@@ -336,9 +336,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
         
         try:
-            from performance import (
-                performance_cache, metrics_collector, memory_optimizer, task_pool
-            )
+            from performance import memory_optimizer, metrics_collector, performance_cache, task_pool
             
             # Собираем статистику
             cache_stats = performance_cache.get_stats()
@@ -549,9 +547,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
         
         try:
-            from performance import (
-                performance_cache, metrics_collector, memory_optimizer, task_pool
-            )
+            from performance import memory_optimizer, metrics_collector, performance_cache, task_pool
             
             await callback.answer()
             await safe_edit_text(callback.message, "📊 Собираю данные о производительности...")
@@ -815,8 +811,8 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_models_list(presets):
         """Build text and keyboard for the models list view."""
-        from src.database.app_settings_repo import AppSettingsRepository
         from database import db as app_db
+        from src.database.app_settings_repo import AppSettingsRepository
 
         active_key = await AppSettingsRepository(app_db).get_active_model_key()
 
@@ -857,8 +853,8 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_model_detail(preset):
         """Build text and keyboard for a single model detail card."""
-        from src.database.app_settings_repo import AppSettingsRepository
         from database import db as app_db
+        from src.database.app_settings_repo import AppSettingsRepository
 
         active_key = await AppSettingsRepository(app_db).get_active_model_key()
         is_active = preset["key"] == active_key
@@ -909,6 +905,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         import re
+
         from database import db
         from src.database.model_preset_repo import ModelPresetRepository
 

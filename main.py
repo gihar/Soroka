@@ -4,11 +4,13 @@ Enhanced Telegram Bot - Точка входа в приложение
 """
 
 import asyncio
-import ssl
-import shutil
 import os
+import shutil
+import ssl
 import sys
+
 from loguru import logger
+
 from config import settings
 
 # Добавляем src в путь для импортов

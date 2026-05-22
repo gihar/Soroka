@@ -2,13 +2,14 @@
 UI компоненты для подтверждения сопоставления спикеров с участниками
 """
 
-from typing import Dict, List, Any, Optional
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from typing import Any, Dict, List, Optional
+
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from src.utils.telegram_safe import safe_send_message
 from src.utils.message_utils import escape_markdown_v2
+from src.utils.telegram_safe import safe_send_message
 
 
 def extract_speaker_quotes(
@@ -106,13 +107,6 @@ def format_mapping_message(
     
     # Сортируем спикеров по порядку (SPEAKER_1, SPEAKER_2, ...)
     all_speakers.sort(key=lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else 999)
-    
-    # Отмечаем уже сопоставленных
-    mapped_speakers = set(speaker_mapping.keys())
-    if unmapped_speakers:
-        unmapped_set = set(unmapped_speakers)
-    else:
-        unmapped_set = set(all_speakers) - mapped_speakers
     
     # Экранируем статический текст
     not_defined_text = escape_markdown_v2("Не определен")

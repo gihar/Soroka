@@ -2,17 +2,22 @@
 Система быстрых действий и улучшенного пользовательского интерфейса
 """
 
-from typing import Dict, List, Any, Optional
-from aiogram import Router, F
-from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardButton, 
-    InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-)
-from services import TemplateService
-from config import settings
+from typing import List, Optional
+
+from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from loguru import logger
 
+from config import settings
+from services import TemplateService
 from src.utils.telegram_safe import safe_edit_text
 
 
@@ -387,10 +392,10 @@ def setup_quick_actions_handlers() -> Router:
         """Обработчик кнопки статистики"""
         logger.info(f"Пользователь {message.from_user.id} запросил статистику")
         try:
+            from datetime import datetime
+
             from database import db
             from reliability.middleware import monitoring_middleware
-            from reliability.health_check import health_checker
-            from datetime import datetime, timedelta
             
             # Получаем статистику пользователя из базы данных
             user_stats = await db.get_user_stats(message.from_user.id)
@@ -406,7 +411,7 @@ def setup_quick_actions_handlers() -> Router:
                 llm_providers = user_stats.get('llm_providers', [])
                 
                 # Строим сообщение
-                stats_text = f"📊 **Ваша статистика**\n\n"
+                stats_text = "📊 **Ваша статистика**\n\n"
                 stats_text += f"🔄 **Обработано файлов:** {total_files}\n"
                 stats_text += f"📅 **Активных дней:** {active_days}\n"
                 
@@ -420,13 +425,13 @@ def setup_quick_actions_handlers() -> Router:
                 
                 # Любимые шаблоны
                 if favorite_templates:
-                    stats_text += f"\n📝 **Популярные шаблоны:**\n"
+                    stats_text += "\n📝 **Популярные шаблоны:**\n"
                     for template in favorite_templates[:3]:
                         stats_text += f"• {template['name']}: {template['count']} раз\n"
                 
                 # LLM провайдеры
                 if llm_providers:
-                    stats_text += f"\n🤖 **Используемые AI модели:**\n"
+                    stats_text += "\n🤖 **Используемые AI модели:**\n"
                     for provider in llm_providers[:3]:
                         provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
                         stats_text += f"• {provider_name}: {provider['count']} раз\n"
@@ -434,14 +439,14 @@ def setup_quick_actions_handlers() -> Router:
                 # System stats only for admins
                 from src.utils.admin_utils import is_admin
                 if is_admin(message.from_user.id):
-                    stats_text += f"\n🌐 **Общая статистика системы:**\n"
+                    stats_text += "\n🌐 **Общая статистика системы:**\n"
                     stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
                     stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
                     stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
                     if system_stats.get('error_rate', 0) > 0:
                         stats_text += f"• Процент ошибок: {system_stats.get('error_rate', 0):.1f}%\n"
                     else:
-                        stats_text += f"• ✅ Система работает стабильно\n"
+                        stats_text += "• ✅ Система работает стабильно\n"
 
             else:
                 stats_text = (

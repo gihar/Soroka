@@ -4,17 +4,18 @@
 
 import asyncio
 import os
-import psutil
+from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import uuid4
-from datetime import datetime
+
+import psutil
 from loguru import logger
 
-from src.models.task_queue import QueuedTask, TaskStatus, TaskPriority
-from src.models.processing import ProcessingRequest
-from database import db
 from config import settings
-from src.utils.telegram_safe import safe_send_message, safe_send_document
+from database import db
+from src.models.processing import ProcessingRequest
+from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
+from src.utils.telegram_safe import safe_send_document, safe_send_message
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -284,10 +285,9 @@ class TaskQueueManager:
     
     async def _process_task(self, task: QueuedTask):
         """Обработать задачу"""
+        from config import settings as cfg
         from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
-        from src.ux.queue_tracker import QueuePositionTracker
-        from config import settings as cfg
         
         progress_tracker = None
         
@@ -372,10 +372,12 @@ class TaskQueueManager:
     
     async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None):
         """Отправить результат обработки пользователю"""
-        from src.ux.message_builder import MessageBuilder
-        from aiogram.types import FSInputFile
-        import tempfile
         import os
+        import tempfile
+
+        from aiogram.types import FSInputFile
+
+        from src.ux.message_builder import MessageBuilder
         
         try:
             # Получаем настройки вывода пользователя

@@ -2,16 +2,15 @@
 Обработчики команд
 """
 
-from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.filters import CommandStart, Command
+from aiogram import Router
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services.user_service import UserService
-from services.template_service import TemplateService
 from services.enhanced_llm_service import EnhancedLLMService
-from src.models.user import UserCreate
+from services.template_service import TemplateService
+from services.user_service import UserService
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 
@@ -24,7 +23,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         """Обработчик команды /start"""
         try:
             # Создаем или получаем пользователя
-            user = await user_service.get_or_create_user(
+            await user_service.get_or_create_user(
                 telegram_id=message.from_user.id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,
@@ -70,9 +69,9 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             if is_admin_user:
                 # Admins see the currently active model name (read-only line)
                 try:
+                    from database import db as app_db
                     from src.database.app_settings_repo import AppSettingsRepository
                     from src.database.model_preset_repo import ModelPresetRepository
-                    from database import db as app_db
 
                     active_key = await AppSettingsRepository(app_db).get_active_model_key()
                     if active_key:

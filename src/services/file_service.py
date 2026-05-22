@@ -4,11 +4,12 @@
 
 import os
 from typing import List
+
 from aiogram import Bot
 from loguru import logger
 
-from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from config import settings
+from src.exceptions.file import FileError, FileSizeError, FileTypeError
 
 
 class FileService:

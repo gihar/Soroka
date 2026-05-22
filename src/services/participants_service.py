@@ -2,10 +2,11 @@
 Сервис для работы со списком участников встречи
 """
 
-import re
 import csv
-from typing import Any, Dict, List, Optional, Set, Tuple
+import re
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 from loguru import logger
 
 from src.models.meeting_info import MeetingInfo

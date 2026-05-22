@@ -3,17 +3,18 @@
 """
 
 import os
-from typing import Optional, Dict
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
+from typing import Dict, Optional
+
+from aiogram import F, Router
 from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
+from src.exceptions.file import FileError
 from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
-from src.exceptions.file import FileError
 
 
 async def show_participants_menu(message: Message, user_service: UserService):
@@ -304,8 +305,8 @@ def setup_participants_handlers() -> Router:
             # Проверяем, есть ли участники
             if not all_participants:
                 await message.answer(
-                    f"❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
-                    f"Попробуйте другой текст или отправьте /cancel для отмены.",
+                    "❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
+                    "Попробуйте другой текст или отправьте /cancel для отмены.",
                     parse_mode="Markdown"
                 )
                 return

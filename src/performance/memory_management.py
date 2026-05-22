@@ -2,16 +2,17 @@
 Система управления памятью и ресурсами
 """
 
+import asyncio
 import gc
 import os
-import psutil
-import asyncio
 import weakref
-from typing import Dict, Any, Optional, List, Callable
-from datetime import datetime, timedelta
-from loguru import logger
-from dataclasses import dataclass
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
+from loguru import logger
 
 
 @dataclass

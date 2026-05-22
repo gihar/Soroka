@@ -2,11 +2,9 @@
 JSON Schema модели для OpenAI Structured Outputs
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-import json
-
-
 
 
 class ProtocolSchema(BaseModel):

@@ -2,24 +2,25 @@
 Сервис для работы с Speechmatics API
 """
 
-import os
-import tempfile
-from typing import Optional, Dict, Any, List
 import asyncio
+import os
 from pathlib import Path
-from loguru import logger
-from config import settings
+from typing import Any, Dict
 
-from src.models.processing import TranscriptionResult, DiarizationData
-from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, SpeechmaticsAPIError
+from loguru import logger
+
+from config import settings
+from src.exceptions.processing import CloudTranscriptionError, SpeechmaticsAPIError
+from src.models.processing import TranscriptionResult
 from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
 try:
-    from speechmatics.models import ConnectionSettings
-    from speechmatics.batch_client import BatchClient
-    from httpx import HTTPStatusError, Client
     import ssl
+
     import urllib3
+    from httpx import HTTPStatusError
+    from speechmatics.batch_client import BatchClient
+    from speechmatics.models import ConnectionSettings
     SPEECHMATICS_AVAILABLE = True
 except ImportError:
     SPEECHMATICS_AVAILABLE = False

@@ -1,6 +1,6 @@
 """Tests for app_settings table creation and seed during init_db."""
-import pytest
 import aiosqlite
+import pytest
 
 
 @pytest.mark.asyncio

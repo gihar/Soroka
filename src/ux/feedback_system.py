@@ -2,18 +2,20 @@
 Система обратной связи и оценки качества работы бота
 """
 
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
+import json
+import os
+import sys
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from aiogram import Router, F
+from typing import Any, Dict, List, Optional
+
+from aiogram import F, Router
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardButton, 
-    InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
 from loguru import logger
-import json
-import sys
-import os
 
 # Добавляем корневую директорию в путь для импорта database
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))

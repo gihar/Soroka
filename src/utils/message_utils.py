@@ -2,8 +2,9 @@
 Утилиты для работы с сообщениями
 """
 
-from aiogram import Bot
 from typing import Optional
+
+from aiogram import Bot
 from loguru import logger
 
 from src.exceptions import BotException
@@ -180,6 +181,7 @@ def safe_send_message(bot, chat_id: int, text: str, parse_mode: str = "Markdown"
         max_length: Максимальная длина сообщения
     """
     import asyncio
+
     from loguru import logger
     
     async def _safe_send():

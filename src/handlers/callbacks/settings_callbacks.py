@@ -2,11 +2,11 @@
 Обработчики callback запросов для настроек бота.
 """
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import UserService, TemplateService, EnhancedLLMService, ProcessingService
+from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 
 
@@ -123,9 +123,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
     async def settings_stats_callback(callback: CallbackQuery):
         """Показ статистики из меню настроек"""
         try:
+            from datetime import datetime
+
             from database import db
             from reliability.middleware import monitoring_middleware
-            from datetime import datetime
 
             user_stats = await db.get_user_stats(callback.from_user.id)
             system_stats = monitoring_middleware.get_stats()
@@ -189,8 +190,8 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
     async def back_to_settings_callback(callback: CallbackQuery):
         """Обработчик возврата к главному меню настроек"""
         try:
-            from ux.quick_actions import QuickActionsUI
             from src.utils.admin_utils import is_admin as _is_admin
+            from ux.quick_actions import QuickActionsUI
 
             keyboard = QuickActionsUI.create_settings_menu(
                 is_admin=_is_admin(callback.from_user.id)
@@ -221,9 +222,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             return
 
         try:
-            from src.database.model_preset_repo import ModelPresetRepository
-            from src.database.app_settings_repo import AppSettingsRepository
             from database import db as app_db
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
 
             preset_repo = ModelPresetRepository(app_db)
             app_settings_repo = AppSettingsRepository(app_db)
@@ -285,10 +286,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             preset_key = callback.data.replace("set_active_model_", "", 1)
 
-            from src.database.model_preset_repo import ModelPresetRepository
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.exceptions.configuration import AdminConfigurationError
             from database import db as app_db
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.exceptions.configuration import AdminConfigurationError
 
             app_settings_repo = AppSettingsRepository(app_db)
             preset_repo = ModelPresetRepository(app_db)

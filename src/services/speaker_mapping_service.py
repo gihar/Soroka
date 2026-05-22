@@ -2,13 +2,14 @@
 Сервис для автоматического сопоставления спикеров с участниками через LLM
 """
 
-import json
 import asyncio
+import json
 from typing import Any, Dict, List, Optional, Set
+
 from loguru import logger
 
-from llm_providers import llm_manager, safe_json_parse
 from config import settings
+from llm_providers import llm_manager, safe_json_parse
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
 
@@ -111,10 +112,7 @@ class SpeakerMappingService:
         
         # Получаем список спикеров
         speakers = diarization_data.get('speakers', [])
-        
-        # Получаем форматированную транскрипцию с метками спикеров
-        formatted_transcript = diarization_data.get('formatted_transcript', '')
-        
+
         # Получаем сегменты
         segments = diarization_data.get('segments', [])
         
@@ -536,6 +534,7 @@ class SpeakerMappingService:
             # Для OpenAI используем специальный вызов
             if llm_provider == "openai":
                 import openai
+
                 from config import settings as cfg
                 
                 client = openai.OpenAI(

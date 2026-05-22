@@ -4,9 +4,10 @@
 
 import asyncio
 import os
-from loguru import logger
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from loguru import logger
 
 from config import settings
 from database import db
@@ -15,15 +16,15 @@ from database import db
 from reliability import health_checker
 from reliability.middleware import (
     error_handling_middleware,
-    monitoring_middleware, 
+    health_check_middleware,
+    monitoring_middleware,
     rate_limiting_middleware,
-    health_check_middleware
 )
 
 # Импорты OOM защиты
 try:
-    from src.performance.oom_protection import get_oom_protection
     from src.performance.memory_management import memory_optimizer
+    from src.performance.oom_protection import get_oom_protection
     OOM_PROTECTION_AVAILABLE = True
 except ImportError:
     OOM_PROTECTION_AVAILABLE = False
@@ -38,17 +39,10 @@ except ImportError:
     logger.warning("Cleanup Service недоступна")
 
 # Импорты новой архитектуры
-from services import (
-    UserService, TemplateService, FileService, 
-    EnhancedLLMService, ProcessingService
-)
-from handlers import (
-    setup_command_handlers, setup_callback_handlers,
-    setup_message_handlers, setup_template_handlers
-)
-from handlers.participants_handlers import setup_participants_handlers
+from handlers import setup_callback_handlers, setup_command_handlers, setup_message_handlers, setup_template_handlers
 from handlers.admin_handlers import setup_admin_handlers
-from exceptions import BotException
+from handlers.participants_handlers import setup_participants_handlers
+from services import EnhancedLLMService, FileService, ProcessingService, TemplateService, UserService
 
 
 class EnhancedTelegramBot:
@@ -139,7 +133,6 @@ class EnhancedTelegramBot:
     def _cleanup_temp_files(self):
         """Очистка временных файлов"""
         try:
-            import shutil
             temp_dir = "temp"
             if os.path.exists(temp_dir):
                 for filename in os.listdir(temp_dir):
@@ -165,7 +158,7 @@ class EnhancedTelegramBot:
         self.dp.include_router(command_router)
         
         # UX обработчики - быстрые действия (ДОЛЖНЫ БЫТЬ РАНЬШЕ message_handlers!)
-        from ux import setup_quick_actions_handlers, setup_feedback_handlers, feedback_collector
+        from ux import feedback_collector, setup_feedback_handlers, setup_quick_actions_handlers
         
         quick_actions_router = setup_quick_actions_handlers()
         self.dp.include_router(quick_actions_router)
@@ -253,8 +246,8 @@ class EnhancedTelegramBot:
             
             # 4. Инициализируем систему обратной связи и метрик
             try:
-                from ux import feedback_collector
                 from performance.metrics import metrics_collector
+                from ux import feedback_collector
                 
                 await feedback_collector.initialize()
                 logger.info("Система обратной связи инициализирована")
@@ -327,8 +320,8 @@ class EnhancedTelegramBot:
         try:
             from llm_providers import llm_manager
             from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
             from src.database.database import db as app_db
+            from src.database.model_preset_repo import ModelPresetRepository
 
             openai_available = llm_manager.providers["openai"].is_available()
             logger.info(f"OpenAI провайдер доступен: {openai_available}")
@@ -406,6 +399,7 @@ class EnhancedTelegramBot:
             # 4.2. Принудительная очистка всех открытых aiohttp сессий
             try:
                 import gc
+
                 import aiohttp
                 for obj in gc.get_objects():
                     if isinstance(obj, aiohttp.ClientSession) and not obj.closed:

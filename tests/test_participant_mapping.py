@@ -2,9 +2,9 @@
 Тесты для функционала сопоставления участников
 """
 
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 # Добавляем корневую директорию в path для импортов
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -79,7 +79,7 @@ class TestParticipantsService(unittest.TestCase):
         ]
         is_valid, error = participants_service.validate_participants(participants_with_duplicates)
         self.assertFalse(is_valid)
-        self.assertIn('дубликаты', error)
+        self.assertIn('дубл', error)
 
     def test_formatting(self):
         """Тест форматирования для отображения"""

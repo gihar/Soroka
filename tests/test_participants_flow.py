@@ -2,10 +2,9 @@
 Тесты для проверки исправленного flow добавления участников
 """
 
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
-import sys
 import os
+import sys
+import unittest
 
 # Добавляем корневую директорию в path для импортов
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

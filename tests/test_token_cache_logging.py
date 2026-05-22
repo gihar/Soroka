@@ -2,13 +2,15 @@
 Тесты для утилит логирования кеширования токенов
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
+
 from src.utils.token_cache_logger import (
+    _get_token_cost,
     check_cache_support,
-    log_cached_tokens_usage,
     format_cache_summary,
-    _get_token_cost
+    log_cached_tokens_usage,
 )
 
 

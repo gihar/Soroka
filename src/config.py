@@ -3,9 +3,10 @@
 """
 
 import os
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, validator, field_validator, BaseModel
-from typing import Optional, List
 
 # Предотвращаем конфликты при форкинге процессов после использования токенизаторов
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

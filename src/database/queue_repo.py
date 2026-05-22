@@ -1,6 +1,7 @@
 """Task queue data access."""
+from typing import Any, Dict, List, Optional
+
 import aiosqlite
-from typing import List, Dict, Optional, Any
 from loguru import logger
 
 

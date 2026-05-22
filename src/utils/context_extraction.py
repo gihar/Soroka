@@ -3,8 +3,8 @@
 вместо передачи полного текста в LLM запросы
 """
 
-from typing import List, Dict, Any, Optional, Tuple
 import re
+from typing import Any, Dict, List, Tuple
 
 
 def extract_relevant_excerpts(

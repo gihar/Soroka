@@ -2,9 +2,9 @@
 Конструктор красивых и информативных сообщений для пользователей
 """
 
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
 from src.utils.message_utils import escape_markdown
 
 
@@ -93,7 +93,7 @@ class MessageBuilder:
     def error_message(cls, error_type: str, details: str = "", 
                      suggestions: Optional[List[str]] = None) -> str:
         """Сообщение об ошибке с рекомендациями"""
-        message = f"❌ **Произошла ошибка**\n\n"
+        message = "❌ **Произошла ошибка**\n\n"
         
         # Тип ошибки
         error_types = {

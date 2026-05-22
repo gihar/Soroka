@@ -3,17 +3,18 @@
 Определяет роли спикеров, паттерны взаимодействия, фазы встречи
 """
 
-from typing import Dict, List, Optional, Any, Tuple
-from collections import defaultdict
 import re
+from collections import defaultdict
+from typing import Any, Dict, List
+
 from loguru import logger
 
 from src.models.diarization_analysis import (
     DiarizationAnalysisResult,
+    InteractionPattern,
+    MeetingPhase,
     SpeakerContribution,
     SpeakerRole,
-    InteractionPattern,
-    MeetingPhase
 )
 
 

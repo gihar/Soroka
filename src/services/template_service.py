@@ -2,13 +2,14 @@
 Сервис для работы с шаблонами
 """
 
-from typing import List, Dict, Any, Optional
-from jinja2 import Environment, BaseLoader, TemplateError
+from typing import Any, Dict, List, Optional
+
+from jinja2 import BaseLoader, Environment, TemplateError
 from loguru import logger
 
-from src.models.template import Template, TemplateCreate
-from src.exceptions.template import TemplateNotFoundError, TemplateValidationError
 from database import db
+from src.exceptions.template import TemplateNotFoundError, TemplateValidationError
+from src.models.template import Template, TemplateCreate
 
 
 class TemplateService:
