@@ -2,17 +2,15 @@
 Система защиты от OOM Killer
 """
 
-import os
-import gc
-import psutil
 import asyncio
-import signal
-import sys
-from typing import Dict, Any, Optional, Callable
-from datetime import datetime, timedelta
-from loguru import logger
-from dataclasses import dataclass
+import gc
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable, Dict, Optional
+
+import psutil
+from loguru import logger
 
 from config import settings
 

@@ -1,6 +1,7 @@
 """Processing metrics data access."""
+from typing import Any, Dict, List
+
 import aiosqlite
-from typing import List, Dict, Any
 
 
 class MetricsRepository:

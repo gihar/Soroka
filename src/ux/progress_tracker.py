@@ -3,14 +3,15 @@
 """
 
 import asyncio
+from datetime import datetime
 from typing import Dict, Optional
+
 from aiogram import Bot
 from aiogram.types import Message
 from loguru import logger
-from datetime import datetime
 
-from src.utils.telegram_safe import safe_edit_text, safe_send_message
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
+from src.utils.telegram_safe import safe_edit_text, safe_send_message
 
 
 class ProgressStage:

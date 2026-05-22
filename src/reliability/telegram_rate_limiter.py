@@ -4,13 +4,12 @@
 
 import asyncio
 import time
-from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass, field
 from collections import deque
-from loguru import logger
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Optional
 
-from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
-from aiogram.types import Message
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from loguru import logger
 
 
 @dataclass

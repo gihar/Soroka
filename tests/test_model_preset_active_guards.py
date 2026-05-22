@@ -1,5 +1,6 @@
 """Guards: cannot delete or disable the active preset."""
 import pytest
+
 from src.exceptions.configuration import ActivePresetDeletionError
 
 

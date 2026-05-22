@@ -1,5 +1,6 @@
 """Tests for AppSettingsRepository."""
 import pytest
+
 from src.exceptions.configuration import AdminConfigurationError
 
 

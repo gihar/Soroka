@@ -1,11 +1,11 @@
 """Model preset data access."""
 
+from typing import Any, Dict, List, Optional
+
 import aiosqlite
-from typing import Optional, List, Dict, Any
 from loguru import logger
 
 from src.exceptions.configuration import ActivePresetDeletionError
-
 
 # Whitelist of fields allowed in update_field
 _ALLOWED_FIELDS = frozenset({

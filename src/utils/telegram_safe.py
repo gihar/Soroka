@@ -2,11 +2,18 @@
 Безопасные обертки для работы с Telegram API
 """
 
-from typing import Optional, Any, Union
-from loguru import logger
+from typing import Optional, Union
 
-from aiogram.types import Message, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, ForceReply, FSInputFile
-from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import (
+    ForceReply,
+    FSInputFile,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
+from loguru import logger
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
 

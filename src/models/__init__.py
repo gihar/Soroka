@@ -2,10 +2,10 @@
 Модели данных для бота
 """
 
-from .user import User, UserCreate, UserUpdate
-from .template import Template, TemplateCreate, TemplateUpdate
-from .processing import ProcessingRequest, ProcessingResult, ProcessingHistory
 from .llm import LLMProvider, LLMRequest, LLMResponse
+from .processing import ProcessingHistory, ProcessingRequest, ProcessingResult
+from .template import Template, TemplateCreate, TemplateUpdate
+from .user import User, UserCreate, UserUpdate
 
 __all__ = [
     "User", "UserCreate", "UserUpdate",

@@ -1,5 +1,5 @@
 """LLM provider manager — single-provider (OpenAI-compatible)."""
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from src.llm.providers.openai_provider import OpenAIProvider
 

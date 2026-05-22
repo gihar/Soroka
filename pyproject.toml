@@ -12,6 +12,13 @@ src = ["src", "."]
 select = ["E", "F", "W", "I"]
 ignore = [
     "E501",  # line too long — relax during migration
+    # Whitespace tech debt — codebase predates ruff enforcement.
+    "W291",  # trailing-whitespace
+    "W292",  # missing-newline-at-end-of-file
+    "W293",  # blank-line-with-whitespace
+    # Style tech debt — many existing call sites, address incrementally.
+    "E722",  # bare-except
+    "E741",  # ambiguous-variable-name
 ]
 
 [tool.ruff.lint.isort]

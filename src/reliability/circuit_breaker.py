@@ -4,9 +4,10 @@ Circuit Breaker для защиты от каскадных сбоев
 
 import asyncio
 import time
-from enum import Enum
-from typing import Callable, Any, Optional, Dict
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Callable, Dict, Optional
+
 from loguru import logger
 
 
@@ -155,7 +156,7 @@ class CircuitBreaker:
             await self._handle_success()
             return result
             
-        except Exception as e:
+        except Exception:
             await self._handle_failure()
             raise
     

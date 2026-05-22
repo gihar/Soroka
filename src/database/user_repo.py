@@ -1,6 +1,7 @@
 """User data access."""
+from typing import Any, Dict, Optional
+
 import aiosqlite
-from typing import Optional, Dict, Any
 from loguru import logger
 
 

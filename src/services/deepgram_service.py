@@ -5,15 +5,15 @@
 from __future__ import annotations
 
 import os
-import asyncio
-from typing import Optional, Dict, Any
 from pathlib import Path
-from loguru import logger
-import httpx
-from config import settings
+from typing import Any, Dict, Optional
 
+import httpx
+from loguru import logger
+
+from config import settings
+from src.exceptions.processing import CloudTranscriptionError, DeepgramAPIError
 from src.models.processing import TranscriptionResult
-from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, DeepgramAPIError
 from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
 # Используем прямой HTTP API вместо SDK для избежания проблем с Pydantic валидацией

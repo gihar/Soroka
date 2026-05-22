@@ -2,9 +2,9 @@
 Тесты для извлечения информации о встрече из текста
 """
 
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 # Добавляем корневую директорию в path для импортов
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

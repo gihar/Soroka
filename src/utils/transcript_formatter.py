@@ -1,7 +1,7 @@
 """
 Утилиты для форматирования транскрипций с сохранением последовательности реплик
 """
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 
 def format_transcript_with_speaker_sequence(segments: List[Dict[str, Any]]) -> str:

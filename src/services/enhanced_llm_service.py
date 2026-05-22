@@ -1,17 +1,22 @@
 """Enhanced LLM service — single-provider (OpenAI) with reliability stack."""
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from loguru import logger
 
-from src.exceptions.processing import LLMError
-from src.reliability import (
-    RetryManager, LLM_RETRY_CONFIG,
-    CircuitBreaker, CircuitBreakerConfig, DEFAULT_CIRCUIT_BREAKER_CONFIG,
-    global_rate_limiter, OPENAI_API_LIMIT,
-    create_llm_fallback_manager,
-)
 from config import settings
 from llm_providers import llm_manager
+from src.exceptions.processing import LLMError
+from src.reliability import (
+    DEFAULT_CIRCUIT_BREAKER_CONFIG,
+    LLM_RETRY_CONFIG,
+    OPENAI_API_LIMIT,
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    RetryManager,
+    create_llm_fallback_manager,
+    global_rate_limiter,
+)
 
 
 class EnhancedLLMService:

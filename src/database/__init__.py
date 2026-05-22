@@ -1,10 +1,10 @@
 """Database package with repository pattern."""
 from .database import Database, db
-from .user_repo import UserRepository
-from .template_repo import TemplateRepository
 from .feedback_repo import FeedbackRepository
 from .metrics_repo import MetricsRepository
 from .queue_repo import QueueRepository
+from .template_repo import TemplateRepository
+from .user_repo import UserRepository
 
 # Convenience instances
 user_repo = UserRepository(db)

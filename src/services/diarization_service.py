@@ -2,17 +2,18 @@
 Модуль диаризации аудио и видео файлов с защитой от OOM
 """
 
+import gc
 import os
 import warnings
-import gc
-from typing import Optional, List, Dict, Any, Tuple
-from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
+
 from config import settings
 
 # Импортируем OOM защиту
 try:
-    from src.performance.oom_protection import oom_protected, get_oom_protection
+    from src.performance.oom_protection import get_oom_protection
     OOM_PROTECTION_AVAILABLE = True
 except ImportError:
     OOM_PROTECTION_AVAILABLE = False
@@ -34,8 +35,8 @@ warnings.filterwarnings("ignore", message=".*torch.*")
 warnings.filterwarnings("ignore", message=".*pyannote.audio.*")
 
 try:
-    import whisperx
     import torch
+    import whisperx
     WHISPERX_AVAILABLE = True
 except ImportError:
     WHISPERX_AVAILABLE = False
@@ -49,7 +50,7 @@ except ImportError:
     logger.warning("Pyannote.audio не установлен. Резервный вариант диаризации недоступен.")
 
 try:
-    import pvfalcon
+    import pvfalcon  # noqa: F401 — availability probe
     FALCON_AVAILABLE = True
 except ImportError:
     FALCON_AVAILABLE = False

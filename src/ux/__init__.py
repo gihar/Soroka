@@ -2,13 +2,16 @@
 Модуль улучшений пользовательского опыта (UX)
 """
 
-from .progress_tracker import ProgressTracker, ProgressFactory
-from .message_builder import MessageBuilder
 from .feedback_system import (
-    FeedbackCollector, FeedbackUI, QuickFeedbackManager, 
-    feedback_collector, setup_feedback_handlers
+    FeedbackCollector,
+    FeedbackUI,
+    QuickFeedbackManager,
+    feedback_collector,
+    setup_feedback_handlers,
 )
-from .quick_actions import QuickActionsUI, CommandShortcuts, UserGuidance, setup_quick_actions_handlers
+from .message_builder import MessageBuilder
+from .progress_tracker import ProgressFactory, ProgressTracker
+from .quick_actions import CommandShortcuts, QuickActionsUI, UserGuidance, setup_quick_actions_handlers
 
 __all__ = [
     "ProgressTracker",

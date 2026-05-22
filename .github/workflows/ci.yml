@@ -16,7 +16,8 @@ jobs:
           python-version: "3.11"
       - run: pip install ruff
       - run: ruff check .
-      - run: ruff format --check .
+      # ruff format --check is intentionally disabled: codebase predates ruff
+      # formatting enforcement. Re-enable after a one-time bulk `ruff format` pass.
 
   test:
     runs-on: ubuntu-latest

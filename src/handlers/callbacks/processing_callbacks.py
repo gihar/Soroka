@@ -2,30 +2,32 @@
 Обработчики callback запросов для обработки файлов и управления задачами.
 """
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery
 from loguru import logger
 
-from services import UserService, TemplateService, EnhancedLLMService, ProcessingService
+from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+
 from .helpers import _safe_callback_answer
 
 
 async def _process_file(callback: CallbackQuery, state: FSMContext, processing_service: ProcessingService):
     """Начать обработку файла"""
-    from src.models.processing import ProcessingRequest
-    from src.services.task_queue_manager import task_queue_manager
-    from src.models.task_queue import TaskPriority
-    from src.ux.queue_tracker import QueueTrackerFactory
     import asyncio
+
+    from src.models.processing import ProcessingRequest
+    from src.models.task_queue import TaskPriority
+    from src.services.task_queue_manager import task_queue_manager
+    from src.ux.queue_tracker import QueueTrackerFactory
 
     try:
         # Получаем данные из состояния
         data = await state.get_data()
 
         # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info(f"🔍 Данные из state перед созданием request (callback):")
+        logger.info("🔍 Данные из state перед созданием request (callback):")
         participants_list = data.get('participants_list')
         if participants_list:
             logger.info(f"  participants_list: {len(participants_list)} чел.")
@@ -98,11 +100,11 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         )
 
         # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info(f"🔍 ProcessingRequest создан, проверка полей:")
+        logger.info("🔍 ProcessingRequest создан, проверка полей:")
         if request.participants_list:
             logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
         else:
-            logger.warning(f"  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
+            logger.warning("  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
         logger.info(f"  request.meeting_topic: {request.meeting_topic}")
         logger.info(f"  request.meeting_date: {request.meeting_date}")
         logger.info(f"  request.meeting_time: {request.meeting_time}")

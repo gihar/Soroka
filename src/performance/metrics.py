@@ -2,18 +2,18 @@
 Система мониторинга производительности и сбора метрик
 """
 
-import time
 import asyncio
-import psutil
-import threading
-from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
-from loguru import logger
 import json
-import sys
 import os
+import sys
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+import psutil
+from loguru import logger
 
 # Добавляем корневую директорию в путь для импорта database
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))

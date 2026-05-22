@@ -3,12 +3,13 @@
 Скрипт для мониторинга использования памяти бота Soroka
 """
 
+import argparse
 import os
 import sys
 import time
-import psutil
-import argparse
 from datetime import datetime
+
+import psutil
 from loguru import logger
 
 # Добавляем src в путь для импортов
@@ -72,7 +73,7 @@ def print_memory_status(memory_info):
     print(f"Мониторинг памяти Soroka Bot - {timestamp}")
     print(f"{'='*60}")
     
-    print(f"Системная память:")
+    print("Системная память:")
     print(f"  Всего: {system['total_mb']:.1f} MB")
     print(f"  Использовано: {system['used_mb']:.1f} MB ({system['percent']:.1f}%)")
     print(f"  Доступно: {system['available_mb']:.1f} MB")
@@ -85,7 +86,7 @@ def print_memory_status(memory_info):
     elif bot_process and "error" in bot_process:
         print(f"\nПроцесс бота: {bot_process['error']}")
     else:
-        print(f"\nПроцесс бота: не найден")
+        print("\nПроцесс бота: не найден")
     
     # Определяем статус
     if system['percent'] >= 95:
@@ -127,7 +128,7 @@ def monitor_continuous(interval=10, max_iterations=None):
             time.sleep(interval)
             
     except KeyboardInterrupt:
-        print(f"\n\nМониторинг остановлен пользователем")
+        print("\n\nМониторинг остановлен пользователем")
     except Exception as e:
         logger.error(f"Ошибка при мониторинге: {e}")
 
@@ -142,7 +143,7 @@ def check_oom_protection():
     stats = oom_protection.get_statistics()
     
     print(f"\n{'='*60}")
-    print(f"Статус OOM Protection")
+    print("Статус OOM Protection")
     print(f"{'='*60}")
     
     print(f"Защита активна: {'✅' if stats['protection_enabled'] else '❌'}")
@@ -151,13 +152,13 @@ def check_oom_protection():
     print(f"События очистки: {stats['cleanup_events_count']}")
     
     memory_status = stats['current_memory_status']
-    print(f"\nТекущий статус памяти:")
+    print("\nТекущий статус памяти:")
     print(f"  Система: {memory_status['system']['percent']:.1f}%")
     print(f"  Процесс: {memory_status['process']['rss_mb']:.1f} MB")
     print(f"  Статус: {memory_status['status']}")
     
     if stats['recent_events']['oom_events']:
-        print(f"\nПоследние OOM события:")
+        print("\nПоследние OOM события:")
         for event in stats['recent_events']['oom_events'][-3:]:
             print(f"  - {event['timestamp']}: {event['type']}")
 

@@ -11,11 +11,11 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from config import settings
-from src.performance.cache_system import performance_cache, cache_llm_response
-from src.performance.metrics import metrics_collector, PerformanceTimer
-from src.performance.async_optimization import task_pool
-from src.exceptions.processing import ProcessingError
 from src.exceptions.configuration import AdminConfigurationError
+from src.exceptions.processing import ProcessingError
+from src.performance.async_optimization import task_pool
+from src.performance.cache_system import cache_llm_response, performance_cache
+from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.services.protocol_validator import protocol_validator
 
 from .protocol_formatter import ProtocolFormatter
@@ -59,12 +59,11 @@ class LLMGenerationService:
         meeting_type: str = None,
     ) -> Any:
         """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
-        from src.models.processing import ProcessingRequest  # noqa: F811
+        from database import db as app_db
 
         # Резолвим активную модель (глобальная админ-настройка) до построения cache key
         from src.database.app_settings_repo import AppSettingsRepository
         from src.database.model_preset_repo import ModelPresetRepository
-        from database import db as app_db
 
         app_settings_repo = AppSettingsRepository(app_db)
         preset_repo = ModelPresetRepository(app_db)

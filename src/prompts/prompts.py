@@ -2,8 +2,7 @@
 Промпты для двухзапросного подхода к генерации протоколов
 """
 
-from typing import Dict, Any, Optional
-
+from typing import Dict, Optional
 
 # Compact field-specific rules for protocol generation.
 # Each rule contains ONLY what's unique to this field.

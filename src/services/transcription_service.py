@@ -2,20 +2,24 @@
 Обновленный сервис транскрипции с защитой от OOM
 """
 
-import os
 import asyncio
-import tempfile
-import httpx
+import os
 import shutil
-import psutil
-from typing import Optional, Dict, Any
 from pathlib import Path
+
+import httpx
 from loguru import logger
 
-from src.models.processing import TranscriptionResult, DiarizationData
-from src.exceptions.processing import TranscriptionError, CloudTranscriptionError, GroqAPIError, SpeechmaticsAPIError, DeepgramAPIError
-from src.performance.oom_protection import oom_protected, get_oom_protection, memory_safe_operation
 from config import settings
+from src.exceptions.processing import (
+    CloudTranscriptionError,
+    DeepgramAPIError,
+    GroqAPIError,
+    SpeechmaticsAPIError,
+    TranscriptionError,
+)
+from src.models.processing import TranscriptionResult
+from src.performance.oom_protection import get_oom_protection, oom_protected
 
 # Leopard (Picovoice) STT — lazy import for faster startup
 LEOPARD_AVAILABLE = None  # resolved on first use
@@ -40,7 +44,7 @@ except ImportError:
     logger.warning("Groq SDK недоступен")
 
 try:
-    from src.services.diarization_service import diarization_service, DiarizationResult
+    from src.services.diarization_service import diarization_service
     DIARIZATION_AVAILABLE = True
 except ImportError:
     DIARIZATION_AVAILABLE = False

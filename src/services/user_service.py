@@ -3,11 +3,12 @@
 """
 
 from typing import Optional
+
 from loguru import logger
 
-from src.models.user import User, UserCreate, UserUpdate
-from src.exceptions.user import UserNotFoundError, UserCreationError
 from database import db
+from src.exceptions.user import UserCreationError, UserNotFoundError
+from src.models.user import User, UserCreate
 
 
 class UserService:
@@ -45,7 +46,7 @@ class UserService:
     async def create_user(self, user_data: UserCreate) -> User:
         """Создать нового пользователя"""
         try:
-            user_id = await self.db.create_user(
+            await self.db.create_user(
                 telegram_id=user_data.telegram_id,
                 username=user_data.username,
                 first_name=user_data.first_name,

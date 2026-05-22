@@ -2,12 +2,12 @@
 ML-based классификатор шаблонов на основе embeddings
 """
 
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
 from loguru import logger
 
 from src.models.template import Template
-
 
 # Маппинг типов встреч к ключевым словам (aligned with 7-template set)
 MEETING_TYPE_TO_CATEGORIES = {

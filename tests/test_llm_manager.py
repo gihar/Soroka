@@ -2,8 +2,9 @@
 import importlib.util
 import os
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 _manager_path = os.path.join(os.path.dirname(__file__), "..", "src", "llm", "manager.py")
 

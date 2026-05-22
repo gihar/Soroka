@@ -1,6 +1,7 @@
 """Tests for EnhancedLLMService — preset-based API."""
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 
 @pytest.mark.asyncio

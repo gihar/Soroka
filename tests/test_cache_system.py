@@ -2,19 +2,20 @@
 Тесты для системы кэширования
 """
 
+import asyncio
+import shutil
+import tempfile
+from datetime import datetime, timedelta
+
 import pytest
 import pytest_asyncio
-import asyncio
-import tempfile
-import shutil
-from pathlib import Path
-from datetime import datetime, timedelta
+
 from src.performance.cache_system import (
-    PerformanceCache,
     CacheEntry,
-    cache_transcription,
+    PerformanceCache,
+    cache_diarization,
     cache_llm_response,
-    cache_diarization
+    cache_transcription,
 )
 
 

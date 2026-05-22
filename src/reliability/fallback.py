@@ -3,9 +3,10 @@
 """
 
 import asyncio
-from typing import Callable, Any, List, Optional, Dict
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
 from loguru import logger
 
 

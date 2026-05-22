@@ -2,13 +2,14 @@
 Обработчики callback запросов для сопоставления спикеров с участниками.
 """
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery
 from loguru import logger
 
-from services import UserService, TemplateService, EnhancedLLMService, ProcessingService
+from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+
 from .helpers import _safe_callback_answer
 
 
@@ -293,9 +294,8 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         except Exception as e:
             # Расширенное логирование ошибки
             import traceback
-            import sys
 
-            logger.error(f"❌ Ошибка в speaker_mapping_confirm_callback")
+            logger.error("❌ Ошибка в speaker_mapping_confirm_callback")
             logger.error(f"Тип ошибки: {type(e).__name__}")
             # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
             error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
@@ -304,7 +304,7 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
             # Логируем контекст callback
             try:
                 if 'user_id_from_callback' in locals():
-                    logger.error(f"Контекст callback:")
+                    logger.error("Контекст callback:")
                     logger.error(f"  - User ID: {user_id_from_callback}")
                     logger.error(f"  - Chat ID: {callback.message.chat.id}")
                     logger.error(f"  - Callback data: {callback.data}")

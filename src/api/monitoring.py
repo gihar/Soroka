@@ -3,8 +3,10 @@ API endpoints для мониторинга
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import Any, Dict
+
 from loguru import logger
+
 from reliability.health_check import health_checker
 from reliability.middleware import monitoring_middleware
 from reliability.rate_limiter import global_rate_limiter

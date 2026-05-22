@@ -4,9 +4,9 @@
 
 import asyncio
 from typing import Optional
-from datetime import datetime
+
 from aiogram import Bot
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from src.utils.telegram_safe import safe_bot_edit_message

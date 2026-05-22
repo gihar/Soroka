@@ -2,13 +2,14 @@
 Обработчики callback запросов для ВЫБОРА шаблонов (при обработке файлов).
 """
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import UserService, TemplateService, EnhancedLLMService, ProcessingService
+from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+
 from .helpers import _safe_callback_answer
 
 

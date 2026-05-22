@@ -1,7 +1,7 @@
 """LLM providers package."""
-from .manager import LLMManager, generate_protocol
-from .json_utils import safe_json_parse
 from .base import LLMProvider
+from .json_utils import safe_json_parse
+from .manager import LLMManager, generate_protocol
 
 # Global singleton (matches original llm_providers.py behavior)
 llm_manager = LLMManager()

@@ -1,5 +1,6 @@
 """Resolution of the active model preset at processing time."""
 import pytest
+
 from src.exceptions.configuration import AdminConfigurationError
 
 
@@ -41,6 +42,7 @@ async def test_resolve_active_preset_raises_when_unset(test_db, app_settings_rep
 async def test_resolve_active_preset_raises_when_disabled(test_db, app_settings_repo):
     """If the active preset has been disabled out-of-band, raise."""
     import aiosqlite
+
     from src.database.model_preset_repo import ModelPresetRepository
     from src.services.processing.llm_generation import resolve_active_preset
 

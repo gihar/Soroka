@@ -2,10 +2,10 @@
 Модуль для работы с базой данных
 """
 
+from typing import Any, Dict, List, Optional
+
 import aiosqlite
-from typing import List, Dict, Optional, Any
 from loguru import logger
-from src.config import settings
 
 
 class Database:

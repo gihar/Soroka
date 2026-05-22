@@ -3,12 +3,13 @@
 """
 
 import re
-from typing import Dict, Any, Tuple, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+
 from loguru import logger
 
 # Импорт для избежания циркулярных зависимостей
 if TYPE_CHECKING:
-    from src.models.diarization_analysis import DiarizationAnalysisResult
+    pass
 
 
 class MeetingClassifier:

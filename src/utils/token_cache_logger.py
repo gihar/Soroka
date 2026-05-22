@@ -2,9 +2,9 @@
 Утилиты для логирования и мониторинга prompt caching в LLM запросах
 """
 
-from typing import Dict, Any, Optional
-from loguru import logger
+from typing import Any, Dict, Optional
 
+from loguru import logger
 
 # Стоимость токенов для различных моделей (USD за 1K токенов)
 TOKEN_COSTS = {

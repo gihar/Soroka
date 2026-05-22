@@ -2,17 +2,18 @@
 Обработчики сообщений с файлами
 """
 
-import re
-import os
 import asyncio
+import os
+import re
 from typing import Optional
-from aiogram import Router, F
+
+from aiogram import F, Router
 from aiogram.filters import StateFilter
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services import FileService, TemplateService, ProcessingService
+from services import FileService, ProcessingService, TemplateService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.exceptions.template import TemplateNotFoundError
@@ -38,7 +39,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             # Валидируем файл
             try:
                 file_service.validate_file(file_obj, content_type, file_name)
-            except FileSizeError as e:
+            except FileSizeError:
                 from ux.message_builder import MessageBuilder
                 error_details = {
                     "type": "size",
@@ -48,7 +49,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 error_message = MessageBuilder.file_validation_error(error_details)
                 await safe_answer(message, error_message, parse_mode="Markdown")
                 return
-            except FileTypeError as e:
+            except FileTypeError:
                 from ux.message_builder import MessageBuilder
                 formats = file_service.get_supported_formats()
                 error_details = {
@@ -188,8 +189,8 @@ async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_
 async def _start_file_processing(message: Message, state: FSMContext, processing_service):
     """Начать обработку файла"""
     from src.models.processing import ProcessingRequest
-    from src.services.task_queue_manager import task_queue_manager
     from src.models.task_queue import TaskPriority
+    from src.services.task_queue_manager import task_queue_manager
     from src.ux.queue_tracker import QueueTrackerFactory
     
     try:
@@ -197,7 +198,7 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         data = await state.get_data()
         
         # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info(f"🔍 Данные из state перед созданием request:")
+        logger.info("🔍 Данные из state перед созданием request:")
         participants_list = data.get('participants_list')
         if participants_list:
             logger.info(f"  participants_list: {len(participants_list)} чел.")
@@ -269,11 +270,11 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         )
         
         # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info(f"🔍 ProcessingRequest создан, проверка полей (message):")
+        logger.info("🔍 ProcessingRequest создан, проверка полей (message):")
         if request.participants_list:
             logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
         else:
-            logger.warning(f"  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
+            logger.warning("  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
         logger.info(f"  request.meeting_topic: {request.meeting_topic}")
         logger.info(f"  request.meeting_date: {request.meeting_date}")
         logger.info(f"  request.meeting_time: {request.meeting_time}")
@@ -663,14 +664,14 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 )
                 
                 # Показываем детальное меню добавления участников
-                from src.handlers.participants_handlers import show_participants_menu
                 from services import UserService
+                from src.handlers.participants_handlers import show_participants_menu
                 user_service = UserService()
                 await show_participants_menu(message, user_service)
                 
-            except FileSizeError as e:
-                from ux.message_builder import MessageBuilder
+            except FileSizeError:
                 from config import settings
+                from ux.message_builder import MessageBuilder
                 
                 error_details = {
                     "type": "size",
@@ -680,7 +681,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 error_message = MessageBuilder.file_validation_error(error_details)
                 await safe_edit_text(status_message, error_message, parse_mode="Markdown")
                 
-            except FileTypeError as e:
+            except FileTypeError:
                 from ux.message_builder import MessageBuilder
                 
                 error_details = {

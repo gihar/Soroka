@@ -3,22 +3,25 @@ PDF converter with corporate minimalist styling.
 Converts Markdown protocol text to a professional business-style PDF.
 """
 
-import re
 import os
+import re
 from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm, mm
-from reportlab.platypus import (
-    BaseDocTemplate, PageTemplate, Frame,
-    Paragraph, Spacer, HRFlowable,
-)
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm, mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-
+from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
+    HRFlowable,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+)
 
 # --- Color palette (corporate minimalist) ---
 COLOR_PRIMARY = colors.HexColor('#1a1a2e')    # near-black for titles

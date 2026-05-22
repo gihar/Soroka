@@ -2,18 +2,25 @@
 Компоненты для повышения надежности системы
 """
 
-from .retry import RetryManager, retry_on_failure, LLM_RETRY_CONFIG, API_RETRY_CONFIG, TRANSCRIPTION_RETRY_CONFIG
 from .circuit_breaker import (
-    CircuitBreaker,
-    CircuitBreakerState,
-    CircuitBreakerConfig,
+    CONSERVATIVE_CONFIG,
     DEFAULT_CIRCUIT_BREAKER_CONFIG,
     FAST_RECOVERY_CONFIG,
-    CONSERVATIVE_CONFIG,
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerState,
 )
-from .rate_limiter import RateLimiter, RateLimitExceeded, global_rate_limiter, OPENAI_API_LIMIT, ANTHROPIC_API_LIMIT, USER_REQUEST_LIMIT
-from .health_check import HealthChecker, HealthStatus, health_checker
 from .fallback import FallbackManager, FallbackStrategy, create_llm_fallback_manager
+from .health_check import HealthChecker, HealthStatus, health_checker
+from .rate_limiter import (
+    ANTHROPIC_API_LIMIT,
+    OPENAI_API_LIMIT,
+    USER_REQUEST_LIMIT,
+    RateLimiter,
+    RateLimitExceeded,
+    global_rate_limiter,
+)
+from .retry import API_RETRY_CONFIG, LLM_RETRY_CONFIG, TRANSCRIPTION_RETRY_CONFIG, RetryManager, retry_on_failure
 
 # Глобальные экземпляры компонентов
 _circuit_breakers = {}

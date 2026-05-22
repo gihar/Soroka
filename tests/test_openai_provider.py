@@ -1,8 +1,6 @@
 """Tests for OpenAIProvider preset handling and cache invalidation."""
 import importlib
 import sys
-
-import pytest
 from unittest.mock import MagicMock
 
 

@@ -3,16 +3,17 @@
 """
 
 import asyncio
-import aiohttp
-import aiofiles
 import os
 import ssl
-from typing import Any, Callable, List, Optional, Dict, Union
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import time
-from loguru import logger
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
+import aiofiles
+import aiohttp
+from loguru import logger
 
 
 @dataclass
@@ -108,8 +109,7 @@ class AsyncTaskPool:
                        if time.time() - t.duration < 3600]  # За последний час
         
         successful = [t for t in recent_tasks if t.success]
-        failed = [t for t in recent_tasks if not t.success]
-        
+
         return {
             "active_tasks": len(self.active_tasks),
             "max_concurrent": self.max_concurrent,
@@ -172,10 +172,6 @@ class OptimizedHTTPClient:
         try:
             async with self.session.get(url) as response:
                 response.raise_for_status()
-                
-                # Получаем размер файла если доступен
-                content_length = response.headers.get('content-length')
-                total_size = int(content_length) if content_length else None
                 
                 async with aiofiles.open(file_path, 'wb') as file:
                     async for chunk in response.content.iter_chunked(chunk_size):

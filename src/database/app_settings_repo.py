@@ -4,12 +4,12 @@ Stores small, global pieces of state that are not user-scoped — most notably
 `active_model_key`, the globally selected AI model preset.
 """
 
-import aiosqlite
 from typing import Optional
+
+import aiosqlite
 from loguru import logger
 
 from src.exceptions.configuration import AdminConfigurationError
-
 
 _ACTIVE_MODEL_KEY = "active_model_key"
 
