@@ -231,6 +231,35 @@ class Database:
                 )
             """)
 
+            # Таблица глобальных настроек приложения (key-value)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_by INTEGER
+                )
+            """)
+
+            # Seed active_model_key from first enabled preset (idempotent).
+            # INSERT OR IGNORE makes concurrent startups safe.
+            cursor = await db.execute(
+                "SELECT key FROM model_presets WHERE is_enabled = 1 "
+                "ORDER BY created_at, id LIMIT 1"
+            )
+            preset_row = await cursor.fetchone()
+            if preset_row is not None:
+                cursor = await db.execute(
+                    "INSERT OR IGNORE INTO app_settings (key, value, updated_by) "
+                    "VALUES ('active_model_key', ?, NULL)",
+                    (preset_row[0],),
+                )
+                if cursor.rowcount > 0:
+                    logger.info(
+                        f"Seeded active_model_key = '{preset_row[0]}' "
+                        "from first enabled preset"
+                    )
+
             # Миграция: консолидация шаблонов (27 -> 7)
             await self._consolidate_templates(db)
 
@@ -259,15 +288,6 @@ class Database:
             await db.commit()
             return cursor.lastrowid
     
-    async def update_user_llm_preference(self, telegram_id: int, llm_provider: Optional[str]):
-        """Обновить предпочтения LLM пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE users SET preferred_llm = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-                (llm_provider, telegram_id)
-            )
-            await db.commit()
-
     async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]):
         """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -277,15 +297,6 @@ class Database:
             )
             await db.commit()
 
-    async def update_user_openai_model_preference(self, telegram_id: int, model_key: Optional[str]):
-        """Обновить предпочтения модели OpenAI пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE users SET preferred_openai_model_key = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-                (model_key, telegram_id)
-            )
-            await db.commit()
-    
     async def get_templates(self) -> List[Dict[str, Any]]:
         """Получить все шаблоны"""
         import json

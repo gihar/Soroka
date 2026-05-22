@@ -41,3 +41,10 @@ async def template_repo(test_db):
     """TemplateRepository backed by in-memory DB."""
     from src.database.template_repo import TemplateRepository
     return TemplateRepository(test_db)
+
+
+@pytest.fixture
+async def app_settings_repo(test_db):
+    """AppSettingsRepository backed by the test DB."""
+    from src.database.app_settings_repo import AppSettingsRepository
+    return AppSettingsRepository(test_db)

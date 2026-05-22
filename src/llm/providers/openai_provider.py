@@ -68,6 +68,25 @@ class OpenAIProvider(LLMProvider):
         self._http_clients.clear()
         self._client_cache.clear()
 
+    def invalidate_cache_for(self, base_url: str, api_key_hash: Optional[int]) -> None:
+        """Remove the cached OpenAI client for the given (base_url, api_key_hash) tuple.
+
+        Used after a preset is updated so the next call rebuilds the client with the
+        new credentials.
+        """
+        cache_key = (base_url, api_key_hash)
+        client = self._client_cache.pop(cache_key, None)
+        if client is not None:
+            logger.info(f"Invalidated OpenAI client cache for {base_url}")
+
+    def invalidate_cache_for_base_url(self, base_url: str) -> None:
+        """Remove all cached OpenAI clients for the given base_url, regardless of api_key."""
+        keys_to_remove = [k for k in self._client_cache if k[0] == base_url]
+        for k in keys_to_remove:
+            self._client_cache.pop(k)
+        if keys_to_remove:
+            logger.info(f"Invalidated {len(keys_to_remove)} OpenAI client(s) for {base_url}")
+
     def is_available(self) -> bool:
         return self.default_client is not None and settings.openai_api_key is not None
 
@@ -99,28 +118,15 @@ class OpenAIProvider(LLMProvider):
         provided_meeting_type = kwargs.get('meeting_type')
         provided_speaker_mapping = kwargs.get('speaker_mapping')
 
-        selected_model = settings.openai_model
-        openai_model_key = kwargs.get('openai_model_key')
-        preset_dict = None
-
-        if openai_model_key:
-            try:
-                from src.database.model_preset_repo import ModelPresetRepository
-                from src.database import db
-                repo = ModelPresetRepository(db)
-                preset_dict = await repo.get_by_key(openai_model_key)
-
-                if preset_dict:
-                    selected_model = preset_dict['model']
-                    logger.info(f"Используется модель из БД: {selected_model} (ключ: {openai_model_key})")
-                else:
-                    preset = next((p for p in settings.openai_models if p.key == openai_model_key), None)
-                    if preset:
-                        selected_model = preset.model
-                        preset_dict = {'base_url': preset.base_url, 'api_key': None}
-                        logger.info(f"Используется модель из конфига: {selected_model} (ключ: {openai_model_key})")
-            except Exception as e:
-                logger.warning(f"Не удалось определить модель по ключу {openai_model_key}: {e}")
+        preset_dict = kwargs.get('preset')
+        if preset_dict and preset_dict.get('model'):
+            selected_model = preset_dict['model']
+            logger.info(
+                f"Используется модель: {selected_model} "
+                f"(ключ: {preset_dict.get('key')})"
+            )
+        else:
+            selected_model = settings.openai_model
 
         if provided_meeting_type and provided_speaker_mapping:
             logger.info(f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление спикеров ({len(provided_speaker_mapping)} спикеров) уже определены")

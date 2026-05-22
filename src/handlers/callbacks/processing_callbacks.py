@@ -242,18 +242,9 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             if user and getattr(user, 'default_template_id', None):
                 template_id = user.default_template_id
 
-            # LLM: user's preferred or first available
-            available = llm_service.get_available_providers()
-            if not available:
-                await safe_edit_text(callback.message,
-                    "❌ Нет доступных LLM провайдеров.")
-                return
-
-            llm_provider = None
-            if user and user.preferred_llm and user.preferred_llm in available:
-                llm_provider = user.preferred_llm
-            else:
-                llm_provider = next(iter(available))
+            # LLM provider is always OpenAI post-migration; the actual model is
+            # determined by the admin-configured active preset at processing time.
+            llm_provider = 'openai'
 
             # Set state and process
             await state.update_data(

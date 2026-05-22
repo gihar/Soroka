@@ -123,46 +123,44 @@ class QuickActionsUI:
         return InlineKeyboardMarkup(inline_keyboard=buttons)
     
     @staticmethod
-    def create_settings_menu() -> InlineKeyboardMarkup:
-        """Меню настроек"""
-        buttons = [
-            [
+    def create_settings_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
+        """Меню настроек. Админ дополнительно видит выбор активной модели ИИ."""
+        buttons = []
+
+        if is_admin:
+            buttons.append([
                 InlineKeyboardButton(
-                    text="🤖 Предпочитаемый ИИ",
-                    callback_data="settings_preferred_llm"
+                    text="🤖 Модель ИИ",
+                    callback_data="settings_active_model",
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🧠 Модель OpenAI",
-                    callback_data="settings_openai_model"
-                )
-            ],
+            ])
+
+        buttons.extend([
             [
                 InlineKeyboardButton(
                     text="📤 Вывод протокола",
-                    callback_data="settings_protocol_output"
+                    callback_data="settings_protocol_output",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="📝 Шаблон по умолчанию",
-                    callback_data="settings_default_template"
+                    callback_data="settings_default_template",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="📊 Статистика",
-                    callback_data="settings_stats"
+                    callback_data="settings_stats",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="🔄 Сбросить настройки",
-                    callback_data="settings_reset"
+                    callback_data="settings_reset",
                 )
-            ]
-        ]
+            ],
+        ])
 
         return InlineKeyboardMarkup(inline_keyboard=buttons)
     
@@ -374,7 +372,10 @@ def setup_quick_actions_handlers() -> Router:
     @router.message(F.text == "⚙️ Настройки")
     async def settings_button_handler(message: Message):
         """Обработчик кнопки настроек"""
-        keyboard = QuickActionsUI.create_settings_menu()
+        from src.utils.admin_utils import is_admin as _is_admin
+        keyboard = QuickActionsUI.create_settings_menu(
+            is_admin=_is_admin(message.from_user.id)
+        )
         await message.answer(
             "⚙️ **Настройки бота**\n\n"
             "Настройте бота под ваши предпочтения:",

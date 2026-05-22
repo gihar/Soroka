@@ -4,6 +4,8 @@ import aiosqlite
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
+from src.exceptions.configuration import ActivePresetDeletionError
+
 
 # Whitelist of fields allowed in update_field
 _ALLOWED_FIELDS = frozenset({
@@ -90,11 +92,25 @@ class ModelPresetRepository:
             )
             await db.commit()
 
+        # Invalidate any cached OpenAI client built from a previous version of this
+        # preset, so the next request rebuilds with current base_url/api_key.
+        # Best-effort: never block the upsert on cache invalidation errors.
+        try:
+            from src.llm import llm_manager
+            provider = llm_manager.providers.get("openai")
+            if provider is not None:
+                provider.invalidate_cache_for_base_url(base_url)
+        except Exception as e:
+            logger.warning(
+                f"Failed to invalidate OpenAI client cache for preset '{key}': {e}"
+            )
+
     async def update_field(self, key: str, field: str, value: Any) -> bool:
         """Update a single field for a preset identified by key.
 
         Returns True when a row was affected.
         Raises ValueError if the field name is not in the whitelist.
+        Raises ActivePresetDeletionError when disabling the active preset.
         """
         if field not in _ALLOWED_FIELDS:
             raise ValueError(
@@ -103,6 +119,9 @@ class ModelPresetRepository:
             )
 
         async with aiosqlite.connect(self._db.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            if field == "is_enabled" and int(value) == 0:
+                await self._raise_if_active(db, key, operation="отключить")
             cursor = await db.execute(
                 f"UPDATE model_presets SET {field} = ? WHERE key = ?",
                 (value, key),
@@ -111,14 +130,36 @@ class ModelPresetRepository:
             return cursor.rowcount > 0
 
     async def delete(self, key: str) -> bool:
-        """Delete a preset by key. Returns True if a row was deleted."""
+        """Delete a preset by key. Returns True if a row was deleted.
+
+        Raises `ActivePresetDeletionError` if `key` is the globally active model.
+        """
         async with aiosqlite.connect(self._db.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await self._raise_if_active(db, key, operation="удалить")
             cursor = await db.execute(
                 "DELETE FROM model_presets WHERE key = ?",
                 (key,),
             )
             await db.commit()
             return cursor.rowcount > 0
+
+    async def _raise_if_active(self, db, key: str, operation: str) -> None:
+        """Raise ActivePresetDeletionError if `key` is the globally active preset.
+
+        Uses the open transaction `db` so the check and the mutation that follows
+        run under a single write lock.
+        """
+        cursor = await db.execute(
+            "SELECT value FROM app_settings WHERE key = 'active_model_key'"
+        )
+        row = await cursor.fetchone()
+        if row is not None and row[0] == key:
+            await db.rollback()
+            raise ActivePresetDeletionError(
+                f"Нельзя {operation} активный пресет '{key}'. "
+                "Сначала выберите другой пресет в /settings → Модель ИИ."
+            )
 
     async def sync_from_config(self) -> int:
         """Import presets from settings.openai_models into DB via upsert.

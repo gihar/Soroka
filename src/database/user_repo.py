@@ -32,24 +32,6 @@ class UserRepository:
             await db.commit()
             return cursor.lastrowid
 
-    async def update_llm_preference(self, telegram_id: int, llm_provider: Optional[str]) -> None:
-        """Update user's preferred LLM provider."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            await db.execute(
-                "UPDATE users SET preferred_llm = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-                (llm_provider, telegram_id)
-            )
-            await db.commit()
-
-    async def update_openai_model_preference(self, telegram_id: int, model_key: Optional[str]) -> None:
-        """Update user's preferred OpenAI model."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            await db.execute(
-                "UPDATE users SET preferred_openai_model_key = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-                (model_key, telegram_id)
-            )
-            await db.commit()
-
     async def update_protocol_output_preference(self, telegram_id: int, mode: Optional[str]) -> None:
         """Update user's preferred protocol output mode."""
         async with aiosqlite.connect(self._db.db_path) as db:

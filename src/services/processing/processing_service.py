@@ -108,9 +108,6 @@ class ProcessingService(BaseProcessingService):
     def _get_template_variables_from_template(self, template):
         return self.llm_gen.get_template_variables_from_template(template)
 
-    async def _get_model_display_name(self, provider, openai_model_key=None):
-        return await self.llm_gen.get_model_display_name(provider, openai_model_key)
-
     async def _generate_llm_response(self, *args, **kwargs):
         return await self.llm_gen.generate_llm_response(*args, **kwargs)
 
@@ -399,12 +396,19 @@ class ProcessingService(BaseProcessingService):
                 asyncio.create_task(self._cleanup_temp_file(temp_file_path))
 
             # Определяем название модели для результата
-            openai_model_key = None
-            if request.llm_provider == 'openai':
-                openai_model_key = getattr(user, 'preferred_openai_model_key', None)
-            llm_model_display_name = await self._get_model_display_name(
-                request.llm_provider, openai_model_key
-            )
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
+            from database import db as app_db
+            from src.services.processing.llm_generation import resolve_active_preset
+
+            try:
+                active_preset = await resolve_active_preset(
+                    AppSettingsRepository(app_db),
+                    ModelPresetRepository(app_db),
+                )
+                llm_model_display_name = active_preset.get("name") or active_preset.get("model")
+            except Exception:
+                llm_model_display_name = "?"
 
             return ProcessingResult(
                 transcription_result=transcription_result,
@@ -740,13 +744,19 @@ class ProcessingService(BaseProcessingService):
                 asyncio.create_task(self._cleanup_temp_file(temp_file_path))
 
             # Определяем название модели
-            user = await self.user_service.get_user_by_telegram_id(user_id)
-            openai_model_key = None
-            if request.llm_provider == 'openai' and user:
-                openai_model_key = getattr(user, 'preferred_openai_model_key', None)
-            llm_model_display_name = await self._get_model_display_name(
-                request.llm_provider, openai_model_key
-            )
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.database.model_preset_repo import ModelPresetRepository
+            from database import db as app_db
+            from src.services.processing.llm_generation import resolve_active_preset
+
+            try:
+                active_preset = await resolve_active_preset(
+                    AppSettingsRepository(app_db),
+                    ModelPresetRepository(app_db),
+                )
+                llm_model_display_name = active_preset.get("name") or active_preset.get("model")
+            except Exception:
+                llm_model_display_name = "?"
 
             result = ProcessingResult(
                 transcription_result=transcription_result,

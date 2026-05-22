@@ -15,130 +15,6 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
     """Настройка обработчиков callback запросов для настроек"""
     router = Router()
 
-    @router.callback_query(F.data == "settings_preferred_llm")
-    async def settings_preferred_llm_callback(callback: CallbackQuery):
-        """Обработчик настройки предпочитаемого ИИ"""
-        try:
-            available_providers = llm_service.get_available_providers()
-
-            # Создаем клавиатуру для выбора LLM
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"🤖 {provider_name}",
-                    callback_data=f"set_llm_{provider_key}"
-                )] for provider_key, provider_name in available_providers.items()
-            ] + [
-                [InlineKeyboardButton(
-                    text="🔄 Сбросить предпочтение",
-                    callback_data="reset_llm_preference"
-                )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
-            ])
-
-            await safe_edit_text(callback.message,
-                "🤖 **Выберите предпочитаемый ИИ**\n\n"
-                "Этот ИИ будет использоваться автоматически для всех обработок:",
-                reply_markup=keyboard
-            )
-            await callback.answer()
-
-        except Exception as e:
-            logger.error(f"Ошибка в settings_preferred_llm_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке настроек")
-
-    @router.callback_query(F.data == "settings_openai_model")
-    async def settings_openai_model_callback(callback: CallbackQuery):
-        """Обработчик меню выбора модели OpenAI"""
-        try:
-            from src.database.model_preset_repo import ModelPresetRepository
-            from database import db as app_db
-            repo = ModelPresetRepository(app_db)
-            presets = await repo.get_available_for_user(callback.from_user.id)
-            if not presets:
-                await safe_edit_text(callback.message,
-                    "❌ Нет доступных моделей.\n\n"
-                    "Используйте /add_model чтобы добавить модель.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
-                    ])
-                )
-                await callback.answer()
-                return
-            # Получаем текущего пользователя и его выбор
-            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
-            selected_key = getattr(user, 'preferred_openai_model_key', None) if user else None
-
-            keyboard_rows = []
-            for p in presets:
-                label = f"{'✅ ' if selected_key == p['key'] else ''}{p['name']}"
-                keyboard_rows.append([InlineKeyboardButton(text=label, callback_data=f"set_openai_model_{p['key']}")])
-            keyboard_rows.append([InlineKeyboardButton(text="🔄 Сбросить выбор модели", callback_data="reset_openai_model_preference")])
-            keyboard_rows.append([InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")])
-
-            await safe_edit_text(callback.message,
-                "🧠 **Модель OpenAI**\n\n"
-                "Выберите модель, которая будет использоваться при провайдере OpenAI:",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Ошибка в settings_openai_model_callback: {e}")
-            await callback.answer("❌ Не удалось загрузить модели OpenAI")
-
-    @router.callback_query(F.data.startswith("set_openai_model_"))
-    async def set_openai_model_callback(callback: CallbackQuery):
-        """Устанавливает предпочитаемую модель OpenAI"""
-        try:
-            model_key = callback.data.replace("set_openai_model_", "")
-
-            # Проверяем, что модель доступна этому пользователю (защита от IDOR)
-            from src.database.model_preset_repo import ModelPresetRepository
-            from database import db as app_db
-            repo = ModelPresetRepository(app_db)
-            allowed = await repo.get_available_for_user(callback.from_user.id)
-            if not any(p['key'] == model_key for p in allowed):
-                await callback.answer("❌ Модель недоступна", show_alert=True)
-                return
-
-            await user_service.update_user_openai_model_preference(callback.from_user.id, model_key)
-            try:
-                preset = await repo.get_by_key(model_key)
-                model_name = preset['name'] if preset else model_key
-            except Exception as e:
-                logger.warning(f"Не удалось получить название модели {model_key}: {e}")
-                model_name = model_key
-            await safe_edit_text(callback.message,
-                f"✅ Модель OpenAI обновлена: {model_name}.\n\n"
-                "Она будет использоваться при выборе провайдера OpenAI.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
-                ])
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Ошибка в set_openai_model_callback: {e}")
-            await callback.answer("❌ Не удалось сохранить выбор модели")
-
-    @router.callback_query(F.data == "reset_openai_model_preference")
-    async def reset_openai_model_preference_callback(callback: CallbackQuery):
-        """Сбрасывает предпочитаемую модель OpenAI"""
-        try:
-            await user_service.update_user_openai_model_preference(callback.from_user.id, None)
-            await safe_edit_text(callback.message,
-                "🔄 Выбор модели OpenAI сброшен.\n\n"
-                "Будет использован пресет по умолчанию.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
-                ])
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Ошибка в reset_openai_model_preference_callback: {e}")
-            await callback.answer("❌ Не удалось сбросить выбор модели")
-
     @router.callback_query(F.data == "settings_protocol_output")
     async def settings_protocol_output_callback(callback: CallbackQuery):
         """Обработчик настройки режима вывода протокола"""
@@ -216,8 +92,6 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
     async def settings_reset_callback(callback: CallbackQuery):
         """Обработчик сброса всех настроек"""
         try:
-            # Сбрасываем все настройки пользователя
-            await user_service.update_user_llm_preference(callback.from_user.id, None)
             # Сбрасываем режим вывода протокола на значение по умолчанию
             try:
                 await user_service.update_user_protocol_output_preference(callback.from_user.id, 'messages')
@@ -234,7 +108,6 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             await safe_edit_text(callback.message,
                 "🔄 **Настройки сброшены**\n\n"
                 "Все ваши настройки восстановлены по умолчанию:\n\n"
-                "• Предпочтения ИИ сброшены\n"
                 "• Шаблон по умолчанию сброшен\n"
                 "• Другие настройки восстановлены\n\n"
                 "Теперь бот будет использовать настройки по умолчанию.",
@@ -317,8 +190,11 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         """Обработчик возврата к главному меню настроек"""
         try:
             from ux.quick_actions import QuickActionsUI
+            from src.utils.admin_utils import is_admin as _is_admin
 
-            keyboard = QuickActionsUI.create_settings_menu()
+            keyboard = QuickActionsUI.create_settings_menu(
+                is_admin=_is_admin(callback.from_user.id)
+            )
 
             await safe_edit_text(callback.message,
                 "⚙️ **Настройки бота**\n\n"
@@ -330,5 +206,119 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         except Exception as e:
             logger.error(f"Ошибка в back_to_settings_callback: {e}")
             await callback.answer("❌ Произошла ошибка при возврате к настройкам")
+
+    @router.callback_query(F.data == "settings_active_model")
+    async def settings_active_model_callback(callback: CallbackQuery):
+        """Show the active-model picker (admin only)."""
+        from src.utils.admin_utils import is_admin
+        if not is_admin(callback.from_user.id):
+            logger.warning(
+                f"Non-admin {callback.from_user.id} attempted to open settings_active_model"
+            )
+            await callback.answer(
+                "❌ Доступно только администратору", show_alert=True
+            )
+            return
+
+        try:
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database.app_settings_repo import AppSettingsRepository
+            from database import db as app_db
+
+            preset_repo = ModelPresetRepository(app_db)
+            app_settings_repo = AppSettingsRepository(app_db)
+
+            presets = await preset_repo.get_enabled()
+            if not presets:
+                await safe_edit_text(
+                    callback.message,
+                    "❌ Нет доступных моделей.\n\n"
+                    "Используйте /add_model чтобы добавить модель.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="⬅️ Назад к настройкам",
+                            callback_data="back_to_settings",
+                        )]
+                    ]),
+                )
+                await callback.answer()
+                return
+
+            active_key = await app_settings_repo.get_active_model_key()
+            rows = []
+            for p in presets:
+                marker = "✅ " if p["key"] == active_key else ""
+                rows.append([InlineKeyboardButton(
+                    text=f"{marker}{p['name']}",
+                    callback_data=f"set_active_model_{p['key']}",
+                )])
+            rows.append([InlineKeyboardButton(
+                text="⬅️ Назад к настройкам",
+                callback_data="back_to_settings",
+            )])
+
+            await safe_edit_text(
+                callback.message,
+                "🤖 **Модель ИИ**\n\n"
+                "Выберите модель, которая будет использоваться ботом:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                parse_mode="Markdown",
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в settings_active_model_callback: {e}")
+            await callback.answer("❌ Не удалось загрузить список моделей")
+
+    @router.callback_query(F.data.startswith("set_active_model_"))
+    async def set_active_model_callback(callback: CallbackQuery):
+        """Apply admin's choice of active model (admin only)."""
+        from src.utils.admin_utils import is_admin
+        if not is_admin(callback.from_user.id):
+            logger.warning(
+                f"Non-admin {callback.from_user.id} attempted set_active_model"
+            )
+            await callback.answer(
+                "❌ Доступно только администратору", show_alert=True
+            )
+            return
+
+        try:
+            preset_key = callback.data.replace("set_active_model_", "", 1)
+
+            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database.app_settings_repo import AppSettingsRepository
+            from src.exceptions.configuration import AdminConfigurationError
+            from database import db as app_db
+
+            app_settings_repo = AppSettingsRepository(app_db)
+            preset_repo = ModelPresetRepository(app_db)
+
+            try:
+                await app_settings_repo.set_active_model_key(
+                    preset_key, admin_id=callback.from_user.id
+                )
+            except AdminConfigurationError as e:
+                await callback.answer(f"❌ {e.message}", show_alert=True)
+                return
+
+            preset = await preset_repo.get_by_key(preset_key)
+            model_name = preset["name"] if preset else preset_key
+
+            await safe_edit_text(
+                callback.message,
+                f"✅ Активная модель: **{model_name}**\n\n"
+                "Бот будет использовать эту модель для всех обработок.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="⬅️ Назад к настройкам",
+                        callback_data="back_to_settings",
+                    )]
+                ]),
+                parse_mode="Markdown",
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в set_active_model_callback: {e}")
+            await callback.answer("❌ Не удалось сохранить выбор модели")
 
     return router

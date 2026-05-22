@@ -60,10 +60,9 @@ if __name__ == "__main__":
         logger.error("TELEGRAM_TOKEN не установлен. Проверьте файл .env")
         exit(1)
     
-    # Проверяем наличие хотя бы одного API ключа для LLM
-    if not any([settings.openai_api_key, settings.anthropic_api_key, 
-                settings.yandex_api_key]):
-        logger.warning("Не установлены API ключи для LLM провайдеров")
+    # Проверяем наличие API ключа OpenAI
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY не установлен")
     
     # Проверяем наличие ffmpeg
     if not check_ffmpeg():

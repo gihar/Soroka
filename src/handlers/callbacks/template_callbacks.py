@@ -111,7 +111,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data.startswith("select_template_id_"))
     async def select_template_id_callback(callback: CallbackQuery, state: FSMContext):
         """Использовать выбранный шаблон без сохранения по умолчанию"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             await _safe_callback_answer(callback)
@@ -133,12 +133,13 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await safe_edit_text(callback.message,
                 f"📋 **Выбран шаблон: {template.name}**\n\n"
                 "Шаблон будет использован для текущей обработки.\n\n"
-                "⏳ Переходим к выбору ИИ для обработки...",
+                "⏳ Начинаю обработку...",
                 parse_mode="Markdown"
             )
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в select_template_id_callback: {e}")
@@ -147,7 +148,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data.startswith("select_template_"))
     async def select_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик выбора шаблона"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             # Немедленно отвечаем на callback query
@@ -156,8 +157,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             template_id = int(callback.data.replace("select_template_", ""))
             await state.update_data(template_id=template_id)
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в select_template_callback: {e}")
@@ -166,7 +168,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data.startswith("use_default_template_"))
     async def use_default_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик использования шаблона по умолчанию"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             # Немедленно отвечаем на callback query
@@ -175,8 +177,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             template_id = int(callback.data.replace("use_default_template_", ""))
             await state.update_data(template_id=template_id)
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в use_default_template_callback: {e}")
@@ -295,7 +298,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data == "smart_template_selection")
     async def smart_template_selection_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик умного выбора шаблона через ML"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             # Немедленно отвечаем на callback query
@@ -308,12 +311,13 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 "🤖 **Умный выбор шаблона активирован!**\n\n"
                 "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
                 "наиболее подходящий шаблон после транскрипции.\n\n"
-                "⏳ Переходим к выбору ИИ для обработки...",
+                "⏳ Начинаю обработку...",
                 parse_mode="Markdown"
             )
 
-            # Показываем выбор LLM используя функцию для callback
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в smart_template_selection_callback: {e}")
@@ -322,7 +326,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data == "quick_smart_select")
     async def quick_smart_selection_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик быстрого умного выбора шаблона"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             # Немедленно отвечаем на callback query
@@ -334,12 +338,13 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await safe_edit_text(callback.message,
                 "🤖 **Умный выбор шаблона**\n\n"
                 "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
-                "⏳ Переходим к выбору ИИ для обработки...",
+                "⏳ Начинаю обработку...",
                 parse_mode="Markdown"
             )
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в quick_smart_selection_callback: {e}")
@@ -348,7 +353,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data == "use_saved_default")
     async def use_saved_default_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик использования сохранённого шаблона по умолчанию"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             # Немедленно отвечаем на callback query
@@ -371,7 +376,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await safe_edit_text(callback.message,
                     "🤖 **Используется Умный выбор шаблона**\n\n"
                     "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
-                    "⏳ Переходим к выбору ИИ для обработки...",
+                    "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )
             else:
@@ -388,12 +393,13 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await state.update_data(template_id=template.id, use_smart_selection=False)
                 await safe_edit_text(callback.message,
                     f"📋 **Используется шаблон: {template.name}**\n\n"
-                    "⏳ Переходим к выбору ИИ для обработки...",
+                    "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в use_saved_default_callback: {e}")
@@ -442,7 +448,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     @router.callback_query(F.data.startswith("quick_template_"))
     async def quick_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик выбора конкретного шаблона для быстрой установки"""
-        from .llm_callbacks import _show_llm_selection
+        from .processing_callbacks import _process_file
 
         try:
             await _safe_callback_answer(callback)
@@ -458,7 +464,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await safe_edit_text(callback.message,
                     "✅ **Умный выбор установлен по умолчанию**\n\n"
                     "🤖 ИИ автоматически подберёт подходящий шаблон.\n\n"
-                    "⏳ Переходим к выбору ИИ для обработки...",
+                    "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )
             else:
@@ -481,12 +487,13 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await safe_edit_text(callback.message,
                     f"✅ **Шаблон установлен: {template.name}**\n\n"
                     f"Шаблон сохранён по умолчанию и будет использован для обработки.\n\n"
-                    "⏳ Переходим к выбору ИИ для обработки...",
+                    "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )
 
-            # Показываем выбор LLM
-            await _show_llm_selection(callback, state, user_service, llm_service, processing_service)
+            # LLM selection removed (admin-only-model migration). Go straight to processing.
+            await state.update_data(llm_provider='openai')
+            await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в quick_template_callback: {e}")
