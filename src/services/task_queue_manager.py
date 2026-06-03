@@ -15,7 +15,6 @@ from config import settings
 from database import db
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
-from src.utils.telegram_safe import safe_send_document, safe_send_message
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -319,8 +318,12 @@ class TaskQueueManager:
             # Проверяем, была ли обработка приостановлена для подтверждения сопоставления
             if result is None:
                 logger.info(f"Обработка задачи {task.task_id} приостановлена - ожидаю подтверждения от пользователя")
-                # Не завершаем задачу и не отправляем результат - это будет сделано после подтверждения
-                # Задача останется в статусе PROCESSING или будет обновлена соответствующим образом
+                # Привязываем task_id к сохранённому состоянию, чтобы путь
+                # возобновления (в колбэке) мог корректно закрыть эту задачу —
+                # иначе строка очереди навсегда зависнет в статусе PROCESSING.
+                from src.services.mapping_state_cache import mapping_state_cache
+                await mapping_state_cache.attach_task_id(task.user_id, str(task.task_id))
+                # Результат отправит путь возобновления после подтверждения.
                 return
             
             # Отправляем результат пользователю
@@ -371,166 +374,22 @@ class TaskQueueManager:
                     logger.error(f"Ошибка при завершении трекера: {e}")
     
     async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None):
-        """Отправить результат обработки пользователю"""
-        import os
-        import tempfile
+        """Отправить результат обработки пользователю.
 
-        from aiogram.types import FSInputFile
+        Тонкая обёртка над :func:`src.services.result_sender.send_result_to_user`,
+        которой делегируется вся логика доставки (см. модуль result_sender).
+        """
+        from src.services.result_sender import send_result_to_user
 
-        from src.ux.message_builder import MessageBuilder
-        
-        try:
-            # Получаем настройки вывода пользователя
-            from src.services.user_service import UserService
-            user_service = UserService()
-            user = await user_service.get_user_by_telegram_id(task.user_id)
-            output_mode = getattr(user, 'protocol_output_mode', None) or 'messages'
-            
-            # Формируем словарь с результатом для MessageBuilder
-            # Определяем название модели для отображения
-            llm_display_name = result.llm_model_used if hasattr(result, 'llm_model_used') and result.llm_model_used else (
-                "OpenAI" if result.llm_provider_used == "openai" else result.llm_provider_used.capitalize()
-            )
-            
-            result_dict = {
-                "template_used": result.template_used if hasattr(result, 'template_used') else {"name": "Неизвестный"},
-                "llm_provider_used": result.llm_provider_used,
-                "llm_model_name": llm_display_name,
-                "transcription_result": {
-                    "transcription": result.transcription_result.transcription if result.transcription_result else "",
-                    "diarization": result.transcription_result.diarization if result.transcription_result else None,
-                    "compression_info": result.transcription_result.compression_info if result.transcription_result else None
-                },
-                "processing_duration": result.processing_duration if hasattr(result, 'processing_duration') else None,
-                "speaker_mapping": task.request.speaker_mapping if hasattr(task.request, 'speaker_mapping') else None
-            }
-            
-            # Формируем сообщение с результатом
-            result_message = MessageBuilder.processing_complete_message(result_dict)
-            
-            # Упрощенная логика отправки: одна попытка с Markdown, при неудаче - простое уведомление
-            try:
-                sent_message = await safe_send_message(
-                    bot, task.chat_id,
-                    text=result_message,
-                    parse_mode="Markdown"
-                )
-                # Если не удалось отправить (возможно flood control), отправляем простое уведомление
-                if not sent_message:
-                    logger.warning("Не удалось отправить результат (возможен flood control)")
-                    await safe_send_message(
-                        bot, task.chat_id,
-                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
-                    )
-            except Exception as e:
-                logger.error(f"Ошибка при отправке результата: {e}")
-                # Fallback на простое уведомление
-                try:
-                    await safe_send_message(
-                        bot, task.chat_id,
-                        text="✅ Протокол успешно создан! Файл отправляется ниже..."
-                    )
-                except Exception:
-                    pass  # Если даже простое уведомление не отправилось, пропускаем
-            
-            # Отправляем протокол
-            if not result.protocol_text:
-                logger.warning("protocol_text пустой или None")
-                await safe_send_message(
-                    bot, task.chat_id,
-                    text="❌ Протокол не был сгенерирован"
-                )
-            else:
-                if output_mode in ('file', 'pdf'):
-                    # Отправляем как файл
-                    suffix = '.pdf' if output_mode == 'pdf' else '.md'
-                    safe_name = os.path.splitext(os.path.basename(task.request.file_name))[0][:40] or 'protocol'
-                    
-                    if output_mode == 'pdf':
-                        # Для PDF создаем временный файл и конвертируем
-                        import tempfile as tmp
-                        temp_path = tmp.mktemp(suffix='.pdf')
-                        try:
-                            from src.utils.pdf_converter import convert_markdown_to_pdf_async
-                            await convert_markdown_to_pdf_async(result.protocol_text, temp_path)
-                        except Exception as e:
-                            logger.error(f"Ошибка конвертации в PDF: {e}")
-                            # Если не получилось, сохраняем как markdown файл
-                            temp_path = tmp.mktemp(suffix='.md')
-                            suffix = '.md'
-                            with open(temp_path, 'w', encoding='utf-8') as f:
-                                f.write(result.protocol_text)
-                    else:
-                        # Для markdown просто сохраняем текст
-                        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False, encoding='utf-8') as f:
-                            temp_path = f.name
-                            f.write(result.protocol_text)
-                    
-                    try:
-                        input_file = FSInputFile(temp_path, filename=f"{safe_name}{suffix}")
-                        await safe_send_document(
-                            bot, task.chat_id,
-                            document=input_file,
-                            caption="📄 Протокол готов!"
-                        )
-                    finally:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                else:
-                    # Отправляем как сообщения (разбиваем если нужно)
-                    protocol_text = result.protocol_text
-                    max_length = 4000
-                    
-                    if len(protocol_text) <= max_length:
-                        await safe_send_message(
-                            bot, task.chat_id,
-                            text=protocol_text,
-                            parse_mode="Markdown"
-                        )
-                    else:
-                        # Разбиваем на части
-                        parts = []
-                        current_part = ""
-                        
-                        for line in protocol_text.split('\n'):
-                            if len(current_part) + len(line) + 1 <= max_length:
-                                current_part += line + '\n'
-                            else:
-                                if current_part:
-                                    parts.append(current_part.strip())
-                                current_part = line + '\n'
-                        
-                        if current_part:
-                            parts.append(current_part.strip())
-                        
-                        # Отправляем части
-                        for i, part in enumerate(parts):
-                            header = f"📄 **Протокол встречи** (часть {i+1}/{len(parts)})\n\n"
-                            await safe_send_message(
-                                bot, task.chat_id,
-                                text=header + part,
-                                parse_mode="Markdown"
-                            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка отправки результата: {e}")
-            
-            # Останавливаем прогресс-трекер с сообщением об ошибке
-            if progress_tracker:
-                try:
-                    await progress_tracker.error("analysis", f"Ошибка отправки результата: {str(e)}")
-                except Exception as tracker_error:
-                    logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
-            
-            # Пытаемся отправить сообщение об ошибке пользователю
-            try:
-                await safe_send_message(
-                    bot, task.chat_id,
-                    text=f"❌ Ошибка при отправке результата: {str(e)}"
-                )
-            except Exception as send_error:
-                logger.error(f"Не удалось отправить сообщение об ошибке: {send_error}")
-    
+        await send_result_to_user(
+            bot=bot,
+            chat_id=task.chat_id,
+            user_id=task.user_id,
+            request=task.request,
+            result=result,
+            progress_tracker=progress_tracker,
+        )
+
     def _format_error_message(self, error_text: str) -> str:
         """Форматировать сообщение об ошибке для пользователя"""
         error_lower = error_text.lower()

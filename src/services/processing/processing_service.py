@@ -8,12 +8,9 @@ This is the orchestrator that delegates to:
 """
 
 import asyncio
-import json
 import os
 import time
-from datetime import datetime
 from typing import Any, Dict, Optional
-from uuid import uuid4
 
 from loguru import logger
 
@@ -60,28 +57,8 @@ class ProcessingService(BaseProcessingService):
         self.history = ProcessingHistoryService(user_service=self.user_service)
 
     # ------------------------------------------------------------------
-    # Backward-compatible private method aliases
+    # Thin delegations to ProcessingHistoryService (used across the orchestrator)
     # ------------------------------------------------------------------
-
-    def _format_speaker_mapping_message(
-        self, speaker_mapping: Dict[str, str], total_participants: int
-    ) -> str:
-        return self.formatter.format_speaker_mapping_message(speaker_mapping, total_participants)
-
-    def _format_protocol(self, template, llm_result, transcription_result) -> str:
-        return self.formatter.format_protocol(template, llm_result, transcription_result)
-
-    def _convert_complex_to_markdown(self, value):
-        return self.formatter.convert_complex_to_markdown(value)
-
-    def _format_dict_to_text(self, data):
-        return self.formatter.format_dict_to_text(data)
-
-    def _format_list_to_text(self, data):
-        return self.formatter.format_list_to_text(data)
-
-    def _fix_json_in_text(self, text):
-        return self.formatter.fix_json_in_text(text)
 
     async def _save_processing_history(self, request, result):
         return await self.history.save_processing_history(request, result)
@@ -94,21 +71,6 @@ class ProcessingService(BaseProcessingService):
 
     def _generate_result_cache_key(self, request, file_hash):
         return self.history.generate_result_cache_key(request, file_hash)
-
-    async def _optimized_llm_generation(self, transcription_result, template,
-                                        request, processing_metrics, meeting_type=None):
-        return await self.llm_gen.optimized_llm_generation(
-            transcription_result, template, request, processing_metrics, meeting_type
-        )
-
-    def _get_template_variables_from_template(self, template):
-        return self.llm_gen.get_template_variables_from_template(template)
-
-    async def _generate_llm_response(self, *args, **kwargs):
-        return await self.llm_gen.generate_llm_response(*args, **kwargs)
-
-    def _post_process_llm_result(self, llm_result):
-        return self.llm_gen.post_process_llm_result(llm_result)
 
     # ------------------------------------------------------------------
     # Orchestration
@@ -190,7 +152,8 @@ class ProcessingService(BaseProcessingService):
 
             # Шаг 5: Оптимизированная обработка
             result = await self._process_file_optimized(
-                request, processing_metrics, progress_tracker, temp_file_path
+                request, processing_metrics, progress_tracker, temp_file_path,
+                cache_key=cache_key,
             )
 
             if result is None:
@@ -219,23 +182,8 @@ class ProcessingService(BaseProcessingService):
                 await self._cleanup_temp_file(temp_file_path)
             raise
 
-    async def _process_file_optimized(
-        self,
-        request: ProcessingRequest,
-        processing_metrics,
-        progress_tracker=None,
-        temp_file_path: str = None,
-    ) -> ProcessingResult:
-        """Внутренняя оптимизированная обработка
-
-        Args:
-            request: Запрос на обработку
-            processing_metrics: Метрики производительности
-            progress_tracker: Трекер прогресса
-            temp_file_path: Путь к уже скачанному файлу (если None, файл будет скачан)
-        """
-
-        # Логирование данных из ProcessingRequest для диагностики
+    def _log_request_diagnostics(self, request: ProcessingRequest) -> None:
+        """Залогировать поля входящего ProcessingRequest для диагностики."""
         logger.info("Данные из ProcessingRequest при начале обработки:")
         if request.participants_list:
             logger.info(f"  participants_list: {len(request.participants_list)} чел.")
@@ -249,6 +197,89 @@ class ProcessingService(BaseProcessingService):
         logger.info(f"  meeting_date: {request.meeting_date}")
         logger.info(f"  meeting_time: {request.meeting_time}")
         logger.info(f"  speaker_mapping: {request.speaker_mapping}")
+
+    async def _finalize_protocol(
+        self,
+        request: ProcessingRequest,
+        transcription_result: Any,
+        template: Any,
+        processing_metrics,
+        meeting_type: Optional[str] = None,
+        temp_file_path: Optional[str] = None,
+    ) -> ProcessingResult:
+        """Общий «хвост» пайплайна.
+
+        Генерация LLM → форматирование → замена спикеров → имя модели →
+        сборка ``ProcessingResult``. Вызывается и из основного пути
+        (``_process_file_optimized``), и из пути возобновления
+        (``continue_processing_after_mapping_confirmation``), чтобы две ветки
+        не могли разойтись.
+        """
+        # Этап 3: Анализ и генерация
+        llm_result = await self.llm_gen.optimized_llm_generation(
+            transcription_result, template, request, processing_metrics,
+            meeting_type=meeting_type,
+        )
+        if llm_result is None:
+            raise ProcessingError(
+                "LLM вернул пустой результат",
+                request.file_name,
+                "llm_empty_result",
+            )
+
+        # Форматирование
+        with PerformanceTimer("formatting", metrics_collector):
+            processing_metrics.formatting_duration = 0.1
+
+            protocol_text = self.formatter.format_protocol(
+                template, llm_result, transcription_result
+            )
+
+            if request.speaker_mapping:
+                from src.utils.text_processing import replace_speakers_in_text
+                protocol_text = replace_speakers_in_text(
+                    protocol_text, request.speaker_mapping
+                )
+                logger.info("Применена замена спикеров на имена участников")
+
+        # Очистка временного файла в фоне (только для внешних файлов)
+        if request.is_external_file and temp_file_path:
+            asyncio.create_task(self.history.cleanup_temp_file(temp_file_path))
+
+        llm_model_display_name = await self.llm_gen.resolve_model_display_name()
+
+        return ProcessingResult(
+            transcription_result=transcription_result,
+            protocol_text=protocol_text,
+            template_used=(
+                template.model_dump()
+                if hasattr(template, 'model_dump')
+                else template.__dict__
+            ),
+            llm_provider_used=request.llm_provider,
+            llm_model_used=llm_model_display_name,
+            processing_duration=processing_metrics.total_duration,
+        )
+
+    async def _process_file_optimized(
+        self,
+        request: ProcessingRequest,
+        processing_metrics,
+        progress_tracker=None,
+        temp_file_path: str = None,
+        cache_key: str = None,
+    ) -> ProcessingResult:
+        """Внутренняя оптимизированная обработка
+
+        Args:
+            request: Запрос на обработку
+            processing_metrics: Метрики производительности
+            progress_tracker: Трекер прогресса
+            temp_file_path: Путь к уже скачанному файлу (если None, файл будет скачан)
+        """
+
+        # Логирование данных из ProcessingRequest для диагностики
+        self._log_request_diagnostics(request)
 
         async with optimized_file_processing() as resources:
             http_client = resources["http_client"]
@@ -344,7 +375,7 @@ class ProcessingService(BaseProcessingService):
                     pause_result = await self._handle_speaker_mapping_confirmation(
                         request, transcription_result, speaker_mapping,
                         request_meeting_type, temp_file_path, processing_metrics,
-                        progress_tracker,
+                        progress_tracker, cache_key=cache_key,
                     )
                     if pause_result is None:
                         return None
@@ -360,73 +391,34 @@ class ProcessingService(BaseProcessingService):
 
             request.template_id = template.id
 
-            # Этап 3: Анализ и генерация
+            # Этап 3: Анализ, генерация, форматирование и сборка результата
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
 
-            llm_result = await self._optimized_llm_generation(
-                transcription_result, template, request, processing_metrics,
-                meeting_type=request_meeting_type,
-            )
-
-            # Форматирование
-            if progress_tracker:
-                pass
-
-            with PerformanceTimer("formatting", metrics_collector):
-                processing_metrics.formatting_duration = 0.1
-
-                protocol_text = self._format_protocol(
-                    template, llm_result, transcription_result
-                )
-
-                if request.speaker_mapping:
-                    from src.utils.text_processing import replace_speakers_in_text
-                    protocol_text = replace_speakers_in_text(
-                        protocol_text, request.speaker_mapping
-                    )
-                    logger.info("Применена замена спикеров на имена участников")
-
-            # Очистка временного файла в фоне (только для внешних файлов)
-            if request.is_external_file:
-                asyncio.create_task(self._cleanup_temp_file(temp_file_path))
-
-            # Определяем название модели для результата
-            from database import db as app_db
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
-            from src.services.processing.llm_generation import resolve_active_preset
-
-            try:
-                active_preset = await resolve_active_preset(
-                    AppSettingsRepository(app_db),
-                    ModelPresetRepository(app_db),
-                )
-                llm_model_display_name = active_preset.get("name") or active_preset.get("model")
-            except Exception:
-                llm_model_display_name = "?"
-
-            return ProcessingResult(
+            return await self._finalize_protocol(
+                request=request,
                 transcription_result=transcription_result,
-                protocol_text=protocol_text,
-                template_used=(
-                    template.model_dump()
-                    if hasattr(template, 'model_dump')
-                    else template.__dict__
-                ),
-                llm_provider_used=request.llm_provider,
-                llm_model_used=llm_model_display_name,
-                processing_duration=processing_metrics.total_duration,
+                template=template,
+                processing_metrics=processing_metrics,
+                meeting_type=request_meeting_type,
+                temp_file_path=temp_file_path,
             )
 
     async def _handle_speaker_mapping_confirmation(
         self, request, transcription_result, speaker_mapping,
         meeting_type, temp_file_path, processing_metrics, progress_tracker,
+        cache_key=None,
     ):
         """Handle speaker mapping confirmation UI.
 
         Returns a sentinel (None) when the processing should be paused,
         or a truthy value when processing should continue without pause.
+
+        The full processing state is persisted to ``mapping_state_cache`` so the
+        resume path (``continue_processing_after_mapping_confirmation``) can
+        reconstruct it. State is stored via model dumps — ``request.model_dump()``
+        and ``processing_metrics.to_dict()`` — instead of hand-copied fields, so
+        it cannot silently drift when the models gain new fields.
         """
         logger.info(
             "UI подтверждения сопоставления включен - "
@@ -440,11 +432,7 @@ class ProcessingService(BaseProcessingService):
             'meeting_type': meeting_type,
             'diarization_data': transcription_result.diarization,
             'participants_list': request.participants_list,
-            'request_data': (
-                request.model_dump()
-                if hasattr(request, 'model_dump')
-                else request.dict()
-            ),
+            'request_data': request.model_dump(),
             'transcription_result': {
                 'transcription': transcription_result.transcription,
                 'formatted_transcript': transcription_result.formatted_transcript,
@@ -452,37 +440,8 @@ class ProcessingService(BaseProcessingService):
                 'speakers_summary': transcription_result.speakers_summary,
             },
             'temp_file_path': temp_file_path,
-            'processing_metrics': {
-                'start_time': (
-                    processing_metrics.start_time.isoformat()
-                    if hasattr(processing_metrics, 'start_time')
-                    else datetime.now().isoformat()
-                ),
-                'total_duration': (
-                    processing_metrics.total_duration
-                    if hasattr(processing_metrics, 'total_duration') else 0
-                ),
-                'download_duration': (
-                    processing_metrics.download_duration
-                    if hasattr(processing_metrics, 'download_duration') else 0
-                ),
-                'validation_duration': (
-                    processing_metrics.validation_duration
-                    if hasattr(processing_metrics, 'validation_duration') else 0
-                ),
-                'conversion_duration': (
-                    processing_metrics.conversion_duration
-                    if hasattr(processing_metrics, 'conversion_duration') else 0
-                ),
-                'transcription_duration': (
-                    processing_metrics.transcription_duration
-                    if hasattr(processing_metrics, 'transcription_duration') else 0
-                ),
-                'diarization_duration': (
-                    processing_metrics.diarization_duration
-                    if hasattr(processing_metrics, 'diarization_duration') else 0
-                ),
-            },
+            'cache_key': cache_key,
+            'processing_metrics': processing_metrics.to_dict(),
         })
 
         if progress_tracker:
@@ -601,8 +560,10 @@ class ProcessingService(BaseProcessingService):
         """
         from src.models.processing import ProcessingRequest, TranscriptionResult
         from src.services.mapping_state_cache import mapping_state_cache
+        from src.services.result_sender import send_result_to_user
         from src.ux.progress_tracker import ProgressFactory
 
+        task_id = None
         try:
             logger.info(
                 f"Продолжение обработки для пользователя {user_id} "
@@ -610,7 +571,6 @@ class ProcessingService(BaseProcessingService):
             )
 
             state_data = await mapping_state_cache.load_state(user_id)
-
             if not state_data:
                 raise ProcessingError(
                     "Состояние обработки не найдено или истекло",
@@ -618,15 +578,17 @@ class ProcessingService(BaseProcessingService):
                     "state_expired",
                 )
 
-            request_data = state_data.get('request_data', {})
             transcription_data = state_data.get('transcription_result', {})
             diarization_data = state_data.get('diarization_data', {})
             temp_file_path = state_data.get('temp_file_path')
             meeting_type = state_data.get('meeting_type', 'general')
+            cache_key = state_data.get('cache_key')
+            task_id = state_data.get('task_id')
 
             logger.info(f"Восстановлено из кеша: тип встречи = {meeting_type}")
 
-            request = ProcessingRequest(**request_data)
+            # Восстанавливаем модели из сохранённого состояния (см. P4)
+            request = ProcessingRequest(**state_data.get('request_data', {}))
             request.speaker_mapping = confirmed_mapping
 
             transcription_result = TranscriptionResult(
@@ -637,326 +599,133 @@ class ProcessingService(BaseProcessingService):
                 speakers_summary=transcription_data.get('speakers_summary', ''),
             )
 
+            processing_metrics = ProcessingMetrics.from_dict(
+                state_data.get('processing_metrics', {})
+            )
+
             progress_tracker = await ProgressFactory.create_file_processing_tracker(
                 bot=bot,
                 chat_id=chat_id,
             )
 
-            saved_metrics = state_data.get('processing_metrics', {})
-            processing_metrics = ProcessingMetrics(
-                file_name=request.file_name,
-                user_id=user_id,
-                start_time=(
-                    datetime.fromisoformat(saved_metrics['start_time'])
-                    if saved_metrics.get('start_time')
-                    else datetime.now()
-                ),
+            # Выбор шаблона (метод сам обрабатывает оба случая: задан/не задан)
+            template = await self._suggest_template_if_needed(
+                request, transcription_result, progress_tracker
             )
-            if 'download_duration' in saved_metrics:
-                processing_metrics.download_duration = saved_metrics['download_duration']
-            if 'validation_duration' in saved_metrics:
-                processing_metrics.validation_duration = saved_metrics['validation_duration']
-            if 'conversion_duration' in saved_metrics:
-                processing_metrics.conversion_duration = saved_metrics['conversion_duration']
-            if 'transcription_duration' in saved_metrics:
-                processing_metrics.transcription_duration = saved_metrics['transcription_duration']
-            if 'diarization_duration' in saved_metrics:
-                processing_metrics.diarization_duration = saved_metrics['diarization_duration']
-
-            if not request.template_id:
-                template = await self._suggest_template_if_needed(
-                    request, transcription_result, progress_tracker
+            if not template:
+                raise ProcessingError(
+                    "Не удалось выбрать шаблон",
+                    request.file_name,
+                    "template_selection",
                 )
-                if not template:
-                    raise ProcessingError(
-                        "Не удалось выбрать шаблон",
-                        request.file_name,
-                        "template_selection",
-                    )
-                request.template_id = template.id
-            else:
-                template = await self.template_service.get_template_by_id(request.template_id)
-                if not template:
-                    raise ProcessingError(
-                        f"Шаблон с ID {request.template_id} не найден",
-                        request.file_name,
-                        "template_not_found",
-                    )
+            request.template_id = template.id
 
-            # Этап 3: Анализ и генерация
+            # Общий «хвост» пайплайна — тот же, что и в основном пути.
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
-
             logger.info(f"Начинаем генерацию протокола для пользователя {user_id}")
 
-            llm_result = await self._optimized_llm_generation(
-                transcription_result, template, request, processing_metrics,
-                meeting_type=meeting_type,
-            )
-
-            logger.info(f"LLM генерация завершена. Тип результата: {type(llm_result)}")
-            if llm_result is None:
-                raise ProcessingError(
-                    "LLM вернул пустой результат",
-                    request.file_name,
-                    "llm_empty_result",
-                )
-
-            # Форматирование
-            with PerformanceTimer("formatting", metrics_collector):
-                processing_metrics.formatting_duration = 0.1
-
-                logger.info("Форматирование протокола...")
-                try:
-                    protocol_text = self._format_protocol(
-                        template, llm_result, transcription_result
-                    )
-                    logger.info(
-                        f"Протокол отформатирован. Длина: {len(protocol_text)} символов"
-                    )
-                except Exception as format_error:
-                    logger.error(f"Ошибка форматирования протокола: {format_error}")
-                    logger.error(f"Тип llm_result: {type(llm_result)}")
-                    logger.error(
-                        f"Содержимое llm_result (первые 500 символов): "
-                        f"{str(llm_result)[:500]}"
-                    )
-                    raise ProcessingError(
-                        f"Ошибка форматирования протокола: {str(format_error)}",
-                        request.file_name,
-                        "protocol_formatting_error",
-                    )
-
-                if confirmed_mapping:
-                    from src.utils.text_processing import replace_speakers_in_text
-                    protocol_text = replace_speakers_in_text(protocol_text, confirmed_mapping)
-                    logger.info(
-                        "Применена замена спикеров на имена участников "
-                        "(подтвержденное сопоставление)"
-                    )
-
-            # Очистка временного файла
-            if request.is_external_file and temp_file_path:
-                asyncio.create_task(self._cleanup_temp_file(temp_file_path))
-
-            # Определяем название модели
-            from database import db as app_db
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
-            from src.services.processing.llm_generation import resolve_active_preset
-
-            try:
-                active_preset = await resolve_active_preset(
-                    AppSettingsRepository(app_db),
-                    ModelPresetRepository(app_db),
-                )
-                llm_model_display_name = active_preset.get("name") or active_preset.get("model")
-            except Exception:
-                llm_model_display_name = "?"
-
-            result = ProcessingResult(
-                transcription_result=transcription_result,
-                protocol_text=protocol_text,
-                template_used=(
-                    template.model_dump()
-                    if hasattr(template, 'model_dump')
-                    else template.__dict__
-                ),
-                llm_provider_used=request.llm_provider,
-                llm_model_used=llm_model_display_name,
-                processing_duration=processing_metrics.total_duration,
-            )
-
-            # Отправляем результат пользователю
-            from src.models.task_queue import QueuedTask, TaskPriority
-            from src.services.task_queue_manager import TaskQueueManager
-
-            task_queue_manager = TaskQueueManager()
-
-            fake_task = QueuedTask(
-                task_id=uuid4(),
+            result = await self._finalize_protocol(
                 request=request,
-                user_id=user_id,
-                chat_id=chat_id,
-                priority=TaskPriority.NORMAL,
-                created_at=datetime.now(),
+                transcription_result=transcription_result,
+                template=template,
+                processing_metrics=processing_metrics,
+                meeting_type=meeting_type,
+                temp_file_path=temp_file_path,
             )
 
-            await task_queue_manager._send_result_to_user(
+            # Доставка результата — общий путь (без фейковой задачи очереди).
+            await send_result_to_user(
                 bot=bot,
-                task=fake_task,
+                chat_id=chat_id,
+                user_id=user_id,
+                request=request,
                 result=result,
                 progress_tracker=progress_tracker,
             )
 
             await self._save_processing_history(request, result)
 
-            logger.info(f"Обработка успешно завершена для пользователя {user_id}")
+            # Кешируем результат, чтобы повторная отправка того же файла
+            # попадала в кеш, как и в основном пути (cache_key сохранён при паузе).
+            if cache_key:
+                try:
+                    await performance_cache.set(
+                        cache_key, result, cache_type="processing_result",
+                    )
+                except Exception as cache_error:
+                    logger.warning(f"Не удалось закешировать результат: {cache_error}")
 
+            # Закрываем задачу очереди, ранее поставленную на паузу, иначе её
+            # строка в БД навсегда зависнет в статусе PROCESSING.
+            await self._mark_queue_task(task_id, "completed")
+
+            logger.info(f"Обработка успешно завершена для пользователя {user_id}")
             return result
 
-        except ProcessingError as e:
-            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
-            logger.error(
-                f"Критичная ошибка обработки для пользователя {user_id}: "
-                f"{error_msg_safe}",
-                exc_info=True,
-            )
-
-            await mapping_state_cache.clear_state(user_id)
-
-            await safe_send_message(
-                bot=bot,
-                chat_id=chat_id,
-                text=(
-                    f"Произошла критичная ошибка:\n\n{str(e)}\n\n"
-                    f"Пожалуйста, начните обработку заново."
-                ),
-            )
-
-            raise
-
-        except json.JSONDecodeError as e:
-            error_msg = f"Ошибка парсинга JSON: {str(e)}"
-
-            logger.error(f"Некритичная ошибка парсинга JSON для пользователя {user_id}")
-            logger.error(f"Детали ошибки: {error_msg}")
-
-            try:
-                state_data = await mapping_state_cache.load_state(user_id)
-                if state_data:
-                    request_data = state_data.get('request_data', {})
-                    logger.error("Контекст обработки:")
-                    logger.error(
-                        f"  - LLM провайдер: {request_data.get('llm_provider', 'unknown')}"
-                    )
-                    logger.error(
-                        f"  - Шаблон ID: {request_data.get('template_id', 'unknown')}"
-                    )
-                    logger.error(
-                        f"  - Файл: {request_data.get('file_name', 'unknown')}"
-                    )
-                    logger.error(
-                        f"  - Участники: "
-                        f"{len(request_data.get('participants_list', []))} чел."
-                    )
-            except Exception as log_error:
-                logger.warning(
-                    f"Не удалось получить контекст из состояния: {log_error}"
-                )
-
-            logger.error("Полный traceback:", exc_info=True)
-
-            await safe_send_message(
-                bot=bot,
-                chat_id=chat_id,
-                text=(
-                    f"Произошла временная ошибка при обработке:\n\n{error_msg}\n\n"
-                    f"Это может быть связано с проблемами API. "
-                    f"Ваше состояние сохранено - вы можете повторить попытку "
-                    f"через кнопку подтверждения."
-                ),
-            )
-
-            raise ProcessingError(
-                f"Ошибка парсинга ответа: {str(e)}",
-                "unknown",
-                "json_parse_error",
-            )
-
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            error_msg = "Превышено время ожидания ответа от сервиса"
-            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
-            logger.error(
-                f"Timeout для пользователя {user_id}: {error_msg_safe}",
-                exc_info=True,
-            )
-
-            await safe_send_message(
-                bot=bot,
-                chat_id=chat_id,
-                text=(
-                    f"{error_msg}\n\n"
-                    f"Ваше состояние сохранено - попробуйте повторить через минуту."
-                ),
-            )
-
-            raise ProcessingError(
-                error_msg,
-                "unknown",
-                "timeout_error",
-            )
-
         except Exception as e:
-            import traceback
+            await self._handle_resume_failure(e, user_id, chat_id, bot, task_id)
 
-            error_type = type(e).__name__
-            error_msg = str(e).lower() if e else "unknown error"
+    async def _mark_queue_task(self, task_id, status: str) -> None:
+        """Best-effort обновление статуса задачи очереди в БД.
 
-            logger.error(
-                "Неожиданное исключение в "
-                "continue_processing_after_mapping_confirmation"
+        Задача, поставленная на паузу ради подтверждения сопоставления спикеров,
+        возобновляется вне воркера — поэтому её финальный статус проставляется
+        здесь. Без этого строка очереди навсегда осталась бы в ``processing``.
+        """
+        if not task_id:
+            return
+        try:
+            await db.update_queue_task_status(str(task_id), status)
+        except Exception as e:
+            logger.warning(f"Не удалось обновить статус задачи {task_id}: {e}")
+
+    async def _handle_resume_failure(
+        self, error: Exception, user_id: int, chat_id: int, bot: Any, task_id
+    ) -> None:
+        """Единый обработчик ошибок возобновления обработки.
+
+        Логирует traceback, помечает задачу очереди как FAILED, очищает
+        сохранённое состояние, уведомляет пользователя и пробрасывает
+        ``ProcessingError`` вызывающему колбэку.
+        """
+        from src.services.mapping_state_cache import mapping_state_cache
+
+        error_type = type(error).__name__
+        logger.error(
+            f"Ошибка возобновления обработки для пользователя {user_id} "
+            f"({error_type}): {error}",
+            exc_info=True,
+        )
+
+        await self._mark_queue_task(task_id, "failed")
+        await mapping_state_cache.clear_state(user_id)
+
+        lowered = str(error).lower()
+        is_api_error = any(
+            pattern in lowered for pattern in (
+                'rate limit', 'quota', 'service unavailable',
+                'connection', 'timeout', 'network',
             )
-            logger.error(f"Тип ошибки: {error_type}")
-            logger.error(f"Сообщение ошибки: {str(e)}")
-            logger.error("Полный traceback:")
-            for line in traceback.format_exception(type(e), e, e.__traceback__):
-                logger.error(line.rstrip())
+        )
+        hint = (
+            "Похоже на временную проблему с API — попробуйте через несколько минут."
+            if is_api_error
+            else "Пожалуйста, начните обработку заново."
+        )
 
-            is_api_error = any(
-                pattern in error_msg for pattern in [
-                    'rate limit', 'quota', 'service unavailable',
-                    'connection', 'timeout', 'network',
-                ]
+        try:
+            await safe_send_message(
+                bot=bot,
+                chat_id=chat_id,
+                text=f"Произошла ошибка при продолжении обработки:\n\n{str(error)}\n\n{hint}",
             )
+        except Exception as notify_error:
+            logger.error(f"Не удалось уведомить пользователя об ошибке: {notify_error}")
 
-            if is_api_error:
-                error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
-                logger.error(
-                    f"API ошибка для пользователя {user_id} "
-                    f"({error_type}): {error_msg_safe}"
-                )
-
-                await safe_send_message(
-                    bot=bot,
-                    chat_id=chat_id,
-                    text=(
-                        f"Временная проблема с API:\n\n{str(e)}\n\n"
-                        f"Ваше состояние сохранено - попробуйте повторить "
-                        f"через несколько минут."
-                    ),
-                )
-
-                raise ProcessingError(
-                    f"API ошибка: {str(e)}",
-                    "unknown",
-                    "api_error",
-                )
-            else:
-                error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
-                logger.error(
-                    f"Неожиданная ошибка для пользователя {user_id} "
-                    f"({error_type}): {error_msg_safe}",
-                    exc_info=True,
-                )
-
-                await mapping_state_cache.clear_state(user_id)
-
-                await safe_send_message(
-                    bot=bot,
-                    chat_id=chat_id,
-                    text=(
-                        f"Произошла непредвиденная ошибка:\n\n"
-                        f"{error_type}: {str(e)}\n\n"
-                        f"Пожалуйста, начните обработку заново."
-                    ),
-                )
-
-                raise ProcessingError(
-                    f"Неожиданная ошибка: {str(e)}",
-                    "unknown",
-                    "unexpected_error",
-                )
+        if isinstance(error, ProcessingError):
+            raise error
+        raise ProcessingError(str(error), "unknown", "resume_error") from error
 
     # ------------------------------------------------------------------
     # Speaker mapping (extracted for parallel execution)

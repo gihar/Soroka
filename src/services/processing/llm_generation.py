@@ -340,6 +340,26 @@ class LLMGenerationService:
             return preset.get("name") or preset.get("model") or "GPT"
         return settings.openai_model or "GPT-4o"
 
+    async def resolve_model_display_name(self) -> str:
+        """Resolve the currently active model preset's display name.
+
+        Single source of truth for the "name shown next to the result" logic
+        that used to be inlined (and duplicated) in ProcessingService. Falls
+        back to ``"?"`` when no active preset is configured/available.
+        """
+        from database import db as app_db
+        from src.database.app_settings_repo import AppSettingsRepository
+        from src.database.model_preset_repo import ModelPresetRepository
+
+        try:
+            active_preset = await resolve_active_preset(
+                AppSettingsRepository(app_db),
+                ModelPresetRepository(app_db),
+            )
+            return active_preset.get("name") or active_preset.get("model") or "?"
+        except Exception:
+            return "?"
+
     async def generate_llm_response(
         self,
         transcription_result,

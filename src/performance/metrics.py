@@ -187,8 +187,39 @@ class ProcessingMetrics:
                     result[key] = str(value) if not isinstance(value, (list, dict)) else "non_serializable"
                 else:
                     result[key] = None
-        
+
         return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProcessingMetrics":
+        """Восстановить метрики из словаря, полученного через :meth:`to_dict`.
+
+        Вычисляемые свойства (``total_duration``, ``efficiency_score``) и любые
+        неизвестные ключи игнорируются. ISO-строки времени разбираются обратно
+        в ``datetime``. Используется при возобновлении обработки после паузы на
+        подтверждение сопоставления спикеров.
+        """
+        from dataclasses import fields as dataclass_fields
+
+        data = data or {}
+        valid_fields = {f.name for f in dataclass_fields(cls)}
+        kwargs: Dict[str, Any] = {k: v for k, v in data.items() if k in valid_fields}
+
+        for key in ("start_time", "end_time"):
+            value = kwargs.get(key)
+            if isinstance(value, str):
+                try:
+                    kwargs[key] = datetime.fromisoformat(value)
+                except ValueError:
+                    kwargs[key] = None
+
+        # start_time обязателен; если отсутствует/невалиден — берём текущее время.
+        if not kwargs.get("start_time"):
+            kwargs["start_time"] = datetime.now()
+        kwargs.setdefault("file_name", data.get("file_name", "unknown"))
+        kwargs.setdefault("user_id", data.get("user_id", 0))
+
+        return cls(**kwargs)
 
 
 class MetricsCollector:
