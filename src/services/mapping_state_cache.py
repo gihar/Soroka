@@ -87,25 +87,6 @@ class MappingStateCache:
         except Exception as e:
             logger.warning(f"Ошибка при очистке состояния для пользователя {user_id}: {e}")
     
-    async def attach_task_id(self, user_id: int, task_id: str) -> bool:
-        """Привязать id задачи очереди к сохранённому состоянию пользователя.
-
-        Задача ставится на паузу в воркере, а возобновляется в колбэке — этот
-        id позволяет на этапе возобновления корректно закрыть строку очереди
-        (COMPLETED/FAILED). Возвращает False, если состояние не найдено.
-        """
-        state = self._cache.get(user_id)
-        if state is None:
-            logger.warning(
-                f"Попытка привязать task_id для пользователя {user_id}, "
-                "но состояние не найдено"
-            )
-            return False
-        # Immutable-обновление: новый dict вместо мутации существующего.
-        self._cache[user_id] = {**state, 'task_id': task_id}
-        logger.debug(f"task_id {task_id} привязан к состоянию пользователя {user_id}")
-        return True
-
     async def update_mapping(self, user_id: int, new_mapping: Dict[str, str]) -> bool:
         """
         Обновить только сопоставление в сохраненном состоянии

@@ -311,19 +311,19 @@ class TaskQueueManager:
                 self.bot, task.chat_id, cfg.enable_diarization
             )
             
-            # Обрабатываем файл
+            # Обрабатываем файл. task_id передаём заранее: если обработка встанет
+            # на паузу для подтверждения сопоставления, он окажется в сохранённом
+            # состоянии ДО показа кнопок — без гонки с отдельной привязкой.
             processing_service = ProcessingService()
-            result = await processing_service.process_file(task.request, progress_tracker)
-            
+            result = await processing_service.process_file(
+                task.request, progress_tracker, task_id=str(task.task_id)
+            )
+
             # Проверяем, была ли обработка приостановлена для подтверждения сопоставления
             if result is None:
                 logger.info(f"Обработка задачи {task.task_id} приостановлена - ожидаю подтверждения от пользователя")
-                # Привязываем task_id к сохранённому состоянию, чтобы путь
-                # возобновления (в колбэке) мог корректно закрыть эту задачу —
-                # иначе строка очереди навсегда зависнет в статусе PROCESSING.
-                from src.services.mapping_state_cache import mapping_state_cache
-                await mapping_state_cache.attach_task_id(task.user_id, str(task.task_id))
-                # Результат отправит путь возобновления после подтверждения.
+                # Результат и финальный статус задачи проставит путь
+                # возобновления (continue_processing_after_mapping_confirmation).
                 return
             
             # Отправляем результат пользователю

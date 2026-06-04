@@ -3,7 +3,7 @@
 Covers the small, pure units introduced/extracted during the refactor:
 - ProcessingMetrics.to_dict()/from_dict() round-trip (P4)
 - result_sender pure helpers: _split_protocol_text / _build_result_dict (P2)
-- MappingStateCache.attach_task_id immutability + behaviour (P3)
+- MappingStateCache save/load round-trip incl. task_id (P3)
 - LLMGenerationService model-name resolution (P6a)
 """
 
@@ -136,30 +136,31 @@ def test_build_result_dict_falls_back_to_provider_name():
 
 
 # ---------------------------------------------------------------------------
-# MappingStateCache.attach_task_id (P3)
+# MappingStateCache save/load round-trip incl. task_id (P3)
 # ---------------------------------------------------------------------------
 
-async def test_attach_task_id_sets_id_without_mutating_original():
+async def test_state_roundtrip_preserves_task_id():
     from src.services.mapping_state_cache import MappingStateCache
 
     cache = MappingStateCache()
-    original = {"speaker_mapping": {}, "meeting_type": "general"}
-    await cache.save_state(1, original)
+    # task_id is now embedded in the state at save time (no separate attach step),
+    # which closes the race where a fast confirm could read task_id=None.
+    await cache.save_state(1, {
+        "speaker_mapping": {"SPEAKER_00": "Ivan"},
+        "meeting_type": "general",
+        "task_id": "task-abc",
+    })
 
-    ok = await cache.attach_task_id(1, "task-abc")
-
-    assert ok is True
     loaded = await cache.load_state(1)
     assert loaded["task_id"] == "task-abc"
-    # Immutable update: the dict passed into save_state is not mutated in place.
-    assert "task_id" not in original
+    assert loaded["speaker_mapping"] == {"SPEAKER_00": "Ivan"}
 
 
-async def test_attach_task_id_missing_state_returns_false():
+async def test_load_state_missing_returns_none():
     from src.services.mapping_state_cache import MappingStateCache
 
     cache = MappingStateCache()
-    assert await cache.attach_task_id(999, "task-x") is False
+    assert await cache.load_state(999) is None
 
 
 # ---------------------------------------------------------------------------

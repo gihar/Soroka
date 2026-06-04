@@ -77,8 +77,15 @@ class ProcessingService(BaseProcessingService):
     # ------------------------------------------------------------------
 
     @performance_timer("file_processing")
-    async def process_file(self, request: ProcessingRequest, progress_tracker=None) -> ProcessingResult:
-        """Оптимизированная обработка файла"""
+    async def process_file(
+        self, request: ProcessingRequest, progress_tracker=None, task_id=None
+    ) -> ProcessingResult:
+        """Оптимизированная обработка файла.
+
+        ``task_id`` (опционально) — id задачи очереди; пробрасывается в состояние
+        паузы на подтверждение сопоставления, чтобы путь возобновления мог
+        корректно закрыть исходную задачу очереди.
+        """
         # Запускаем мониторинг при первом использовании
         await self._ensure_monitoring_started()
 
@@ -153,7 +160,7 @@ class ProcessingService(BaseProcessingService):
             # Шаг 5: Оптимизированная обработка
             result = await self._process_file_optimized(
                 request, processing_metrics, progress_tracker, temp_file_path,
-                cache_key=cache_key,
+                cache_key=cache_key, task_id=task_id,
             )
 
             if result is None:
@@ -268,6 +275,7 @@ class ProcessingService(BaseProcessingService):
         progress_tracker=None,
         temp_file_path: str = None,
         cache_key: str = None,
+        task_id=None,
     ) -> ProcessingResult:
         """Внутренняя оптимизированная обработка
 
@@ -368,28 +376,33 @@ class ProcessingService(BaseProcessingService):
                 self._suggest_template_if_needed(request, transcription_result, progress_tracker),
             )
 
+            # Фиксируем шаблон СРАЗУ, до возможной паузы на подтверждение —
+            # тогда template_id попадёт в сохранённое состояние и путь
+            # возобновления переиспользует тот же шаблон, а не выберет заново.
+            if not template:
+                raise ProcessingError(
+                    "Не удалось выбрать шаблон",
+                    request.file_name, "template_selection",
+                )
+            request.template_id = template.id
+
             # Обработка результатов speaker mapping
             speaker_mapping, request_meeting_type = mapping_result
             if speaker_mapping:
                 if settings.enable_speaker_mapping_confirmation:
+                    # task_id передаём ДО показа кнопок подтверждения, чтобы он
+                    # был в сохранённом состоянии к моменту, когда пользователь
+                    # сможет нажать «Подтвердить» (иначе — гонка с attach).
                     pause_result = await self._handle_speaker_mapping_confirmation(
                         request, transcription_result, speaker_mapping,
                         request_meeting_type, temp_file_path, processing_metrics,
-                        progress_tracker, cache_key=cache_key,
+                        progress_tracker, cache_key=cache_key, task_id=task_id,
                     )
                     if pause_result is None:
                         return None
                 request.speaker_mapping = speaker_mapping
             else:
                 request.speaker_mapping = None
-
-            if not template:
-                raise ProcessingError(
-                    "Не удалось выбрать шаблон",
-                    request.file_name, "template_selection",
-                )
-
-            request.template_id = template.id
 
             # Этап 3: Анализ, генерация, форматирование и сборка результата
             if progress_tracker:
@@ -407,7 +420,7 @@ class ProcessingService(BaseProcessingService):
     async def _handle_speaker_mapping_confirmation(
         self, request, transcription_result, speaker_mapping,
         meeting_type, temp_file_path, processing_metrics, progress_tracker,
-        cache_key=None,
+        cache_key=None, task_id=None,
     ):
         """Handle speaker mapping confirmation UI.
 
@@ -441,6 +454,7 @@ class ProcessingService(BaseProcessingService):
             },
             'temp_file_path': temp_file_path,
             'cache_key': cache_key,
+            'task_id': task_id,
             'processing_metrics': processing_metrics.to_dict(),
         })
 
@@ -666,7 +680,7 @@ class ProcessingService(BaseProcessingService):
         except Exception as e:
             await self._handle_resume_failure(e, user_id, chat_id, bot, task_id)
 
-    async def _mark_queue_task(self, task_id, status: str) -> None:
+    async def _mark_queue_task(self, task_id, status: str, error_message: str = None) -> None:
         """Best-effort обновление статуса задачи очереди в БД.
 
         Задача, поставленная на паузу ради подтверждения сопоставления спикеров,
@@ -676,7 +690,9 @@ class ProcessingService(BaseProcessingService):
         if not task_id:
             return
         try:
-            await db.update_queue_task_status(str(task_id), status)
+            await db.update_queue_task_status(
+                str(task_id), status, error_message=error_message
+            )
         except Exception as e:
             logger.warning(f"Не удалось обновить статус задачи {task_id}: {e}")
 
@@ -698,7 +714,7 @@ class ProcessingService(BaseProcessingService):
             exc_info=True,
         )
 
-        await self._mark_queue_task(task_id, "failed")
+        await self._mark_queue_task(task_id, "failed", error_message=str(error))
         await mapping_state_cache.clear_state(user_id)
 
         lowered = str(error).lower()
