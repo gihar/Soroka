@@ -141,12 +141,17 @@ async def send_result_to_user(
     request: ProcessingRequest,
     result: ProcessingResult,
     progress_tracker=None,
-) -> None:
+) -> bool:
     """Send a finished processing result to the user.
 
     Handles the summary message and the protocol body, respecting the user's
     ``protocol_output_mode`` (messages / file / pdf). Errors are reported to the
     user and the progress tracker but never re-raised — delivery is best-effort.
+
+    Returns ``True`` only when the protocol BODY was delivered, ``False`` when it
+    was not (empty protocol, or the body send raised). Callers use this to avoid
+    recording a task as completed / caching a result that the user never got.
+    The summary message is cosmetic and does not affect the return value.
     """
     try:
         # Lazy imports: avoid pulling the whole src.ux package at module import
@@ -166,7 +171,7 @@ async def send_result_to_user(
         if not result.protocol_text:
             logger.warning("protocol_text пустой или None")
             await safe_send_message(bot, chat_id, text="❌ Протокол не был сгенерирован")
-            return
+            return False
 
         if output_mode in ("file", "pdf"):
             await _send_protocol_as_file(
@@ -174,6 +179,8 @@ async def send_result_to_user(
             )
         else:
             await _send_protocol_as_messages(bot, chat_id, result.protocol_text)
+
+        return True
 
     except Exception as e:
         logger.error(f"Ошибка отправки результата: {e}")
@@ -190,3 +197,4 @@ async def send_result_to_user(
             )
         except Exception as send_error:
             logger.error(f"Не удалось отправить сообщение об ошибке: {send_error}")
+        return False

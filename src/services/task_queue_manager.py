@@ -327,14 +327,26 @@ class TaskQueueManager:
                 return
             
             # Отправляем результат пользователю
-            await self._send_result_to_user(self.bot, task, result, progress_tracker)
-            
-            # Обновляем статус
-            task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now()
-            await self._update_task_status(str(task.task_id), TaskStatus.COMPLETED)
-            
-            logger.info(f"Задача {task.task_id} успешно выполнена")
+            delivered = await self._send_result_to_user(self.bot, task, result, progress_tracker)
+
+            # Обновляем статус по факту доставки: если тело протокола не дошло,
+            # не помечаем задачу выполненной (результат уже закеширован в
+            # process_file, поэтому повторная загрузка переотправит его из кеша).
+            if delivered:
+                task.status = TaskStatus.COMPLETED
+                task.completed_at = datetime.now()
+                await self._update_task_status(str(task.task_id), TaskStatus.COMPLETED)
+                logger.info(f"Задача {task.task_id} успешно выполнена")
+            else:
+                error_text = "Не удалось доставить результат пользователю"
+                task.status = TaskStatus.FAILED
+                task.error_message = error_text
+                await self._update_task_status(
+                    str(task.task_id), TaskStatus.FAILED, error_message=error_text
+                )
+                logger.warning(
+                    f"Задача {task.task_id}: протокол сгенерирован, но не доставлен"
+                )
             
         except Exception as e:
             logger.error(f"Ошибка обработки задачи {task.task_id}: {e}")
@@ -373,15 +385,16 @@ class TaskQueueManager:
                 except Exception as e:
                     logger.error(f"Ошибка при завершении трекера: {e}")
     
-    async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None):
+    async def _send_result_to_user(self, bot, task: QueuedTask, result, progress_tracker=None) -> bool:
         """Отправить результат обработки пользователю.
 
         Тонкая обёртка над :func:`src.services.result_sender.send_result_to_user`,
         которой делегируется вся логика доставки (см. модуль result_sender).
+        Возвращает True, если тело протокола доставлено, иначе False.
         """
         from src.services.result_sender import send_result_to_user
 
-        await send_result_to_user(
+        return await send_result_to_user(
             bot=bot,
             chat_id=task.chat_id,
             user_id=task.user_id,

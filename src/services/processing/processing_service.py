@@ -649,7 +649,7 @@ class ProcessingService(BaseProcessingService):
             )
 
             # Доставка результата — общий путь (без фейковой задачи очереди).
-            await send_result_to_user(
+            delivered = await send_result_to_user(
                 bot=bot,
                 chat_id=chat_id,
                 user_id=user_id,
@@ -658,23 +658,36 @@ class ProcessingService(BaseProcessingService):
                 progress_tracker=progress_tracker,
             )
 
+            # История фиксирует факт генерации протокола независимо от доставки.
             await self._save_processing_history(request, result)
 
-            # Кешируем результат, чтобы повторная отправка того же файла
-            # попадала в кеш, как и в основном пути (cache_key сохранён при паузе).
-            if cache_key:
-                try:
-                    await performance_cache.set(
-                        cache_key, result, cache_type="processing_result",
-                    )
-                except Exception as cache_error:
-                    logger.warning(f"Не удалось закешировать результат: {cache_error}")
+            if delivered:
+                # Кешируем результат ТОЛЬКО при успешной доставке — иначе повторная
+                # загрузка того же файла попадёт в кеш и не будет переотправлена.
+                # cache_key сохранён при паузе (см. P3).
+                if cache_key:
+                    try:
+                        await performance_cache.set(
+                            cache_key, result, cache_type="processing_result",
+                        )
+                    except Exception as cache_error:
+                        logger.warning(f"Не удалось закешировать результат: {cache_error}")
+                # Закрываем задачу очереди, ранее поставленную на паузу.
+                await self._mark_queue_task(task_id, "completed")
+                logger.info(f"Обработка успешно завершена для пользователя {user_id}")
+            else:
+                # Протокол сгенерирован, но доставка не удалась: не помечаем
+                # completed и не кешируем. Пользователь уже получил уведомление об
+                # ошибке; повторная загрузка файла попадёт в кеши транскрипции/LLM,
+                # так что генерация не повторится впустую.
+                await self._mark_queue_task(
+                    task_id, "failed",
+                    error_message="Не удалось доставить результат пользователю",
+                )
+                logger.warning(
+                    f"Протокол сгенерирован, но не доставлен пользователю {user_id}"
+                )
 
-            # Закрываем задачу очереди, ранее поставленную на паузу, иначе её
-            # строка в БД навсегда зависнет в статусе PROCESSING.
-            await self._mark_queue_task(task_id, "completed")
-
-            logger.info(f"Обработка успешно завершена для пользователя {user_id}")
             return result
 
         except Exception as e:
