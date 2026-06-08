@@ -1,7 +1,11 @@
 """Тесты выбора окна и нарезки аудиофрагмента спикера."""
 
 import os
+import shutil
+import subprocess
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -59,3 +63,47 @@ def test_input_segments_not_mutated():
     snapshot = [dict(s) for s in segments]
     select_fragment_window(segments, "SPEAKER_1")
     assert segments == snapshot
+
+
+def _ffprobe_duration(path: str) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True,
+    )
+    return float(out.stdout.strip())
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="ffmpeg/ffprobe не установлены в окружении",
+)
+async def test_cut_voice_fragment_produces_valid_ogg(tmp_path):
+    from src.services.audio_fragment_service import cut_voice_fragment
+
+    # Сгенерировать 20-секундный тон как исходник
+    src = tmp_path / "tone.wav"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+         "-y", str(src)],
+        capture_output=True, text=True, check=True,
+    )
+
+    out = tmp_path / "clip.ogg"
+    ok = await cut_voice_fragment(str(src), start=5.0, duration=8.0, out_path=str(out))
+
+    assert ok is True
+    assert out.exists() and out.stat().st_size > 0
+    # Длительность близка к запрошенным 8 с
+    assert abs(_ffprobe_duration(str(out)) - 8.0) < 1.0
+
+
+@pytest.mark.asyncio
+async def test_cut_voice_fragment_missing_source_returns_false(tmp_path):
+    from src.services.audio_fragment_service import cut_voice_fragment
+
+    out = tmp_path / "clip.ogg"
+    ok = await cut_voice_fragment(str(tmp_path / "nope.wav"), start=0.0, duration=5.0, out_path=str(out))
+    assert ok is False
+    assert not out.exists()
