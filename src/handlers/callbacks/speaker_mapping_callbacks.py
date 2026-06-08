@@ -128,20 +128,10 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
                     if 0 <= participant_idx < len(participants):
                         participant_name = participants[participant_idx].get('name', '')
                         if participant_name:
-                            # Проверяем, не используется ли уже этот участник другим спикером
-                            used_by = None
-                            for sid, pname in speaker_mapping.items():
-                                if sid != speaker_id and pname == participant_name:
-                                    used_by = sid
-                                    break
-
-                            if used_by:
-                                await callback.answer(
-                                    f"⚠️ Этот участник уже сопоставлен с {used_by}",
-                                    show_alert=True
-                                )
-                                return
-
+                            # Допускаем many-to-one: один участник может быть
+                            # сопоставлен нескольким спикерам. Диаризация иногда
+                            # дробит одного человека на несколько SPEAKER_N, и
+                            # пользователю нужно свести их к одному участнику.
                             speaker_mapping[speaker_id] = participant_name
                             await callback.answer("✅ Сопоставление изменено")
                         else:
