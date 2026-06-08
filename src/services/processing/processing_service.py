@@ -502,6 +502,25 @@ class ProcessingService(BaseProcessingService):
 
             speakers_text = transcription_result.speakers_text
 
+            # Аудиопревью: присылаем голосовой фрагмент на каждого спикера ПЕРЕД
+            # сообщением с клавиатурой. Обёрнуто в try/except — превью не должно
+            # мешать показу UI сопоставления.
+            try:
+                from src.ux.speaker_audio_preview import send_speaker_audio_previews
+                await send_speaker_audio_previews(
+                    bot=progress_tracker.bot,
+                    chat_id=progress_tracker.chat_id,
+                    user_id=request.user_id,
+                    speakers=all_speakers,
+                    diarization_data=transcription_result.diarization,
+                    temp_file_path=temp_file_path,
+                    speakers_text=speakers_text,
+                )
+            except Exception as preview_error:
+                logger.warning(
+                    f"Не удалось отправить аудиопревью спикеров: {preview_error}"
+                )
+
             confirmation_message = await show_mapping_confirmation(
                 bot=progress_tracker.bot,
                 chat_id=progress_tracker.chat_id,
