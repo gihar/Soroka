@@ -113,6 +113,9 @@ class SpeakerMappingSchema(BaseModel):
     )
     mapping_notes: str = Field(description="Заметки по сопоставлению и определению типа встречи")
 
+    class Config:
+        extra = "forbid"
+
 
 
 
@@ -202,8 +205,42 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
             for def_name, def_schema in schema_dict["$defs"].items():
                 fix_required_fields(def_schema)
     
+    def enforce_additional_properties_false(node: Dict[str, Any]) -> None:
+        """Strict Structured Outputs требует additionalProperties:false на КАЖДОМ
+        объектном узле (включая корень). Проставляем его рекурсивно, НЕ трогая
+        узлы, где additionalProperties уже задан — это типизированные Dict-карты
+        вида {"additionalProperties": {"type": "string"}}, которые провайдер
+        принимает и которые нужны для динамических ключей.
+        """
+        if not isinstance(node, dict):
+            return
+
+        if node.get("type") == "object" and "additionalProperties" not in node:
+            node["additionalProperties"] = False
+
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            for child in properties.values():
+                enforce_additional_properties_false(child)
+
+        defs = node.get("$defs")
+        if isinstance(defs, dict):
+            for child in defs.values():
+                enforce_additional_properties_false(child)
+
+        items = node.get("items")
+        if isinstance(items, dict):
+            enforce_additional_properties_false(items)
+
+        for combiner in ("anyOf", "oneOf", "allOf"):
+            branches = node.get(combiner)
+            if isinstance(branches, list):
+                for branch in branches:
+                    enforce_additional_properties_false(branch)
+
     fix_required_fields(schema)
-    
+    enforce_additional_properties_false(schema)
+
     # OpenAI требует определенный формат
     return {
         "name": schema.get("title", model_class.__name__),
