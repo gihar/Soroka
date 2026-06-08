@@ -9,6 +9,7 @@ from loguru import logger
 
 from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+from src.utils.template_sort import sort_templates_by_name
 
 from .helpers import _safe_callback_answer
 
@@ -22,7 +23,7 @@ async def _build_flat_template_keyboard(template_service: TemplateService,
     Returns (keyboard, templates) tuple.
     """
     templates = await template_service.get_all_templates()
-    templates.sort(key=lambda t: (not t.is_default, t.name))
+    templates = sort_templates_by_name(templates)
 
     keyboard_buttons = [
         [InlineKeyboardButton(
@@ -63,7 +64,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 )
                 return
 
-            templates.sort(key=lambda t: (not t.is_default, t.name))
+            templates = sort_templates_by_name(templates)
             keyboard_buttons = [
                 [InlineKeyboardButton(
                     text=t.name,
@@ -265,7 +266,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
         """Возврат к плоскому списку шаблонов (categories removed)"""
         try:
             templates = await template_service.get_all_templates()
-            templates.sort(key=lambda t: (not t.is_default, t.name))
+            templates = sort_templates_by_name(templates)
 
             keyboard_buttons = []
 

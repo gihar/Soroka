@@ -10,6 +10,7 @@ from loguru import logger
 
 from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+from src.utils.template_sort import sort_templates_by_name
 
 from .helpers import _safe_callback_answer
 
@@ -24,7 +25,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
         """Show flat template list for viewing (backward-compat for category callbacks)"""
         try:
             templates = await template_service.get_all_templates()
-            templates.sort(key=lambda t: (not t.is_default, t.name))
+            templates = sort_templates_by_name(templates)
 
             keyboard_buttons = [
                 [InlineKeyboardButton(
@@ -254,11 +255,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 )])
 
                 # Templates in 2-column grid
-                # Default templates first, then alphabetical
-                sorted_templates = sorted(
-                    all_templates,
-                    key=lambda t: (not t.is_default, t.name)
-                )
+                # Alphabetical order
+                sorted_templates = sort_templates_by_name(all_templates)
 
                 row = []
                 for template in sorted_templates:
