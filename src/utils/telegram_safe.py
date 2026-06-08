@@ -333,6 +333,55 @@ async def safe_send_voice(
         return None
 
 
+async def safe_send_audio(
+    bot,
+    chat_id: int,
+    audio: Union[str, FSInputFile],
+    caption: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    disable_notification: Optional[bool] = None,
+    **kwargs
+) -> Optional[Message]:
+    """
+    Безопасная отправка аудиофайла через bot
+
+    Используется как фолбэк для голосовых сообщений: sendAudio не подпадает под
+    запрет голосовых (VOICE_MESSAGES_FORBIDDEN), поэтому получатель всё равно
+    получит фрагмент — как обычный аудиофайл.
+
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        audio: Путь к аудиофайлу или FSInputFile
+        caption: Подпись к аудио
+        parse_mode: Режим парсинга
+        disable_notification: Отключить уведомление
+        **kwargs: Дополнительные параметры
+
+    Returns:
+        Отправленное сообщение или None при ошибке
+    """
+    try:
+        result = await telegram_rate_limiter.safe_send_with_retry(
+            bot.send_audio,
+            chat_id=chat_id,
+            audio=audio,
+            caption=caption,
+            parse_mode=parse_mode,
+            disable_notification=disable_notification,
+            **kwargs
+        )
+
+        if result is None:
+            logger.warning(f"Не удалось отправить аудиофайл в чат {chat_id}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Критическая ошибка в safe_send_audio: {e}")
+        return None
+
+
 async def safe_bot_edit_message(
     bot,
     chat_id: int,

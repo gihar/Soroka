@@ -11,6 +11,18 @@ from typing import Any, Callable, Dict, Optional
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from loguru import logger
 
+# Перманентные ошибки Telegram, ретрай которых бессмыслен (запрос всегда будет
+# отклонён с тем же результатом). Напр. VOICE_MESSAGES_FORBIDDEN — получатель
+# запретил голосовые сообщения в настройках приватности.
+_NON_RETRYABLE_MARKERS = (
+    "VOICE_MESSAGES_FORBIDDEN",
+)
+
+
+def is_non_retryable_telegram_error(error_message: str) -> bool:
+    """True, если ошибка перманентна и ретрай бессмыслен."""
+    return any(marker in error_message for marker in _NON_RETRYABLE_MARKERS)
+
 
 @dataclass
 class FloodControlState:
@@ -293,6 +305,10 @@ class TelegramRateLimiter:
                         return None
                 else:
                     logger.error(f"Ошибка Telegram API: {e}")
+                    # Перманентные ошибки (напр. VOICE_MESSAGES_FORBIDDEN) ретраить
+                    # бессмысленно — выходим сразу, без задержек и спама в логах.
+                    if is_non_retryable_telegram_error(str(e)):
+                        return None
                     if attempt < max_retries:
                         await asyncio.sleep(0.5 * (attempt + 1))
                         continue
