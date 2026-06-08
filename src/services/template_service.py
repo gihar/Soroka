@@ -159,6 +159,9 @@ class TemplateService:
         try:
             # Гарантируем, что схема таблицы templates поддерживает auto-update
             await self.db.ensure_templates_updated_at_column()
+            # Переименование англоязычных шаблонов и удаление системных сирот (идемпотентно)
+            from src.services.template_maintenance import apply_template_maintenance
+            await apply_template_maintenance(self.db)
             existing_templates = await self.get_all_templates()
             existing_by_name: Dict[str, Template] = {}
             for template in existing_templates:

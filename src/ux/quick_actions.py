@@ -19,6 +19,7 @@ from loguru import logger
 from config import settings
 from services import TemplateService
 from src.utils.telegram_safe import safe_edit_text
+from src.utils.template_sort import sort_templates_by_name
 
 
 class QuickActionsUI:
@@ -347,7 +348,7 @@ def setup_quick_actions_handlers() -> Router:
                 await message.answer("📝 Шаблоны не найдены.")
                 return
             
-            templates.sort(key=lambda t: (not t.is_default, t.name))
+            templates = sort_templates_by_name(templates)
 
             keyboard_buttons = [
                 [InlineKeyboardButton(

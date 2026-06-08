@@ -402,6 +402,35 @@ class Database:
             await db.commit()
             return cursor.lastrowid
 
+    async def system_template_exists(self, name: str) -> bool:
+        """Есть ли системный шаблон (created_by IS NULL) с таким именем."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM templates WHERE name = ? AND created_by IS NULL LIMIT 1",
+                (name,),
+            )
+            return await cursor.fetchone() is not None
+
+    async def rename_system_template(self, old_name: str, new_name: str) -> int:
+        """Переименовать системные шаблоны old_name -> new_name. Возвращает число строк."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE templates SET name = ? WHERE name = ? AND created_by IS NULL",
+                (new_name, old_name),
+            )
+            await db.commit()
+            return cursor.rowcount
+
+    async def delete_system_template_by_name(self, name: str) -> int:
+        """Удалить системные шаблоны с именем name. Возвращает число удалённых строк."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM templates WHERE name = ? AND created_by IS NULL",
+                (name,),
+            )
+            await db.commit()
+            return cursor.rowcount
+
     async def ensure_templates_updated_at_column(self) -> None:
         """Проверить наличие столбца updated_at и добавить его при необходимости"""
         async with aiosqlite.connect(self.db_path) as db:
