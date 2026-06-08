@@ -232,6 +232,12 @@ def get_json_schema(model_class: BaseModel) -> Dict[str, Any]:
         if isinstance(items, dict):
             enforce_additional_properties_false(items)
 
+        for combiner in ("anyOf", "oneOf", "allOf"):
+            branches = node.get(combiner)
+            if isinstance(branches, list):
+                for branch in branches:
+                    enforce_additional_properties_false(branch)
+
     fix_required_fields(schema)
     enforce_additional_properties_false(schema)
 

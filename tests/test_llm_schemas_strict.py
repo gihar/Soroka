@@ -47,3 +47,16 @@ def test_dict_fields_keep_typed_additional_properties():
         ap = props[field].get("additionalProperties")
         assert isinstance(ap, dict), f"{field} should keep a typed additionalProperties"
         assert ap is not False
+
+
+def test_nested_defs_objects_are_closed():
+    """Nested submodels hoisted to $defs must also get additionalProperties:false."""
+    from src.models.llm_schemas import UNIFIED_PROTOCOL_SCHEMA
+
+    defs = UNIFIED_PROTOCOL_SCHEMA["schema"].get("$defs", {})
+    assert defs, "expected at least one nested $defs entry (e.g. SelfReflectionSchema)"
+    for def_name, def_schema in defs.items():
+        if def_schema.get("type") == "object":
+            assert def_schema.get("additionalProperties") is False, (
+                f"$defs.{def_name}: nested object must set additionalProperties=false"
+            )
