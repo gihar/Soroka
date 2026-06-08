@@ -13,6 +13,15 @@ from llm_providers import llm_manager, safe_json_parse
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
 
+class SpeakerMappingLLMError(Exception):
+    """Жёсткий сбой LLM-вызова сопоставления (ошибка API / схемы / парсинга).
+
+    Отличает реальный сбой вызова от легитимного пустого результата, когда LLM
+    честно вернул отсутствие сопоставлений. Жёсткий сбой логируется громко и
+    приводит к мягкой деградации, а не к молчаливому пустому маппингу.
+    """
+
+
 class SpeakerMappingService:
     """Сервис для сопоставления спикеров с участниками"""
     
@@ -88,6 +97,12 @@ class SpeakerMappingService:
             logger.info(f"Сопоставление завершено: {len(validated_mapping)} спикеров, тип: {meeting_type}")
             return validated_mapping, meeting_type
             
+        except SpeakerMappingLLMError as e:
+            logger.error(
+                f"SPEAKER_MAPPING_LLM_FAILED provider={llm_provider}: {e}. "
+                "Протокол будет сгенерирован без сопоставления спикеров."
+            )
+            return {}, "general"
         except Exception as e:
             logger.error(f"Ошибка при сопоставлении спикеров: {e}")
             # Возвращаем пустой mapping и general тип
@@ -578,7 +593,7 @@ class SpeakerMappingService:
                     result = safe_json_parse(content, context="SpeakerMappingService LLM response")
                 except (ValueError, json.JSONDecodeError) as e:
                     logger.error(f"❌ Не удалось распарсить JSON ответа от LLM для маппинга спикеров: {e}")
-                    return {}
+                    raise SpeakerMappingLLMError(f"JSON parse failed: {e}") from e
                 
                 # Краткое резюме результата (если включено логирование)
                 if settings.llm_debug_log:
@@ -597,9 +612,11 @@ class SpeakerMappingService:
                 # Возвращаем пустой результат
                 return {}
             
+        except SpeakerMappingLLMError:
+            raise
         except Exception as e:
             logger.error(f"Ошибка при вызове LLM для сопоставления: {e}")
-            return {}
+            raise SpeakerMappingLLMError(str(e)) from e
     
     def _validate_mapping(
         self,
