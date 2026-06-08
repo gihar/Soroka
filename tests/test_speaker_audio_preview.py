@@ -167,3 +167,98 @@ async def test_disabled_by_config_sends_nothing(monkeypatch, tmp_path):
         speakers_text={},
     )
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_audio_when_voice_fails(monkeypatch, tmp_path):
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    voice_calls = []
+    audio_calls = []
+
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
+
+    async def fake_voice(bot, chat_id, voice, caption=None, **k):
+        voice_calls.append(caption)
+        return None  # голосовые запрещены / не ушли
+
+    async def fake_audio(bot, chat_id, audio, caption=None, **k):
+        audio_calls.append(caption)
+        return "MSG"
+
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_voice)
+    monkeypatch.setattr(preview, "safe_send_audio", fake_audio)
+
+    await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={"SPEAKER_1": "привет всем"},
+    )
+
+    assert len(voice_calls) == 1  # голосовое пробуем первым
+    assert len(audio_calls) == 1  # и падаем в фолбэк на аудиофайл
+    assert "SPEAKER_1" in audio_calls[0]
+
+
+@pytest.mark.asyncio
+async def test_no_audio_fallback_when_voice_succeeds(monkeypatch, tmp_path):
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    audio_calls = []
+
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
+
+    async def fake_voice(bot, chat_id, voice, caption=None, **k):
+        return "MSG"
+
+    async def fake_audio(bot, chat_id, audio, caption=None, **k):
+        audio_calls.append(caption)
+        return "MSG"
+
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_voice)
+    monkeypatch.setattr(preview, "safe_send_audio", fake_audio)
+
+    await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={},
+    )
+
+    assert audio_calls == []  # голосовое ушло — фолбэк не нужен
+
+
+@pytest.mark.asyncio
+async def test_schedule_runs_previews_in_background(monkeypatch):
+    ran = []
+
+    async def fake_send(**kwargs):
+        ran.append(kwargs)
+
+    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_send)
+
+    task = preview.schedule_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path="x",
+        speakers_text={},
+    )
+
+    assert task is not None
+    await task  # в проде НЕ ждём; здесь ждём, чтобы проверить, что задача отработала
+    assert len(ran) == 1
+    assert ran[0]["chat_id"] == 1
