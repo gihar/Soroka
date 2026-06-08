@@ -1,4 +1,9 @@
-"""Превью аудио вызывается ПЕРЕД показом UI сопоставления и не ломает его при ошибке."""
+"""Аудиопревью планируется ФОНОМ ПОСЛЕ показа карточки и не ломает паузу при ошибке.
+
+Регрессия, которую это закрывает: раньше превью awaitилось ВСТРОЕННО перед показом
+карточки, и падающие отправки голосовых (VOICE_MESSAGES_FORBIDDEN + ретраи) на ~8с
+блокировали и сбивали порядок UI сопоставления.
+"""
 
 import os
 import sys
@@ -48,7 +53,7 @@ def _make_args():
     return request, transcription_result, progress_tracker, processing_metrics
 
 
-def _patch_common(monkeypatch, call_log, previews_raises=False):
+def _patch_common(monkeypatch, call_log, schedule_raises=False):
     import src.services.mapping_state_cache as msc
     import src.utils.telegram_safe as ts
     import src.ux.speaker_audio_preview as preview
@@ -64,12 +69,15 @@ def _patch_common(monkeypatch, call_log, previews_raises=False):
 
     monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
 
-    async def fake_previews(**kwargs):
-        call_log.append("previews")
-        if previews_raises:
-            raise RuntimeError("ffmpeg exploded")
+    # schedule_speaker_audio_previews — СИНХРОННАЯ, возвращает управление сразу
+    # (fire-and-forget), не awaitится в проде.
+    def fake_schedule(**kwargs):
+        call_log.append("schedule")
+        if schedule_raises:
+            raise RuntimeError("scheduling failed")
+        return None
 
-    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_previews)
+    monkeypatch.setattr(preview, "schedule_speaker_audio_previews", fake_schedule)
 
     async def fake_show(**kwargs):
         call_log.append("show")
@@ -79,7 +87,7 @@ def _patch_common(monkeypatch, call_log, previews_raises=False):
 
 
 @pytest.mark.asyncio
-async def test_previews_called_before_show(monkeypatch):
+async def test_previews_scheduled_after_show(monkeypatch):
     call_log = []
     _patch_common(monkeypatch, call_log)
 
@@ -97,14 +105,15 @@ async def test_previews_called_before_show(monkeypatch):
     )
 
     assert result is None  # пауза
-    assert "previews" in call_log and "show" in call_log
-    assert call_log.index("previews") < call_log.index("show")
+    assert "show" in call_log and "schedule" in call_log
+    # Карточка показывается ПЕРВОЙ; аудио планируется уже после — не блокирует UI.
+    assert call_log.index("show") < call_log.index("schedule")
 
 
 @pytest.mark.asyncio
-async def test_preview_failure_does_not_block_show(monkeypatch):
+async def test_schedule_failure_does_not_block_pause(monkeypatch):
     call_log = []
-    _patch_common(monkeypatch, call_log, previews_raises=True)
+    _patch_common(monkeypatch, call_log, schedule_raises=True)
 
     service = _make_service()
     request, tr, pt, pm = _make_args()
@@ -120,4 +129,4 @@ async def test_preview_failure_does_not_block_show(monkeypatch):
     )
 
     assert result is None  # пауза всё равно наступает
-    assert "show" in call_log  # UI сопоставления показан несмотря на ошибку превью
+    assert "show" in call_log  # карточка показана несмотря на ошибку планирования
