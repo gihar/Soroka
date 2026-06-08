@@ -39,12 +39,12 @@ class TemplateLibrary:
 {% endif %}"""
             },
             {
-                "name": "Daily Standup",
+                "name": "Дейли",
                 "description": "Ежедневные standup встречи команды",
                 "tags": ["daily", "standup", "scrum"],
                 "keywords": ["standup", "вчера", "сегодня", "блокеры", "ежедневно"],
                 "is_default": True,
-                "content": """# Daily Standup
+                "content": """# Дейли
 
 **Дата:** {{ date }}
 **Команда:** {{ participants }}
@@ -70,12 +70,12 @@ class TemplateLibrary:
 {{ next_steps }}"""
             },
             {
-                "name": "Sprint Retrospective",
+                "name": "Ретроспектива спринта",
                 "description": "Ретроспектива спринта для улучшения процессов",
                 "tags": ["retrospective", "agile", "improvement"],
                 "keywords": ["ретроспектива", "что хорошо", "что улучшить", "действия", "retro"],
                 "is_default": True,
-                "content": """# Sprint Retrospective
+                "content": """# Ретроспектива спринта
 
 **Дата:** {{ date }}
 **Команда:** {{ participants }}
