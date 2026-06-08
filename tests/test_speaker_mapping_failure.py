@@ -17,9 +17,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.mark.asyncio
 async def test_mapping_llm_failure_is_loud_and_degrades(monkeypatch):
     from loguru import logger
+
     from src.services.speaker_mapping_service import (
-        SpeakerMappingService,
         SpeakerMappingLLMError,
+        SpeakerMappingService,
     )
 
     service = SpeakerMappingService()
@@ -61,6 +62,7 @@ async def test_mapping_llm_failure_is_loud_and_degrades(monkeypatch):
 async def test_empty_mapping_is_not_treated_as_failure(monkeypatch):
     """A successful call returning no confident matches is NOT a failure: no marker."""
     from loguru import logger
+
     from src.services.speaker_mapping_service import SpeakerMappingService
 
     service = SpeakerMappingService()
