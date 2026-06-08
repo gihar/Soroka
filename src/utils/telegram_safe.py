@@ -288,6 +288,51 @@ async def safe_send_document(
         return None
 
 
+async def safe_send_voice(
+    bot,
+    chat_id: int,
+    voice: Union[str, FSInputFile],
+    caption: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+    disable_notification: Optional[bool] = None,
+    **kwargs
+) -> Optional[Message]:
+    """
+    Безопасная отправка голосового сообщения через bot
+
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        voice: Путь к OGG/Opus файлу или FSInputFile
+        caption: Подпись к голосовому
+        parse_mode: Режим парсинга
+        disable_notification: Отключить уведомление
+        **kwargs: Дополнительные параметры
+
+    Returns:
+        Отправленное сообщение или None при ошибке
+    """
+    try:
+        result = await telegram_rate_limiter.safe_send_with_retry(
+            bot.send_voice,
+            chat_id=chat_id,
+            voice=voice,
+            caption=caption,
+            parse_mode=parse_mode,
+            disable_notification=disable_notification,
+            **kwargs
+        )
+
+        if result is None:
+            logger.warning(f"Не удалось отправить голосовое в чат {chat_id}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Критическая ошибка в safe_send_voice: {e}")
+        return None
+
+
 async def safe_bot_edit_message(
     bot,
     chat_id: int,

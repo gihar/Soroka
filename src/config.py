@@ -143,7 +143,13 @@ class Settings(BaseSettings):
     include_raw_transcription_in_prompts: bool = Field(False, description="Включать исходную транскрипцию в промпты вместе с форматированной (для отладки проблем с диаризацией, увеличивает расход токенов)")
     full_text_matching: bool = Field(False, description="Использовать полный текст транскрипции для сопоставления участников (увеличивает расход токенов)")
     enable_speaker_mapping_confirmation: bool = Field(False, description="Показывать UI для подтверждения сопоставления спикеров перед генерацией протокола")
-    
+
+    # Аудиофрагменты спикеров при сопоставлении (показываются вместе с UI подтверждения)
+    speaker_audio_preview_enabled: bool = Field(True, description="Присылать голосовые фрагменты речи каждого спикера при показе UI сопоставления")
+    speaker_preview_max_seconds: int = Field(15, description="Длина вырезаемого аудиофрагмента спикера (секунды)")
+    speaker_preview_min_segment_seconds: float = Field(1.5, description="Минимальная длительность сегмента, считающегося 'весомым' для выбора начала фрагмента (секунды)")
+    speaker_preview_bitrate: str = Field("32k", description="Битрейт Opus для голосовых фрагментов спикеров")
+
     # Настройки очереди задач
     max_concurrent_tasks: Optional[int] = Field(None, description="Максимальное количество одновременно обрабатываемых задач (по умолчанию рассчитывается по CPU/RAM)")
     max_queue_size: int = Field(100, description="Максимальный размер очереди задач")
