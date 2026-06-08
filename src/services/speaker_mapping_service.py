@@ -592,7 +592,6 @@ class SpeakerMappingService:
                 try:
                     result = safe_json_parse(content, context="SpeakerMappingService LLM response")
                 except (ValueError, json.JSONDecodeError) as e:
-                    logger.error(f"❌ Не удалось распарсить JSON ответа от LLM для маппинга спикеров: {e}")
                     raise SpeakerMappingLLMError(f"JSON parse failed: {e}") from e
                 
                 # Краткое резюме результата (если включено логирование)
@@ -615,7 +614,6 @@ class SpeakerMappingService:
         except SpeakerMappingLLMError:
             raise
         except Exception as e:
-            logger.error(f"Ошибка при вызове LLM для сопоставления: {e}")
             raise SpeakerMappingLLMError(str(e)) from e
     
     def _validate_mapping(
