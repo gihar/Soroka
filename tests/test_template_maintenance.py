@@ -43,6 +43,8 @@ async def test_maintenance_renames_and_deletes(test_db):
     user_rows = sorted(t["name"] for t in rows if t["created_by"] is not None)
     assert user_rows == ["Мастер-класс", "Простой шаблон"]
     assert result["renamed"] == 3
+    assert result["deleted"] == 4
+    assert result["deduped"] == 0
 
 
 @pytest.mark.asyncio
@@ -56,6 +58,8 @@ async def test_maintenance_is_idempotent(test_db):
     again = sorted((t["name"], t["created_by"]) for t in await test_db.get_templates())
     assert again == snapshot          # состояние не изменилось
     assert second["renamed"] == 0     # нечего переименовывать
+    assert second["deduped"] == 0
+    assert second["deleted"] == 0
 
 
 @pytest.mark.asyncio
@@ -69,4 +73,4 @@ async def test_maintenance_dedups_partial_run(test_db):
     names = [t["name"] for t in await test_db.get_templates()]
     assert names.count("Груминг бэклога") == 1     # ровно один
     assert "Backlog Refinement" not in names        # устаревший убран
-    assert result["deduped"] >= 1
+    assert result["deduped"] == 1
