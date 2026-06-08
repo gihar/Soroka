@@ -287,9 +287,10 @@ class TaskQueueManager:
         from config import settings as cfg
         from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
-        
+
         progress_tracker = None
-        
+        paused = False
+
         try:
             # Небольшая задержка для гарантии, что message_id успел сохраниться
             await asyncio.sleep(0.1)
@@ -324,6 +325,9 @@ class TaskQueueManager:
                 logger.info(f"Обработка задачи {task.task_id} приостановлена - ожидаю подтверждения от пользователя")
                 # Результат и финальный статус задачи проставит путь
                 # возобновления (continue_processing_after_mapping_confirmation).
+                # НЕ завершаем трекер: иначе появится ложное «Обработка завершена!
+                # Протокол готов» ещё ДО подтверждения сопоставления.
+                paused = True
                 return
             
             # Отправляем результат пользователю
@@ -377,8 +381,10 @@ class TaskQueueManager:
             # НЕ пробрасываем исключение - обрабатываем локально
         
         finally:
-            # КРИТИЧЕСКИ ВАЖНО: всегда завершаем трекер, даже если была ошибка
-            if progress_tracker:
+            # Завершаем трекер, даже если была ошибка — НО не на паузе для
+            # подтверждения сопоставления (там трекер уже показывает «Проверьте
+            # сопоставление», и complete_all() затёр бы его ложным «Протокол готов»).
+            if progress_tracker and not paused:
                 try:
                     logger.debug(f"Принудительное завершение трекера для задачи {task.task_id}")
                     await progress_tracker.complete_all()
