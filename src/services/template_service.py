@@ -200,7 +200,7 @@ class TemplateService:
             
             total_templates = len(existing_templates) + created_count
             logger.info(
-                "Синхронизация стандартных шаблонов завершена: создано %s, обновлено %s, пропущено пользовательских %s",
+                "Синхронизация стандартных шаблонов завершена: создано {}, обновлено {}, пропущено пользовательских {}",
                 created_count,
                 updated_count,
                 skipped_user_templates,
