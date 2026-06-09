@@ -43,5 +43,5 @@ async def apply_template_maintenance(db) -> dict:
         deleted += await db.delete_system_template_by_name(name)
 
     result = {"renamed": renamed, "deduped": deduped, "deleted": deleted}
-    logger.info("Обслуживание шаблонов завершено: %s", result)
+    logger.info("Обслуживание шаблонов завершено: {}", result)
     return result
