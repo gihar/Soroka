@@ -4,7 +4,7 @@
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from uuid import uuid4
 
@@ -15,6 +15,10 @@ from config import settings
 from database import db
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
+
+# Не чаще одного алерта админам об окончании кредитов LLM в этот интервал —
+# при исчерпании баланса падает каждая задача, иначе админов завалит сообщениями.
+_CREDITS_ALERT_THROTTLE = timedelta(minutes=10)
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -35,6 +39,7 @@ class TaskQueueManager:
         self.is_running = False
         self._lock = asyncio.Lock()
         self.bot = None  # Будет инициализирован при старте воркеров
+        self._last_credits_alert_at: Optional[datetime] = None
         
         # Определяем максимальное количество параллельных задач
         if settings.max_concurrent_tasks:
@@ -377,7 +382,17 @@ class TaskQueueManager:
                 )
             except Exception as send_error:
                 logger.error(f"Не удалось отправить рекомендации пользователю: {send_error}")
-            
+
+            # При исчерпании кредитов LLM — алертим админов (это сбой на нашей
+            # стороне, который ломает обработку у всех пользователей).
+            if self._is_insufficient_credits(str(e).lower()):
+                try:
+                    await self._notify_admins_insufficient_credits(e)
+                except Exception as admin_error:
+                    logger.error(
+                        f"Не удалось уведомить админов об окончании кредитов: {admin_error}"
+                    )
+
             # НЕ пробрасываем исключение - обрабатываем локально
         
         finally:
@@ -409,11 +424,81 @@ class TaskQueueManager:
             progress_tracker=progress_tracker,
         )
 
+    @staticmethod
+    def _is_insufficient_credits(error_lower: str) -> bool:
+        """Признак ошибки «закончились кредиты на LLM» (HTTP 402).
+
+        Срабатывает и на типизированном ``LLMInsufficientCreditsError`` (русское
+        «кредит»), и на сыром ответе провайдера (англ. «credits» / «402»).
+        """
+        return (
+            "кредит" in error_lower
+            or "credit" in error_lower
+            or "error code: 402" in error_lower
+        )
+
+    @staticmethod
+    def _build_admin_credits_alert(exc: Exception) -> str:
+        """Текст алерта администраторам об исчерпании кредитов LLM."""
+        details = getattr(exc, "details", None) or {}
+        model = details.get("model") if isinstance(details, dict) else None
+
+        raw = str(exc)
+        if len(raw) > 300:
+            raw = raw[:297] + "..."
+
+        model_line = f"Модель: {model}\n" if model else ""
+        return (
+            "🚨 LLM: закончились кредиты (HTTP 402)\n\n"
+            "Запросы к LLM-провайдеру падают — пользователи сейчас получают "
+            "«Сервис временно недоступен».\n\n"
+            f"{model_line}"
+            f"Детали: {raw}\n\n"
+            "➡️ Пополните баланс провайдера "
+            "(например, https://openrouter.ai/settings/credits)."
+        )
+
+    async def _notify_admins_insufficient_credits(self, exc: Exception) -> None:
+        """Уведомить администраторов об окончании кредитов LLM (с троттлингом)."""
+        if not settings.admins:
+            logger.warning(
+                "LLM 402: список ADMINS пуст — некого уведомить об окончании кредитов"
+            )
+            return
+
+        now = datetime.now()
+        if (
+            self._last_credits_alert_at is not None
+            and now - self._last_credits_alert_at < _CREDITS_ALERT_THROTTLE
+        ):
+            logger.debug("LLM 402: алерт админам пропущен (троттлинг)")
+            return
+        self._last_credits_alert_at = now
+
+        from src.utils.telegram_safe import safe_send_message
+
+        text = self._build_admin_credits_alert(exc)
+        for admin_id in settings.admins:
+            try:
+                await safe_send_message(
+                    self.bot, admin_id, text, disable_web_page_preview=True
+                )
+            except Exception as send_error:
+                logger.error(
+                    f"Не удалось уведомить админа {admin_id} об окончании кредитов: "
+                    f"{send_error}"
+                )
+        logger.info(
+            f"Алерт об окончании кредитов LLM отправлен админам: {settings.admins}"
+        )
+
     def _format_error_message(self, error_text: str) -> str:
         """Форматировать сообщение об ошибке для пользователя"""
         error_lower = error_text.lower()
-        
-        if "память" in error_lower or "memory" in error_lower:
+
+        if self._is_insufficient_credits(error_lower):
+            return "Сервис временно недоступен"
+        elif "память" in error_lower or "memory" in error_lower:
             return "Недостаточно памяти для обработки"
         elif "размер" in error_lower or "size" in error_lower:
             return "Файл слишком большой"
@@ -430,8 +515,18 @@ class TaskQueueManager:
     def _get_error_recommendation(self, error_text: str) -> str:
         """Получить рекомендации по устранению ошибки"""
         error_lower = error_text.lower()
-        
-        if "память" in error_lower or "memory" in error_lower:
+
+        if self._is_insufficient_credits(error_lower):
+            return (
+                "⚠️ **Сервис временно недоступен**\n\n"
+                "На сервисе обработки закончились ресурсы (кредиты LLM). "
+                "Это временная проблема на нашей стороне — с вашим файлом всё в порядке.\n\n"
+                "Что делать:\n"
+                "• Повторите попытку позже — мы пополним баланс\n"
+                "• Файл менять или пересжимать не нужно\n\n"
+                "🔄 Просто отправьте его снова через некоторое время."
+            )
+        elif "память" in error_lower or "memory" in error_lower:
             return (
                 "💡 **Рекомендации:**\n\n"
                 "Система перегружена. Попробуйте:\n"

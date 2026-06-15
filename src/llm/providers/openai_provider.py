@@ -7,6 +7,7 @@ import openai
 from loguru import logger
 
 from src.config import settings
+from src.exceptions.processing import LLMInsufficientCreditsError
 from src.llm.base import LLMProvider
 from src.llm.json_utils import safe_json_parse
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
@@ -17,6 +18,18 @@ from src.prompts.prompts import (
     build_generation_system_prompt,
 )
 from src.utils.token_cache_logger import log_cached_tokens_usage
+
+
+def _is_insufficient_credits_error(exc: Exception) -> bool:
+    """Detect an OpenAI/OpenRouter ``402 Payment Required`` (out of credits) error.
+
+    Checks the SDK ``status_code`` first, then falls back to the message text so
+    the error is recognised even if it arrives wrapped or without the attribute.
+    """
+    if getattr(exc, "status_code", None) == 402:
+        return True
+    text = str(exc).lower()
+    return "error code: 402" in text or "more credits" in text
 
 
 class OpenAIProvider(LLMProvider):
@@ -237,4 +250,8 @@ class OpenAIProvider(LLMProvider):
 
         except Exception as e:
             logger.error(f"Ошибка при вызове OpenAI [{step_name}]: {e}")
+            if _is_insufficient_credits_error(e):
+                raise LLMInsufficientCreditsError(
+                    str(e), provider="openai", model=selected_model
+                ) from e
             raise
