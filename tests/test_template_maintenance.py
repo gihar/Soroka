@@ -3,7 +3,6 @@ import pytest
 
 from src.services.template_maintenance import (
     REMOVE_NAMES,
-    RENAME_MAP,
     apply_template_maintenance,
 )
 
