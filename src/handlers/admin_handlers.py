@@ -811,10 +811,9 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_models_list(presets):
         """Build text and keyboard for the models list view."""
-        from database import db as app_db
-        from src.database.app_settings_repo import AppSettingsRepository
+        from src.database import app_settings_repo
 
-        active_key = await AppSettingsRepository(app_db).get_active_model_key()
+        active_key = await app_settings_repo.get_active_model_key()
 
         if not presets:
             text = "📋 **Список моделей**\n\nМоделей пока нет. Используйте /add\\_model или синхронизируйте из .env."
@@ -853,10 +852,9 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
     async def _render_model_detail(preset):
         """Build text and keyboard for a single model detail card."""
-        from database import db as app_db
-        from src.database.app_settings_repo import AppSettingsRepository
+        from src.database import app_settings_repo
 
-        active_key = await AppSettingsRepository(app_db).get_active_model_key()
+        active_key = await app_settings_repo.get_active_model_key()
         is_active = preset["key"] == active_key
 
         key = preset["key"]
@@ -906,8 +904,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
 
         import re
 
-        from database import db
-        from src.database.model_preset_repo import ModelPresetRepository
+        from src.database import model_preset_repo
 
         raw_args = (message.text or "").split(maxsplit=1)
         args_str = raw_args[1].strip() if len(raw_args) > 1 else ""
@@ -951,7 +948,7 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             key = key[:40]
 
         try:
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             await repo.upsert(key, name, model_id, base_url, api_key)
 
             api_display = "задан" if api_key else "не задан (используется существующий)"
@@ -976,10 +973,9 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             presets = await repo.get_all()
             text, keyboard = await _render_models_list(presets)
             await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
@@ -995,12 +991,11 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
             key = callback.data.replace("admin_model_toggle_", "", 1)
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             preset = await repo.get_by_key(key)
             if not preset:
                 await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
@@ -1030,12 +1025,11 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
             key = callback.data.replace("admin_model_access_", "", 1)
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             preset = await repo.get_by_key(key)
             if not preset:
                 await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
@@ -1059,12 +1053,11 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
             key = callback.data.replace("admin_model_delete_", "", 1)
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             from src.exceptions.configuration import ActivePresetDeletionError
 
             try:
@@ -1093,12 +1086,11 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
             key = callback.data.replace("admin_model_", "", 1)
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             preset = await repo.get_by_key(key)
             if not preset:
                 await safe_edit_text(callback.message, f"❌ Модель `{key}` не найдена.", parse_mode="Markdown")
@@ -1118,11 +1110,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             count = await repo.sync_from_config()
 
             presets = await repo.get_all()
@@ -1141,11 +1132,10 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             return
 
         try:
-            from database import db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import model_preset_repo
 
             await callback.answer()
-            repo = ModelPresetRepository(db)
+            repo = model_preset_repo
             presets = await repo.get_all()
             text, keyboard = await _render_models_list(presets)
             await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="Markdown")

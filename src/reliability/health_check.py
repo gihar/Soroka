@@ -67,10 +67,8 @@ class DatabaseHealthCheck(HealthCheck):
         
         try:
             # Простой запрос для проверки соединения
-            import aiosqlite
-
-            from database import db
-            async with aiosqlite.connect(db.db_path) as connection:
+            from src.database import db
+            async with db.connect() as connection:
                 async with connection.execute("SELECT 1") as cursor:
                     await cursor.fetchone()
             

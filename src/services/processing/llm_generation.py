@@ -59,14 +59,10 @@ class LLMGenerationService:
         meeting_type: str = None,
     ) -> Any:
         """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
-        from database import db as app_db
-
         # Резолвим активную модель (глобальная админ-настройка) до построения cache key
-        from src.database.app_settings_repo import AppSettingsRepository
-        from src.database.model_preset_repo import ModelPresetRepository
+        from src.database import app_settings_repo, model_preset_repo
 
-        app_settings_repo = AppSettingsRepository(app_db)
-        preset_repo = ModelPresetRepository(app_db)
+        preset_repo = model_preset_repo
         active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
         llm_model_name = active_preset["name"]  # noqa: F841
 
@@ -347,14 +343,12 @@ class LLMGenerationService:
         that used to be inlined (and duplicated) in ProcessingService. Falls
         back to ``"?"`` when no active preset is configured/available.
         """
-        from database import db as app_db
-        from src.database.app_settings_repo import AppSettingsRepository
-        from src.database.model_preset_repo import ModelPresetRepository
+        from src.database import app_settings_repo, model_preset_repo
 
         try:
             active_preset = await resolve_active_preset(
-                AppSettingsRepository(app_db),
-                ModelPresetRepository(app_db),
+                app_settings_repo,
+                model_preset_repo,
             )
             return active_preset.get("name") or active_preset.get("model") or "?"
         except Exception:

@@ -69,13 +69,11 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             if is_admin_user:
                 # Admins see the currently active model name (read-only line)
                 try:
-                    from database import db as app_db
-                    from src.database.app_settings_repo import AppSettingsRepository
-                    from src.database.model_preset_repo import ModelPresetRepository
+                    from src.database import app_settings_repo, model_preset_repo
 
-                    active_key = await AppSettingsRepository(app_db).get_active_model_key()
+                    active_key = await app_settings_repo.get_active_model_key()
                     if active_key:
-                        preset = await ModelPresetRepository(app_db).get_by_key(active_key)
+                        preset = await model_preset_repo.get_by_key(active_key)
                         if preset:
                             text += f"Активная модель: {preset['name']}\n\n"
                         else:
