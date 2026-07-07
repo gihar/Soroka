@@ -760,54 +760,6 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
     
-    async def save_processing_metric(self, metric_data: Dict[str, Any]) -> int:
-        """Сохранить метрику обработки файла"""
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT INTO processing_metrics (
-                    file_name, user_id, start_time, end_time,
-                    download_duration, validation_duration, conversion_duration,
-                    transcription_duration, diarization_duration, llm_duration, formatting_duration,
-                    file_size_bytes, file_format, audio_duration_seconds,
-                    transcription_length, speakers_count,
-                    error_occurred, error_stage, error_message
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                metric_data.get('file_name'),
-                metric_data.get('user_id'),
-                metric_data.get('start_time'),
-                metric_data.get('end_time'),
-                metric_data.get('download_duration', 0.0),
-                metric_data.get('validation_duration', 0.0),
-                metric_data.get('conversion_duration', 0.0),
-                metric_data.get('transcription_duration', 0.0),
-                metric_data.get('diarization_duration', 0.0),
-                metric_data.get('llm_duration', 0.0),
-                metric_data.get('formatting_duration', 0.0),
-                metric_data.get('file_size_bytes', 0),
-                metric_data.get('file_format'),
-                metric_data.get('audio_duration_seconds', 0.0),
-                metric_data.get('transcription_length', 0),
-                metric_data.get('speakers_count', 0),
-                metric_data.get('error_occurred', False),
-                metric_data.get('error_stage'),
-                metric_data.get('error_message')
-            ))
-            await db.commit()
-            return cursor.lastrowid
-    
-    async def get_processing_metrics(self, hours: int = 24) -> List[Dict[str, Any]]:
-        """Получить метрики обработки за последние N часов"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute("""
-                SELECT * FROM processing_metrics
-                WHERE created_at >= DATETIME('now', ?) 
-                ORDER BY created_at DESC
-            """, (f'-{hours} hours',))
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-    
     # Методы для работы с очередью задач
     async def save_queue_task(self, task_data: Dict[str, Any]) -> bool:
         """Сохранить задачу в очередь"""

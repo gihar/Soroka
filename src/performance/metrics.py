@@ -17,7 +17,7 @@ from loguru import logger
 
 # Добавляем корневую директорию в путь для импорта database
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from database import db
+from src.database import metrics_repo
 
 
 @dataclass
@@ -255,7 +255,7 @@ class MetricsCollector:
         
         try:
             # Загружаем метрики обработки за последние 24 часа
-            metrics_data = await db.get_processing_metrics(hours=24)
+            metrics_data = await metrics_repo.get_processing_metrics(hours=24)
             for metric_dict in metrics_data:
                 metric = ProcessingMetrics(
                     file_name=metric_dict['file_name'],
@@ -449,7 +449,7 @@ class MetricsCollector:
                 'error_stage': metrics.error_stage,
                 'error_message': metrics.error_message
             }
-            await db.save_processing_metric(metric_data)
+            await metrics_repo.save_processing_metric(metric_data)
         except Exception as e:
             logger.error(f"Ошибка сохранения метрик обработки: {e}")
     
