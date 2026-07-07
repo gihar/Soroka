@@ -15,8 +15,7 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from config import settings
-from database import db
-from src.database import history_repo
+from src.database import history_repo, queue_repo
 from src.exceptions.processing import ProcessingError
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
@@ -727,7 +726,7 @@ class ProcessingService(BaseProcessingService):
         if not task_id:
             return
         try:
-            await db.update_queue_task_status(
+            await queue_repo.update_queue_task_status(
                 str(task_id), status, error_message=error_message
             )
         except Exception as e:

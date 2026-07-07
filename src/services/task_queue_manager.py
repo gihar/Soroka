@@ -12,7 +12,7 @@ import psutil
 from loguru import logger
 
 from config import settings
-from database import db
+from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
 
@@ -594,7 +594,7 @@ class TaskQueueManager:
         """Сохранить задачу в БД"""
         try:
             task_data = task.to_dict()
-            await db.save_queue_task(task_data)
+            await queue_repo.save_queue_task(task_data)
         except Exception as e:
             logger.error(f"Ошибка сохранения задачи в БД: {e}")
     
@@ -603,7 +603,7 @@ class TaskQueueManager:
                                 error_message: Optional[str] = None):
         """Обновить статус задачи в БД"""
         try:
-            await db.update_queue_task_status(
+            await queue_repo.update_queue_task_status(
                 task_id, status.value, started_at, error_message
             )
         except Exception as e:
@@ -612,7 +612,7 @@ class TaskQueueManager:
     async def _restore_queue_from_db(self):
         """Восстановить очередь задач из БД при запуске"""
         try:
-            pending_tasks = await db.get_pending_queue_tasks()
+            pending_tasks = await queue_repo.get_pending_queue_tasks()
             
             if not pending_tasks:
                 logger.info("Нет задач для восстановления из БД")
@@ -641,7 +641,7 @@ class TaskQueueManager:
                 await asyncio.sleep(settings.queue_cleanup_interval_hours * 3600)
                 
                 logger.info("Запуск очистки завершенных задач...")
-                deleted = await db.cleanup_completed_queue_tasks(
+                deleted = await queue_repo.cleanup_completed_queue_tasks(
                     hours=settings.queue_cleanup_interval_hours
                 )
                 

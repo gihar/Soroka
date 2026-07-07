@@ -302,8 +302,8 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         # Сохраняем message_id в задаче
         if queue_tracker.message_id:
             queued_task.message_id = queue_tracker.message_id
-            from database import db
-            await db.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
+            from src.database import queue_repo
+            await queue_repo.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
         
         # Запускаем фоновое обновление позиции в очереди
         asyncio.create_task(_monitor_queue_position(

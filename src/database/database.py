@@ -3,8 +3,6 @@
 """
 
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
-
 import aiosqlite
 from loguru import logger
 
@@ -359,107 +357,5 @@ class Database:
         await db.commit()
         logger.info("Template consolidation migration complete")
 
-    # Методы для работы с очередью задач
-    async def save_queue_task(self, task_data: Dict[str, Any]) -> bool:
-        """Сохранить задачу в очередь"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    INSERT INTO queue_tasks (
-                        task_id, user_id, chat_id, message_id,
-                        file_id, file_path, file_name, template_id,
-                        llm_provider, language, is_external_file,
-                        status, priority, created_at, started_at, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    task_data['task_id'],
-                    task_data['user_id'],
-                    task_data['chat_id'],
-                    task_data.get('message_id'),
-                    task_data.get('file_id'),
-                    task_data.get('file_path'),
-                    task_data['file_name'],
-                    task_data['template_id'],
-                    task_data['llm_provider'],
-                    task_data.get('language', 'ru'),
-                    task_data.get('is_external_file', False),
-                    task_data['status'],
-                    task_data.get('priority', 1),
-                    task_data['created_at'],
-                    task_data.get('started_at'),
-                    task_data.get('error_message')
-                ))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении задачи в БД: {e}")
-            return False
-    
-    async def update_queue_task_status(self, task_id: str, status: str, 
-                                      started_at: Optional[str] = None,
-                                      error_message: Optional[str] = None) -> bool:
-        """Обновить статус задачи в очереди"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                if started_at:
-                    await db.execute("""
-                        UPDATE queue_tasks 
-                        SET status = ?, started_at = ?, error_message = ?
-                        WHERE task_id = ?
-                    """, (status, started_at, error_message, task_id))
-                else:
-                    await db.execute("""
-                        UPDATE queue_tasks 
-                        SET status = ?, error_message = ?
-                        WHERE task_id = ?
-                    """, (status, error_message, task_id))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении статуса задачи: {e}")
-            return False
-    
-    async def update_queue_task_message_id(self, task_id: str, message_id: int) -> bool:
-        """Обновить message_id задачи"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    UPDATE queue_tasks 
-                    SET message_id = ?
-                    WHERE task_id = ?
-                """, (message_id, task_id))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении message_id задачи: {e}")
-            return False
-    
-    async def get_pending_queue_tasks(self) -> List[Dict[str, Any]]:
-        """Получить все задачи в статусе queued, отсортированные по приоритету и времени создания"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute("""
-                SELECT * FROM queue_tasks 
-                WHERE status = 'queued'
-                ORDER BY priority DESC, created_at ASC
-            """)
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-    
-    async def cleanup_completed_queue_tasks(self, hours: int = 24) -> int:
-        """Очистить завершенные задачи старше N часов"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                cursor = await db.execute("""
-                    DELETE FROM queue_tasks 
-                    WHERE status IN ('completed', 'cancelled', 'failed')
-                    AND created_at < DATETIME('now', ?)
-                """, (f'-{hours} hours',))
-                await db.commit()
-                return cursor.rowcount
-        except Exception as e:
-            logger.error(f"Ошибка при очистке завершенных задач: {e}")
-            return 0
-    
 # Глобальный экземпляр базы данных
 db = Database()
