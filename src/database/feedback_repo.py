@@ -1,7 +1,6 @@
 """Feedback data access."""
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
 
 
 class FeedbackRepository:
@@ -15,7 +14,7 @@ class FeedbackRepository:
                             processing_time: Optional[float] = None, file_format: Optional[str] = None,
                             file_size: Optional[int] = None) -> None:
         """Save user feedback."""
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute("""
                 INSERT INTO feedback
                 (user_id, rating, feedback_type, comment, protocol_id, processing_time, file_format, file_size)
@@ -25,8 +24,7 @@ class FeedbackRepository:
 
     async def get_all_feedback(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get all feedback entries."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             query = "SELECT * FROM feedback ORDER BY created_at DESC"
             if limit:
                 query += f" LIMIT {limit}"
@@ -36,8 +34,7 @@ class FeedbackRepository:
 
     async def get_feedback_stats(self) -> Dict[str, Any]:
         """Get feedback statistics."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
 
             cursor = await db.execute("""
                 SELECT

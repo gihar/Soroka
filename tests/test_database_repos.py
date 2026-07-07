@@ -79,3 +79,39 @@ async def test_cannot_delete_default_template(test_db, template_repo):
     )
     result = await template_repo.delete_template(telegram_id=55555, template_id=tid)
     assert result is False
+
+
+# --- Обслуживание системных шаблонов (порт из монолита, #26) ---
+
+async def test_system_template_exists_only_for_system_rows(test_db, template_repo, user_repo):
+    user_id = await user_repo.create_user(telegram_id=42)
+    await template_repo.create_template(name="Личный", content="c", created_by=user_id)
+    await template_repo.create_template(name="Системный", content="c", created_by=None)
+
+    assert await template_repo.system_template_exists("Системный") is True
+    assert await template_repo.system_template_exists("Личный") is False
+    assert await template_repo.system_template_exists("Несуществующий") is False
+
+
+async def test_rename_system_template_touches_only_system_rows(test_db, template_repo, user_repo):
+    user_id = await user_repo.create_user(telegram_id=43)
+    user_tpl = await template_repo.create_template(name="Отчёт", content="c", created_by=user_id)
+    await template_repo.create_template(name="Отчёт", content="c", created_by=None)
+
+    renamed = await template_repo.rename_system_template("Отчёт", "Протокол встречи")
+
+    assert renamed == 1
+    assert (await template_repo.get_template(user_tpl))["name"] == "Отчёт"
+    assert await template_repo.system_template_exists("Протокол встречи") is True
+
+
+async def test_delete_system_template_by_name_keeps_user_rows(test_db, template_repo, user_repo):
+    user_id = await user_repo.create_user(telegram_id=44)
+    user_tpl = await template_repo.create_template(name="Дубль", content="c", created_by=user_id)
+    await template_repo.create_template(name="Дубль", content="c", created_by=None)
+    await template_repo.create_template(name="Дубль", content="c", created_by=None)
+
+    deleted = await template_repo.delete_system_template_by_name("Дубль")
+
+    assert deleted == 2
+    assert (await template_repo.get_template(user_tpl)) is not None

@@ -6,7 +6,6 @@ Stores small, global pieces of state that are not user-scoped — most notably
 
 from typing import Optional
 
-import aiosqlite
 from loguru import logger
 
 from src.exceptions.configuration import AdminConfigurationError
@@ -22,7 +21,7 @@ class AppSettingsRepository:
 
     async def get(self, key: str) -> Optional[str]:
         """Return the stored string value for `key`, or None if absent."""
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             cursor = await db.execute(
                 "SELECT value FROM app_settings WHERE key = ?",
                 (key,),
@@ -32,7 +31,7 @@ class AppSettingsRepository:
 
     async def set(self, key: str, value: str, admin_id: Optional[int]) -> None:
         """UPSERT `key` to `value`, recording `admin_id` as `updated_by`."""
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute(
                 """
                 INSERT INTO app_settings (key, value, updated_by, updated_at)
@@ -55,7 +54,7 @@ class AppSettingsRepository:
 
         Raises `AdminConfigurationError` if the preset does not exist or is disabled.
         """
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
                 "SELECT is_enabled FROM model_presets WHERE key = ?",

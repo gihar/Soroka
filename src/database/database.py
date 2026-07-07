@@ -2,6 +2,7 @@
 Модуль для работы с базой данных
 """
 
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import aiosqlite
@@ -10,10 +11,17 @@ from loguru import logger
 
 class Database:
     """Класс для работы с базой данных"""
-    
+
     def __init__(self, db_path: str = "bot.db"):
         self.db_path = db_path
-    
+
+    @asynccontextmanager
+    async def connect(self):
+        """Единственное место политики соединения: row_factory, будущие PRAGMA."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn
+
     async def init_db(self):
         """Инициализация базы данных"""
         async with aiosqlite.connect(self.db_path) as db:
@@ -142,6 +150,13 @@ class Database:
             try:
                 await db.execute("ALTER TABLE users ADD COLUMN protocol_output_mode TEXT DEFAULT 'messages'")
                 logger.info("Добавлено поле protocol_output_mode в таблицу users (по умолчанию 'messages')")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
+            # Миграция: добавляем поле saved_participants если его нет
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN saved_participants TEXT")
+                logger.info("Добавлено поле saved_participants в таблицу users")
             except Exception:
                 # Поле уже существует, пропускаем
                 pass

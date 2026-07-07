@@ -1,7 +1,6 @@
 """Task queue data access."""
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
 from loguru import logger
 
 
@@ -14,7 +13,7 @@ class QueueRepository:
     async def save_queue_task(self, task_data: Dict[str, Any]) -> bool:
         """Save a task to the queue."""
         try:
-            async with aiosqlite.connect(self._db.db_path) as db:
+            async with self._db.connect() as db:
                 await db.execute("""
                     INSERT INTO queue_tasks (
                         task_id, user_id, chat_id, message_id,
@@ -51,7 +50,7 @@ class QueueRepository:
                                        error_message: Optional[str] = None) -> bool:
         """Update task status in queue."""
         try:
-            async with aiosqlite.connect(self._db.db_path) as db:
+            async with self._db.connect() as db:
                 if started_at:
                     await db.execute("""
                         UPDATE queue_tasks
@@ -73,7 +72,7 @@ class QueueRepository:
     async def update_queue_task_message_id(self, task_id: str, message_id: int) -> bool:
         """Update message_id for a task."""
         try:
-            async with aiosqlite.connect(self._db.db_path) as db:
+            async with self._db.connect() as db:
                 await db.execute("""
                     UPDATE queue_tasks
                     SET message_id = ?
@@ -87,8 +86,7 @@ class QueueRepository:
 
     async def get_pending_queue_tasks(self) -> List[Dict[str, Any]]:
         """Get all queued tasks sorted by priority and creation time."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             cursor = await db.execute("""
                 SELECT * FROM queue_tasks
                 WHERE status = 'queued'
@@ -100,7 +98,7 @@ class QueueRepository:
     async def cleanup_completed_queue_tasks(self, hours: int = 24) -> int:
         """Clean up completed tasks older than N hours."""
         try:
-            async with aiosqlite.connect(self._db.db_path) as db:
+            async with self._db.connect() as db:
                 cursor = await db.execute("""
                     DELETE FROM queue_tasks
                     WHERE status IN ('completed', 'cancelled', 'failed')
@@ -112,13 +110,3 @@ class QueueRepository:
             logger.error(f"Error cleaning up completed tasks: {e}")
             return 0
 
-    async def save_processing_result(self, user_id: int, file_name: str, template_id: int,
-                                     llm_provider: str, transcription_text: str, result_text: str) -> None:
-        """Save processing result to history."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            await db.execute("""
-                INSERT INTO processing_history
-                (user_id, file_name, template_id, llm_provider, transcription_text, result_text)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, file_name, template_id, llm_provider, transcription_text, result_text))
-            await db.commit()

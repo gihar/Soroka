@@ -1,7 +1,6 @@
 """Processing metrics data access."""
 from typing import Any, Dict, List
 
-import aiosqlite
 
 
 class MetricsRepository:
@@ -12,7 +11,7 @@ class MetricsRepository:
 
     async def save_processing_metric(self, metric_data: Dict[str, Any]) -> int:
         """Save a processing metric."""
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             cursor = await db.execute("""
                 INSERT INTO processing_metrics (
                     file_name, user_id, start_time, end_time,
@@ -48,8 +47,7 @@ class MetricsRepository:
 
     async def get_processing_metrics(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Get processing metrics for the last N hours."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             cursor = await db.execute("""
                 SELECT * FROM processing_metrics
                 WHERE created_at >= DATETIME('now', ?)
