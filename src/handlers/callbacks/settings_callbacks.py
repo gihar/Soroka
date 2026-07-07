@@ -125,10 +125,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             from datetime import datetime
 
-            from database import db
+            from src.database import history_repo
             from reliability.middleware import monitoring_middleware
 
-            user_stats = await db.get_user_stats(callback.from_user.id)
+            user_stats = await history_repo.get_user_stats(callback.from_user.id)
             system_stats = monitoring_middleware.get_stats()
 
             if user_stats:
