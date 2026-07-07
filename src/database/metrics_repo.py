@@ -2,7 +2,6 @@
 from typing import Any, Dict, List
 
 
-
 class MetricsRepository:
     """Repository for processing metrics operations."""
 

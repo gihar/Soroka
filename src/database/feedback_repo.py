@@ -2,7 +2,6 @@
 from typing import Any, Dict, List, Optional
 
 
-
 class FeedbackRepository:
     """Repository for feedback operations."""
 

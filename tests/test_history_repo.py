@@ -57,7 +57,7 @@ async def test_saved_results_feed_user_stats(history_repo, user_repo, template_r
 
 
 async def test_stats_ignore_other_users_history(history_repo, user_repo, template_repo):
-    owner_id = await user_repo.create_user(telegram_id=1001)
+    await user_repo.create_user(telegram_id=1001)
     other_id = await user_repo.create_user(telegram_id=1002)
     template_id = await template_repo.create_template(name="Т", content="c")
 

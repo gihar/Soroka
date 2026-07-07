@@ -10,7 +10,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from loguru import logger
 
 from config import settings
-from src.database import db
 
 # Импорты надежности
 from reliability import health_checker
@@ -20,6 +19,7 @@ from reliability.middleware import (
     monitoring_middleware,
     rate_limiting_middleware,
 )
+from src.database import db
 
 # Импорты OOM защиты
 try:

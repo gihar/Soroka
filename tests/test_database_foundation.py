@@ -1,6 +1,5 @@
 """Фундамент миграции на репозитории (#26): connect(), миграции схемы в init_db."""
 import aiosqlite
-import pytest
 
 from src.database.database import Database
 
