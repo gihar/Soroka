@@ -193,3 +193,80 @@ async def test_update_saved_participants_round_trip(user_repo):
 
     assert await user_repo.update_saved_participants(59, payload) is True
     assert (await user_repo.get_user(59))["saved_participants"] == payload
+
+
+# --- Шаблоны: полная характеризация перед переключением (#31) ---
+
+async def test_get_user_templates_unknown_user_is_empty(template_repo):
+    assert await template_repo.get_user_templates(telegram_id=9001) == []
+
+
+async def test_get_user_templates_returns_own_and_system(template_repo, user_repo):
+    uid = await user_repo.create_user(telegram_id=60)
+    stranger = await user_repo.create_user(telegram_id=61)
+    await template_repo.create_template(name="Свой", content="c", created_by=uid)
+    await template_repo.create_template(name="Системный", content="c", is_default=True)
+    await template_repo.create_template(name="Чужой", content="c", created_by=stranger)
+
+    names = [t["name"] for t in await template_repo.get_user_templates(60)]
+
+    assert names == ["Системный", "Свой"]  # системные впереди, далее по имени
+
+
+async def test_template_json_fields_round_trip(template_repo):
+    tpl = await template_repo.create_template(
+        name="Теги", content="c",
+        tags=["встреча", "статус"], keywords=["протокол"],
+    )
+
+    loaded = await template_repo.get_template(tpl)
+
+    assert loaded["tags"] == ["встреча", "статус"]
+    assert loaded["keywords"] == ["протокол"]
+
+
+async def test_update_template_rewrites_all_fields(template_repo):
+    tpl = await template_repo.create_template(name="До", content="старое")
+
+    ok = await template_repo.update_template(
+        tpl, name="После", content="новое", description="описание",
+        tags=["a"], keywords=["b"],
+    )
+
+    assert ok is True
+    loaded = await template_repo.get_template(tpl)
+    assert loaded["name"] == "После"
+    assert loaded["content"] == "новое"
+    assert loaded["description"] == "описание"
+    assert loaded["tags"] == ["a"]
+    assert loaded["keywords"] == ["b"]
+
+
+async def test_update_nonexistent_template_returns_false(template_repo):
+    assert await template_repo.update_template(4242, name="x", content="y") is False
+
+
+async def test_delete_template_denied_for_foreign_and_unknown(template_repo, user_repo):
+    owner = await user_repo.create_user(telegram_id=62)
+    await user_repo.create_user(telegram_id=63)
+    tpl = await template_repo.create_template(name="Чужой", content="c", created_by=owner)
+
+    assert await template_repo.delete_template(telegram_id=63, template_id=tpl) is False
+    assert await template_repo.delete_template(telegram_id=9002, template_id=tpl) is False
+    assert await template_repo.delete_template(telegram_id=62, template_id=9999) is False
+
+
+async def test_delete_template_allows_legacy_telegram_owner(template_repo, user_repo):
+    await user_repo.create_user(telegram_id=64)
+    tpl = await template_repo.create_template(name="Легаси", content="c", created_by=64)
+
+    assert await template_repo.delete_template(telegram_id=64, template_id=tpl) is True
+
+
+async def test_delete_template_resets_user_defaults(template_repo, user_repo):
+    uid = await user_repo.create_user(telegram_id=65)
+    tpl = await template_repo.create_template(name="Дефолтный", content="c", created_by=uid)
+    await user_repo.set_default_template(telegram_id=65, template_id=tpl)
+
+    assert await template_repo.delete_template(telegram_id=65, template_id=tpl) is True
+    assert (await user_repo.get_user(65))["default_template_id"] is None

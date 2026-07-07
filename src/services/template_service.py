@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from jinja2 import BaseLoader, Environment, TemplateError
 from loguru import logger
 
-from database import db
-from src.database import user_repo
+from src.database import template_repo, user_repo
+from src.database.template_repo import TemplateRepository
+from src.database.user_repo import UserRepository
 from src.exceptions.template import TemplateNotFoundError, TemplateValidationError
 from src.models.template import Template, TemplateCreate
 
@@ -16,14 +17,16 @@ from src.models.template import Template, TemplateCreate
 class TemplateService:
     """Сервис для работы с шаблонами"""
     
-    def __init__(self):
-        self.db = db
+    def __init__(self, templates: TemplateRepository = template_repo,
+                 users: UserRepository = user_repo):
+        self._templates = templates
+        self._users = users
         self.jinja_env = Environment(loader=BaseLoader())
     
     async def get_all_templates(self) -> List[Template]:
         """Получить все шаблоны"""
         try:
-            templates_data = await self.db.get_templates()
+            templates_data = await self._templates.get_templates()
             return [Template(**template) for template in templates_data]
         except Exception as e:
             logger.error(f"Ошибка при получении шаблонов: {e}")
@@ -32,7 +35,7 @@ class TemplateService:
     async def get_user_templates(self, telegram_id: int) -> List[Template]:
         """Получить шаблоны пользователя"""
         try:
-            templates_data = await self.db.get_user_templates(telegram_id)
+            templates_data = await self._templates.get_user_templates(telegram_id)
             return [Template(**template) for template in templates_data]
         except Exception as e:
             logger.error(f"Ошибка при получении шаблонов пользователя {telegram_id}: {e}")
@@ -41,7 +44,7 @@ class TemplateService:
     async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
         """Установить шаблон по умолчанию для пользователя"""
         try:
-            result = await user_repo.set_default_template(telegram_id, template_id)
+            result = await self._users.set_default_template(telegram_id, template_id)
             if result:
                 logger.info(f"Установлен шаблон по умолчанию {template_id} для пользователя {telegram_id}")
             return result
@@ -52,7 +55,7 @@ class TemplateService:
     async def reset_user_default_template(self, telegram_id: int) -> bool:
         """Сбросить шаблон по умолчанию для пользователя"""
         try:
-            result = await user_repo.reset_default_template(telegram_id)
+            result = await self._users.reset_default_template(telegram_id)
             if result:
                 logger.info(f"Сброшен шаблон по умолчанию для пользователя {telegram_id}")
             return result
@@ -63,7 +66,7 @@ class TemplateService:
     async def get_template_by_id(self, template_id: int) -> Template:
         """Получить шаблон по ID"""
         try:
-            template_data = await self.db.get_template(template_id)
+            template_data = await self._templates.get_template(template_id)
             if not template_data:
                 raise TemplateNotFoundError(template_id)
             
@@ -81,7 +84,7 @@ class TemplateService:
             self.validate_template_content(template_data.content)
             
             # Создаем шаблон в БД
-            template_id = await self.db.create_template(
+            template_id = await self._templates.create_template(
                 name=template_data.name,
                 content=template_data.content,
                 description=template_data.description,
@@ -106,7 +109,7 @@ class TemplateService:
     async def delete_template(self, telegram_id: int, template_id: int) -> bool:
         """Удалить шаблон пользователя (если не базовый)"""
         try:
-            result = await self.db.delete_template(telegram_id, template_id)
+            result = await self._templates.delete_template(telegram_id, template_id)
             if result:
                 logger.info(f"Пользователь {telegram_id} удалил шаблон {template_id}")
             return result
@@ -158,11 +161,9 @@ class TemplateService:
     async def init_default_templates(self) -> None:
         """Создание и автообновление базовых шаблонов"""
         try:
-            # Гарантируем, что схема таблицы templates поддерживает auto-update
-            await self.db.ensure_templates_updated_at_column()
             # Переименование англоязычных шаблонов и удаление системных сирот (идемпотентно)
             from src.services.template_maintenance import apply_template_maintenance
-            await apply_template_maintenance(self.db)
+            await apply_template_maintenance(self._templates)
             existing_templates = await self.get_all_templates()
             existing_by_name: Dict[str, Template] = {}
             for template in existing_templates:
@@ -428,7 +429,7 @@ class TemplateService:
 
     async def _update_system_template(self, existing: Template, template_data: Dict[str, Any]) -> None:
         """Перезаписать шаблон актуальным содержимым"""
-        await self.db.update_template(
+        await self._templates.update_template(
             template_id=existing.id,
             name=template_data["name"],
             description=template_data.get("description"),

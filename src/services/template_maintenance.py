@@ -22,7 +22,7 @@ REMOVE_NAMES = [
 ]
 
 
-async def apply_template_maintenance(db) -> dict:
+async def apply_template_maintenance(templates) -> dict:
     """Переименовать англоязычные системные шаблоны и удалить системных сирот.
 
     Returns:
@@ -33,14 +33,14 @@ async def apply_template_maintenance(db) -> dict:
     deleted = 0
 
     for old_name, new_name in RENAME_MAP.items():
-        if await db.system_template_exists(new_name):
+        if await templates.system_template_exists(new_name):
             # целевое имя уже есть (повторный/частичный прогон) — убрать устаревший дубль
-            deduped += await db.delete_system_template_by_name(old_name)
+            deduped += await templates.delete_system_template_by_name(old_name)
         else:
-            renamed += await db.rename_system_template(old_name, new_name)
+            renamed += await templates.rename_system_template(old_name, new_name)
 
     for name in REMOVE_NAMES:
-        deleted += await db.delete_system_template_by_name(name)
+        deleted += await templates.delete_system_template_by_name(name)
 
     result = {"renamed": renamed, "deduped": deduped, "deleted": deleted}
     logger.info("Обслуживание шаблонов завершено: {}", result)
