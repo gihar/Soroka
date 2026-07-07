@@ -3,8 +3,6 @@
 """
 
 import json
-import os
-import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -17,9 +15,7 @@ from aiogram.types import (
 )
 from loguru import logger
 
-# Добавляем корневую директорию в путь для импорта database
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from database import db
+from src.database import feedback_repo
 from src.utils.telegram_safe import safe_edit_text
 
 
@@ -51,7 +47,7 @@ class FeedbackCollector:
         
         try:
             # Загружаем последние 1000 записей из БД
-            feedbacks = await db.get_all_feedback(limit=1000)
+            feedbacks = await feedback_repo.get_all_feedback(limit=1000)
             for feedback_dict in feedbacks:
                 feedback = FeedbackEntry(
                     user_id=feedback_dict['user_id'],
@@ -87,7 +83,7 @@ class FeedbackCollector:
     async def _save_feedback_to_db(self, feedback: FeedbackEntry):
         """Сохранить обратную связь в БД"""
         try:
-            await db.save_feedback(
+            await feedback_repo.save_feedback(
                 user_id=feedback.user_id,
                 rating=feedback.rating,
                 feedback_type=feedback.feedback_type,
@@ -104,7 +100,7 @@ class FeedbackCollector:
         """Получить статистику обратной связи"""
         try:
             # Получаем статистику из БД
-            return await db.get_feedback_stats()
+            return await feedback_repo.get_feedback_stats()
         except Exception as e:
             logger.error(f"Ошибка получения статистики из БД: {e}")
             # Fallback: считаем из памяти
