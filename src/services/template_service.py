@@ -8,6 +8,7 @@ from jinja2 import BaseLoader, Environment, TemplateError
 from loguru import logger
 
 from database import db
+from src.database import user_repo
 from src.exceptions.template import TemplateNotFoundError, TemplateValidationError
 from src.models.template import Template, TemplateCreate
 
@@ -40,7 +41,7 @@ class TemplateService:
     async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
         """Установить шаблон по умолчанию для пользователя"""
         try:
-            result = await self.db.set_user_default_template(telegram_id, template_id)
+            result = await user_repo.set_default_template(telegram_id, template_id)
             if result:
                 logger.info(f"Установлен шаблон по умолчанию {template_id} для пользователя {telegram_id}")
             return result
@@ -51,7 +52,7 @@ class TemplateService:
     async def reset_user_default_template(self, telegram_id: int) -> bool:
         """Сбросить шаблон по умолчанию для пользователя"""
         try:
-            result = await self.db.reset_user_default_template(telegram_id)
+            result = await user_repo.reset_default_template(telegram_id)
             if result:
                 logger.info(f"Сброшен шаблон по умолчанию для пользователя {telegram_id}")
             return result

@@ -281,37 +281,6 @@ class Database:
             await db.commit()
             logger.info("База данных инициализирована")
     
-    async def get_user(self, telegram_id: int) -> Optional[Dict[str, Any]]:
-        """Получить пользователя по Telegram ID"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM users WHERE telegram_id = ?", 
-                (telegram_id,)
-            )
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-    
-    async def create_user(self, telegram_id: int, username: str = None, 
-                         first_name: str = None, last_name: str = None) -> int:
-        """Создать нового пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT INTO users (telegram_id, username, first_name, last_name)
-                VALUES (?, ?, ?, ?)
-            """, (telegram_id, username, first_name, last_name))
-            await db.commit()
-            return cursor.lastrowid
-    
-    async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]):
-        """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE users SET protocol_output_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
-                (mode, telegram_id)
-            )
-            await db.commit()
-
     async def get_templates(self) -> List[Dict[str, Any]]:
         """Получить все шаблоны"""
         import json
@@ -611,71 +580,6 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
     
-    async def set_user_default_template(self, telegram_id: int, template_id: int) -> bool:
-        """Установить шаблон по умолчанию для пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            
-            # Получаем ID пользователя
-            cursor = await db.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
-            user_row = await cursor.fetchone()
-            
-            if not user_row:
-                return False
-            
-            user_id = user_row['id']
-            
-            # Проверяем, что шаблон существует и доступен пользователю
-            # template_id = 0 - специальное значение для "Умного выбора", пропускаем проверку
-            if template_id != 0:
-                template_cursor = await db.execute("""
-                    SELECT id, created_by, is_default
-                    FROM templates 
-                    WHERE id = ?
-                """, (template_id,))
-                template_row = await template_cursor.fetchone()
-                
-                if not template_row:
-                    return False
-                
-                template_owner = template_row["created_by"]
-                is_system_template = bool(template_row["is_default"])
-                
-                # Проверяем права доступа к шаблону
-                owner_matches_user = template_owner == user_id
-                owner_matches_telegram = template_owner == telegram_id
-                owner_unknown = template_owner is None
-                
-                if not (is_system_template or owner_matches_user or owner_unknown or owner_matches_telegram):
-                    return False
-                
-                # Если шаблон создан пользователем в старых версиях (created_by = telegram_id),
-                # синхронизируем created_by с актуальным user_id владельца
-                if owner_matches_telegram:
-                    await db.execute(
-                        "UPDATE templates SET created_by = ? WHERE id = ?",
-                        (user_id, template_id)
-                    )
-            
-            # Обновляем предпочтения пользователя
-            await db.execute("""
-                UPDATE users SET default_template_id = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE telegram_id = ?
-            """, (template_id, telegram_id))
-            
-            await db.commit()
-            return True
-
-    async def reset_user_default_template(self, telegram_id: int) -> bool:
-        """Сбросить шаблон по умолчанию для пользователя (установить NULL)"""
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                UPDATE users SET default_template_id = NULL, updated_at = CURRENT_TIMESTAMP 
-                WHERE telegram_id = ?
-            """, (telegram_id,))
-            await db.commit()
-            return cursor.rowcount > 0
-    
     # Методы для работы с очередью задач
     async def save_queue_task(self, task_data: Dict[str, Any]) -> bool:
         """Сохранить задачу в очередь"""
@@ -778,33 +682,5 @@ class Database:
             logger.error(f"Ошибка при очистке завершенных задач: {e}")
             return 0
     
-    async def update_user_saved_participants(self, telegram_id: int, participants_json: str) -> bool:
-        """Обновить сохраненный список участников для пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Сначала проверяем, есть ли колонка saved_participants
-                cursor = await db.execute("PRAGMA table_info(users)")
-                columns = await cursor.fetchall()
-                column_names = [col[1] for col in columns]
-                
-                # Если колонки нет - добавляем её
-                if 'saved_participants' not in column_names:
-                    logger.info("Добавление колонки saved_participants в таблицу users")
-                    await db.execute("ALTER TABLE users ADD COLUMN saved_participants TEXT")
-                    await db.commit()
-                
-                # Обновляем список участников
-                await db.execute("""
-                    UPDATE users 
-                    SET saved_participants = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE telegram_id = ?
-                """, (participants_json, telegram_id))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении списка участников: {e}")
-            return False
-
-
 # Глобальный экземпляр базы данных
 db = Database()
