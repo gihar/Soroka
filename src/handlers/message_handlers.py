@@ -292,7 +292,7 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
 
 async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
     """Мониторинг изменения позиции задачи в очереди"""
-    from config import settings
+    from src.config import settings
     
     try:
         while queue_tracker.is_active:
@@ -639,7 +639,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await show_participants_menu(message, user_service)
                 
             except FileSizeError:
-                from config import settings
+                from src.config import settings
                 from ux.message_builder import MessageBuilder
                 
                 error_details = {

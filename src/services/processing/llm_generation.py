@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
 from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.services.protocol_validator import protocol_validator

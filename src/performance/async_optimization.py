@@ -288,7 +288,7 @@ async def optimized_file_processing():
     """Контекстный менеджер для оптимизированной обработки файлов"""
     # Импортируем настройки SSL из конфигурации
     try:
-        from config import settings
+        from src.config import settings
         verify_ssl = getattr(settings, 'ssl_verify', True)
     except:
         verify_ssl = True  # По умолчанию проверяем SSL

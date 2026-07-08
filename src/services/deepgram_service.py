@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 import httpx
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.processing import CloudTranscriptionError, DeepgramAPIError
 from src.models.processing import TranscriptionResult
 from src.utils.transcript_formatter import format_transcript_with_speaker_sequence

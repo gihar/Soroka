@@ -7,7 +7,7 @@ import pytest
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
-# Allow bare `from config import ...` and `from services import ...` used inside
+# Allow bare `from src.config import ...` and `from services import ...` used inside
 # legacy modules that are transitively imported via src/ux/__init__.py.
 sys.path.insert(0, os.path.join(_root, "src"))
 

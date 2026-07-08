@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Optional
 import psutil
 from loguru import logger
 
-from config import settings
+from src.config import settings
 
 
 @dataclass

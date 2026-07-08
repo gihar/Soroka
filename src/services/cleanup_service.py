@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 
 
 class CleanupService:

@@ -4,7 +4,7 @@
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 
 
 def is_admin(user_id: int) -> bool:

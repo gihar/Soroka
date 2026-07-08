@@ -8,7 +8,7 @@ from typing import Optional
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.models.processing import DiarizationData
 
 try:

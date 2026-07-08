@@ -33,7 +33,7 @@ def _credits_exc():
 
 def test_alert_sent_to_every_admin(monkeypatch):
     import src.utils.telegram_safe as ts
-    from config import settings
+    from src.config import settings
 
     sent = AsyncMock()
     monkeypatch.setattr(ts, "safe_send_message", sent)
@@ -51,7 +51,7 @@ def test_alert_sent_to_every_admin(monkeypatch):
 
 def test_repeated_alerts_are_throttled(monkeypatch):
     import src.utils.telegram_safe as ts
-    from config import settings
+    from src.config import settings
 
     sent = AsyncMock()
     monkeypatch.setattr(ts, "safe_send_message", sent)
@@ -66,7 +66,7 @@ def test_repeated_alerts_are_throttled(monkeypatch):
 
 def test_no_admins_configured_is_noop(monkeypatch):
     import src.utils.telegram_safe as ts
-    from config import settings
+    from src.config import settings
 
     sent = AsyncMock()
     monkeypatch.setattr(ts, "safe_send_message", sent)

@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.processing import (
     TranscriptionError,
 )

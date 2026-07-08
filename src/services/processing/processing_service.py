@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.database import history_repo, queue_repo
 from src.exceptions.processing import ProcessingError
 from src.models.processing import ProcessingRequest, ProcessingResult

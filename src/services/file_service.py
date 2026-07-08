@@ -8,7 +8,7 @@ from typing import List, Optional
 from aiogram import Bot
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 
 # Один Bot на весь процесс для запросов file-info к Telegram.

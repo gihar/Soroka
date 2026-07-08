@@ -13,7 +13,7 @@ from typing import Dict, Protocol
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.processing import (
     CloudTranscriptionError,
     GroqAPIError,

@@ -11,7 +11,7 @@ from uuid import uuid4
 import psutil
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
@@ -289,7 +289,7 @@ class TaskQueueManager:
     
     async def _process_task(self, task: QueuedTask):
         """Обработать задачу"""
-        from config import settings as cfg
+        from src.config import settings as cfg
         from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
 

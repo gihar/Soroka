@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.processing import CloudTranscriptionError, SpeechmaticsAPIError
 from src.models.processing import TranscriptionResult
 from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
