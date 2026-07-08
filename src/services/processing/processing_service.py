@@ -835,16 +835,6 @@ class ProcessingService(BaseProcessingService):
             all_templates = await self.template_service.get_all_templates()
             return all_templates[0] if all_templates else None
 
-        from src.services.meeting_classifier import meeting_classifier
-        meeting_type, type_scores = meeting_classifier.classify(
-            transcription_result.transcription,
-            diarization_analysis=None,
-        )
-        logger.info(
-            f"Тип встречи для рекомендации шаблона: {meeting_type} "
-            f"(оценки: {', '.join(f'{k}={v:.2f}' for k, v in list(type_scores.items())[:3])})"
-        )
-
         user_stats = await history_repo.get_user_stats(request.user_id)
         template_history = []
         if user_stats and user_stats.get('favorite_templates'):
@@ -858,8 +848,6 @@ class ProcessingService(BaseProcessingService):
             templates=templates,
             top_k=3,
             user_history=template_history,
-            meeting_type=meeting_type,
-            type_scores=type_scores,
             meeting_topic=request.meeting_topic,
         )
 
@@ -867,7 +855,7 @@ class ProcessingService(BaseProcessingService):
             best_template, confidence = suggestions[0]
             logger.info(
                 f"Рекомендован шаблон '{best_template.name}' "
-                f"(уверенность: {confidence:.2%}, тип встречи: {meeting_type})"
+                f"(уверенность: {confidence:.2%})"
             )
             return best_template
 

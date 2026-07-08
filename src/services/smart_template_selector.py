@@ -2,6 +2,7 @@
 ML-based классификатор шаблонов на основе embeddings
 """
 
+import re
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -9,7 +10,57 @@ from loguru import logger
 
 from src.models.template import Template
 
-# Маппинг типов встреч к ключевым словам (aligned with 7-template set)
+# Ключевые слова категорий (бывший meeting_classifier — внутренний шов подсказки шаблонов)
+_CATEGORY_KEYWORDS = {
+    'technical': [
+        r'\bAPI\b', r'\bбаз[аы]\s+данных\b', r'\bсервер\w*\b',
+        r'\bкод\w*\b', r'\bархитектур\w+\b', r'\bалгоритм\w*\b',
+        r'\bфункци[яи]\w*\b', r'\bкласс\w*\b', r'\bметод\w*\b',
+        r'\bрепозитори[йи]\b', r'\bкоммит\w*\b', r'\bгит\b',
+        r'\bфронтенд\b', r'\bбэкенд\b', r'\bдевопс\b', r'\bCI\/CD\b',
+        r'\bтест\w*\b', r'\bбаг\w*\b', r'\bдебаг\w*\b',
+        r'\bфреймворк\w*\b', r'\bбиблиотек\w*\b', r'\bпакет\w*\b',
+        r'\bспринт\w*\b', r'\bдеплой\w*\b', r'\bрелиз\w*\b',
+        r'\bмердж\w*\b', r'\bпулл\s+реквест\b', r'\bлог\w*\b',
+        r'\bмониторинг\w*\b'
+    ],
+    'business': [
+        r'\bбюджет\w*\b', r'\bприбыл[ьи]\w*\b', r'\bконтракт\w*\b',
+        r'\bсделк[аи]\w*\b', r'\bклиент\w+\b', r'\bпродаж\w+\b',
+        r'\bмаркетинг\w*\b', r'\bстратеги[яи]\w*\b', r'\bфинанс\w+\b',
+        r'\bинвестиц\w+\b', r'\bбизнес\b', r'\bдоход\w*\b',
+        r'\bрасход\w*\b', r'\bплан\s+продаж\b', r'\bROI\b',
+        r'\bконкурент\w+\b', r'\bрын\w*\b', r'\bдоговор\w*\b',
+        r'\bсмет[аы]\b', r'\bаккаунтинг\b', r'\bтендер\w*\b',
+        r'\bкоммерческ\w+\s+предложен\w+\b', r'\bКП\b'
+    ],
+    'educational': [
+        r'\bобъясн\w+\b', r'\bпонятн\w+\b', r'\bизуч\w+\b',
+        r'\bобуч\w+\b', r'\bучеб\w+\b', r'\bкурс\w*\b',
+        r'\bлекци[яи]\b', r'\bсеминар\b', r'\bтренинг\b',
+        r'\bзанят\w+\b', r'\bматериал\w*\b', r'\bтеор\w+\b',
+        r'\bпракти\w+\b', r'\bзадани[ея]\b', r'\bдомашн\w+\b'
+    ],
+    'brainstorm': [
+        r'\bидея\w*\b', r'\bпредлага[ю|е]м\b', r'\bможно\b',
+        r'\bа\s+если\b', r'\bвариант\w*\b', r'\bопци[яи]\b',
+        r'\bкреатив\w+\b', r'\bинновац\w+\b', r'\bновизн\w*\b',
+        r'\bпредложен\w+\b', r'\bпридум\w+\b', r'\bгенерир\w+\b'
+    ],
+    'status': [
+        r'\bстатус\b', r'\bпрогресс\b', r'\bвыполнен\w+\b',
+        r'\bметрик\w*\b', r'\bKPI\b', r'\bпоказател\w+\b',
+        r'\bдостижен\w+\b', r'\bрезультат\w*\b', r'\bотчет\w*\b',
+        r'\bитог\w*\b', r'\bдостигнут\w*\b', r'\bзавершен\w+\b'
+    ],
+}
+
+_CATEGORY_PATTERNS = {
+    name: re.compile('|'.join(words), re.IGNORECASE | re.UNICODE)
+    for name, words in _CATEGORY_KEYWORDS.items()
+}
+
+# Маппинг категорий к ключевым словам шаблонов (aligned with 7-template set)
 MEETING_TYPE_TO_CATEGORIES = {
     'technical': ['техническое', 'code review', 'разработка', 'архитектура', 'api'],
     'educational': ['лекция', 'обучение', 'презентация', 'тренинг'],
@@ -26,6 +77,33 @@ class SmartTemplateSelector:
         self.template_embeddings: Dict[int, np.ndarray] = {}
         self._initialized = False
     
+    def _score_categories(self, transcription: str) -> Tuple[str, Dict[str, float]]:
+        """Оценить категории шаблонов по ключевым словам транскрипции.
+
+        Возвращает (топ-категория или 'general', нормированные оценки).
+        Это подбор категории шаблона, а не «тип встречи» — тип встречи
+        определяет LLM (см. CONTEXT.md).
+        """
+        word_count = len(transcription.split())
+        scores = {
+            name: (len(pattern.findall(transcription)) / word_count * 100) if word_count > 0 else 0.0
+            for name, pattern in _CATEGORY_PATTERNS.items()
+        }
+
+        question_count = len(re.findall(r'[?？]', transcription))
+        if question_count > 20:
+            scores['brainstorm'] += 1.0
+
+        top_category = max(scores, key=scores.get)
+        if scores[top_category] < 0.5:
+            top_category = 'general'
+
+        logger.info(
+            f"Категория шаблона: {top_category} "
+            f"(оценки: {', '.join(f'{k}={v:.2f}' for k, v in scores.items())})"
+        )
+        return top_category, scores
+
     def _lazy_init(self):
         """Ленивая инициализация модели"""
         if self._initialized:
@@ -90,8 +168,6 @@ class SmartTemplateSelector:
         templates: List[Template],
         top_k: int = 3,
         user_history: Optional[List[int]] = None,
-        meeting_type: Optional[str] = None,
-        type_scores: Optional[Dict[str, float]] = None,
         meeting_topic: Optional[str] = None
     ) -> List[Tuple[Template, float]]:
         """
@@ -102,8 +178,6 @@ class SmartTemplateSelector:
             templates: Доступные шаблоны
             top_k: Количество рекомендаций
             user_history: История использования (template_id)
-            meeting_type: Классифицированный тип встречи (для boost)
-            type_scores: Оценки по всем типам (для тонкой настройки)
             meeting_topic: Тема встречи (если есть)
         
         Returns:
@@ -131,6 +205,8 @@ class SmartTemplateSelector:
                 mid_part = transcription[mid_start : mid_start + 2000]
                 sample = f"{start_part} ... {mid_part}"
             
+            top_category, _category_scores = self._score_categories(transcription)
+
             # Добавляем тему встречи в контекст поиска (сильный сигнал)
             if meeting_topic:
                 sample = f"Тема: {meeting_topic}\n\n{sample}"
@@ -156,22 +232,22 @@ class SmartTemplateSelector:
                     frequency = user_history.count(template.id)
                     history_boost = min(0.1 * frequency, 0.3)  # макс +30%
                 
-                # Бонус за соответствие типу встречи
+                # Бонус за соответствие категории (скоринг по ключевым словам)
                 category_boost = 0.0
-                if meeting_type and meeting_type in MEETING_TYPE_TO_CATEGORIES:
-                    category_keywords = MEETING_TYPE_TO_CATEGORIES[meeting_type]
+                if top_category in MEETING_TYPE_TO_CATEGORIES:
+                    category_keywords = MEETING_TYPE_TO_CATEGORIES[top_category]
                     template_text = f"{template.name} {template.description or ''} {template.category or ''}".lower()
 
                     for keyword in category_keywords:
                         if keyword in template_text:
                             # Повышенный boost для бизнес встреч (+30% вместо +15%)
-                            if meeting_type == 'business':
+                            if top_category == 'business':
                                 category_boost = 0.30  # +30% для бизнес шаблонов
                             else:
                                 category_boost = 0.15  # +15% для остальных категорий
                             logger.debug(
                                 f"Категорийный boost для шаблона '{template.name}': "
-                                f"meeting_type={meeting_type}, keyword='{keyword}', boost={category_boost}"
+                                f"category={top_category}, keyword='{keyword}', boost={category_boost}"
                             )
                             break
                 
