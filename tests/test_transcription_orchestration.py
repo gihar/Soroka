@@ -55,6 +55,7 @@ def service():
     svc.groq_client = None
     svc.oom_protection = MagicMock()
     svc.oom_protection.can_process_file.return_value = (True, "ok")
+    svc._check_ffmpeg = lambda: True  # environment-guard, не поведение под тестом
     return svc
 
 
