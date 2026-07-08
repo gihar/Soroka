@@ -21,10 +21,11 @@ from src.models.processing import ProcessingRequest, ProcessingResult
 from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
 from src.performance.cache_system import cache_transcription, performance_cache
 from src.performance.memory_management import memory_optimizer
-from src.performance.metrics import PerformanceTimer, ProcessingMetrics, metrics_collector, performance_timer
+from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
 from src.services.base_processing_service import BaseProcessingService
 from src.services.diarization_analyzer import diarization_analyzer
+from src.services.mapping_session import MappingSession
 from src.services.smart_template_selector import smart_selector
 
 # Новые сервисы для улучшения качества
@@ -426,36 +427,27 @@ class ProcessingService(BaseProcessingService):
         Returns a sentinel (None) when the processing should be paused,
         or a truthy value when processing should continue without pause.
 
-        The full processing state is persisted to ``mapping_state_cache`` so the
-        resume path (``continue_processing_after_mapping_confirmation``) can
-        reconstruct it. State is stored via model dumps — ``request.model_dump()``
-        and ``processing_metrics.to_dict()`` — instead of hand-copied fields, so
-        it cannot silently drift when the models gain new fields.
+        The full processing state is saved as a typed ``MappingSession`` so the
+        resume path (``continue_processing_after_mapping_confirmation``) receives
+        live objects — no serialization round-trip, nothing to drift.
         """
         logger.info(
             "UI подтверждения сопоставления включен - "
-            "сохраняю состояние и показываю интерфейс"
+            "сохраняю сессию и показываю интерфейс"
         )
 
-        from src.services.mapping_state_cache import mapping_state_cache
+        from src.services.mapping_session import MappingSession, mapping_sessions
 
-        await mapping_state_cache.save_state(request.user_id, {
-            'speaker_mapping': speaker_mapping,
-            'meeting_type': meeting_type,
-            'diarization_data': transcription_result.diarization,
-            'participants_list': request.participants_list,
-            'request_data': request.model_dump(),
-            'transcription_result': {
-                'transcription': transcription_result.transcription,
-                'formatted_transcript': transcription_result.formatted_transcript,
-                'speakers_text': transcription_result.speakers_text,
-                'speakers_summary': transcription_result.speakers_summary,
-            },
-            'temp_file_path': temp_file_path,
-            'cache_key': cache_key,
-            'task_id': task_id,
-            'processing_metrics': processing_metrics.to_dict(),
-        })
+        mapping_sessions.save(request.user_id, MappingSession(
+            request=request,
+            transcription_result=transcription_result,
+            speaker_mapping=speaker_mapping,
+            meeting_type=meeting_type,
+            temp_file_path=temp_file_path,
+            cache_key=cache_key,
+            task_id=task_id,
+            metrics=processing_metrics,
+        ))
 
         if progress_tracker:
             from src.ux.speaker_mapping_ui import show_mapping_confirmation
@@ -537,7 +529,7 @@ class ProcessingService(BaseProcessingService):
                         f"Не удалось отправить уведомление об ошибке UI: {notify_error}"
                     )
 
-                await mapping_state_cache.clear_state(request.user_id)
+                mapping_sessions.discard(request.user_id)
                 request.speaker_mapping = speaker_mapping
                 return True  # continue processing
             else:
@@ -577,7 +569,7 @@ class ProcessingService(BaseProcessingService):
 
     async def continue_processing_after_mapping_confirmation(
         self,
-        user_id: int,
+        session: MappingSession,
         confirmed_mapping: Dict[str, str],
         bot: Any,
         chat_id: int,
@@ -586,7 +578,7 @@ class ProcessingService(BaseProcessingService):
         Продолжить обработку после подтверждения сопоставления спикеров
 
         Args:
-            user_id: ID пользователя
+            session: Сессия сопоставления, атомарно изъятая коллбэком (take)
             confirmed_mapping: Подтвержденное сопоставление спикеров
             bot: Экземпляр бота для отправки сообщений
             chat_id: ID чата
@@ -594,50 +586,26 @@ class ProcessingService(BaseProcessingService):
         Returns:
             ProcessingResult с готовым протоколом
         """
-        from src.models.processing import ProcessingRequest, TranscriptionResult
-        from src.services.mapping_state_cache import mapping_state_cache
         from src.services.result_sender import send_result_to_user
         from src.ux.progress_tracker import ProgressFactory
 
-        task_id = None
+        user_id = session.request.user_id
+        task_id = session.task_id
         try:
             logger.info(
                 f"Продолжение обработки для пользователя {user_id} "
                 "после подтверждения сопоставления"
             )
 
-            state_data = await mapping_state_cache.load_state(user_id)
-            if not state_data:
-                raise ProcessingError(
-                    "Состояние обработки не найдено или истекло",
-                    "unknown",
-                    "state_expired",
-                )
-
-            transcription_data = state_data.get('transcription_result', {})
-            diarization_data = state_data.get('diarization_data', {})
-            temp_file_path = state_data.get('temp_file_path')
-            meeting_type = state_data.get('meeting_type', 'general')
-            cache_key = state_data.get('cache_key')
-            task_id = state_data.get('task_id')
-
-            logger.info(f"Восстановлено из кеша: тип встречи = {meeting_type}")
-
-            # Восстанавливаем модели из сохранённого состояния (см. P4)
-            request = ProcessingRequest(**state_data.get('request_data', {}))
+            request = session.request
             request.speaker_mapping = confirmed_mapping
+            transcription_result = session.transcription_result
+            processing_metrics = session.metrics
+            meeting_type = session.meeting_type
+            temp_file_path = session.temp_file_path
+            cache_key = session.cache_key
 
-            transcription_result = TranscriptionResult(
-                transcription=transcription_data.get('transcription', ''),
-                diarization=diarization_data,
-                speakers_text=transcription_data.get('speakers_text', {}),
-                formatted_transcript=transcription_data.get('formatted_transcript', ''),
-                speakers_summary=transcription_data.get('speakers_summary', ''),
-            )
-
-            processing_metrics = ProcessingMetrics.from_dict(
-                state_data.get('processing_metrics', {})
-            )
+            logger.info(f"Сессия восстановлена: тип встречи = {meeting_type}")
 
             progress_tracker = await ProgressFactory.create_file_processing_tracker(
                 bot=bot,
@@ -736,12 +704,11 @@ class ProcessingService(BaseProcessingService):
     ) -> None:
         """Единый обработчик ошибок возобновления обработки.
 
-        Логирует traceback, помечает задачу очереди как FAILED, очищает
-        сохранённое состояние, уведомляет пользователя и пробрасывает
-        ``ProcessingError`` вызывающему колбэку.
+        Логирует traceback, помечает задачу очереди как FAILED, уведомляет
+        пользователя и пробрасывает ``ProcessingError`` вызывающему колбэку.
+        Сессия сопоставления к этому моменту уже изъята (take) — восстанавливать
+        или чистить нечего.
         """
-        from src.services.mapping_state_cache import mapping_state_cache
-
         error_type = type(error).__name__
         logger.error(
             f"Ошибка возобновления обработки для пользователя {user_id} "
@@ -750,7 +717,6 @@ class ProcessingService(BaseProcessingService):
         )
 
         await self._mark_queue_task(task_id, "failed", error_message=str(error))
-        await mapping_state_cache.clear_state(user_id)
 
         lowered = str(error).lower()
         is_api_error = any(

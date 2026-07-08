@@ -139,28 +139,6 @@ def test_build_result_dict_falls_back_to_provider_name():
 # MappingStateCache save/load round-trip incl. task_id (P3)
 # ---------------------------------------------------------------------------
 
-async def test_state_roundtrip_preserves_task_id():
-    from src.services.mapping_state_cache import MappingStateCache
-
-    cache = MappingStateCache()
-    # task_id is now embedded in the state at save time (no separate attach step),
-    # which closes the race where a fast confirm could read task_id=None.
-    await cache.save_state(1, {
-        "speaker_mapping": {"SPEAKER_00": "Ivan"},
-        "meeting_type": "general",
-        "task_id": "task-abc",
-    })
-
-    loaded = await cache.load_state(1)
-    assert loaded["task_id"] == "task-abc"
-    assert loaded["speaker_mapping"] == {"SPEAKER_00": "Ivan"}
-
-
-async def test_load_state_missing_returns_none():
-    from src.services.mapping_state_cache import MappingStateCache
-
-    cache = MappingStateCache()
-    assert await cache.load_state(999) is None
 
 
 # ---------------------------------------------------------------------------

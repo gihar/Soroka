@@ -1,6 +1,12 @@
 """
 Обработчики callback запросов для сопоставления спикеров с участниками.
+
+Работают с типизированной сессией сопоставления: peek для чтения (смена,
+выбор, отмена), атомарный take для подтверждения/пропуска — повторный тап
+получает None и не запускает второе возобновление.
 """
+
+from typing import Optional
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -8,9 +14,42 @@ from aiogram.types import CallbackQuery
 from loguru import logger
 
 from services import ProcessingService, TemplateService, UserService
+from src.services.mapping_session import MappingSession, mapping_sessions
 from src.utils.telegram_safe import safe_edit_text
+from src.ux.speaker_mapping_ui import update_mapping_message
 
 from .helpers import _safe_callback_answer
+
+_SESSION_GONE_TEXT = (
+    "❌ Состояние обработки не найдено или истекло.\n\n"
+    "Пожалуйста, начните обработку заново."
+)
+
+
+def _owner_id(callback: CallbackQuery, parts_index: int) -> Optional[int]:
+    """Извлечь user_id из callback data и проверить владельца."""
+    parts = callback.data.split(":")
+    if len(parts) <= parts_index:
+        logger.error(f"Неверный формат callback data: {callback.data}")
+        return None
+    user_id = int(parts[parts_index])
+    if callback.from_user.id != user_id:
+        return None
+    return user_id
+
+
+async def _show_main_view(callback: CallbackQuery, session: MappingSession,
+                          user_id: int, editing_speaker: Optional[str] = None) -> None:
+    """Перерисовать карточку сопоставления из типизированной сессии."""
+    await update_mapping_message(
+        callback.message,
+        session.speaker_mapping,
+        session.transcription_result.diarization or {},
+        session.request.participants_list or [],
+        user_id,
+        current_editing_speaker=editing_speaker,
+        speakers_text=session.transcription_result.speakers_text,
+    )
 
 
 def setup_speaker_mapping_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
@@ -29,48 +68,20 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
                 logger.error(f"Неверный формат callback data: {callback.data}")
                 await callback.answer("❌ Ошибка формата запроса")
                 return
-
             speaker_id = parts[1]
-            user_id_from_callback = int(parts[2])
-
-            # Проверяем владельца
-            if callback.from_user.id != user_id_from_callback:
+            user_id = _owner_id(callback, 2)
+            if user_id is None:
                 await callback.answer("❌ Это не ваш запрос")
                 return
 
-            # Загружаем состояние
-            from src.services.mapping_state_cache import mapping_state_cache
-            state_data = await mapping_state_cache.load_state(user_id_from_callback)
-
-            if not state_data:
-                await safe_edit_text(
-                    callback.message,
-                    "❌ Состояние обработки не найдено или истекло.\n\n"
-                    "Пожалуйста, начните обработку заново."
-                )
+            session = mapping_sessions.peek(user_id)
+            if session is None:
+                await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
                 await callback.answer()
                 return
 
-            speaker_mapping = state_data.get('speaker_mapping', {})
-            diarization_data = state_data.get('diarization_data', {})
-            participants = state_data.get('participants_list', [])
-
-            # Извлекаем speakers_text из кеша если доступен
-            transcription_result = state_data.get('transcription_result', {})
-            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
-
-            # Обновляем сообщение, показывая выбор участников для этого спикера
-            from src.ux.speaker_mapping_ui import update_mapping_message
-            await update_mapping_message(
-                callback.message,
-                speaker_mapping,
-                diarization_data,
-                participants,
-                user_id_from_callback,
-                current_editing_speaker=speaker_id,
-                speakers_text=speakers_text
-            )
-
+            # Показываем выбор участников для этого спикера
+            await _show_main_view(callback, session, user_id, editing_speaker=speaker_id)
             await callback.answer()
 
         except Exception as e:
@@ -89,32 +100,21 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
                 logger.error(f"Неверный формат callback data: {callback.data}")
                 await callback.answer("❌ Ошибка формата запроса")
                 return
-
             speaker_id = parts[1]
             participant_idx_str = parts[2]
-            user_id_from_callback = int(parts[3])
-
-            # Проверяем владельца
-            if callback.from_user.id != user_id_from_callback:
+            user_id = _owner_id(callback, 3)
+            if user_id is None:
                 await callback.answer("❌ Это не ваш запрос")
                 return
 
-            # Загружаем состояние
-            from src.services.mapping_state_cache import mapping_state_cache
-            state_data = await mapping_state_cache.load_state(user_id_from_callback)
-
-            if not state_data:
-                await safe_edit_text(
-                    callback.message,
-                    "❌ Состояние обработки не найдено или истекло.\n\n"
-                    "Пожалуйста, начните обработку заново."
-                )
+            session = mapping_sessions.peek(user_id)
+            if session is None:
+                await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
                 await callback.answer()
                 return
 
-            speaker_mapping = state_data.get('speaker_mapping', {}).copy()
-            diarization_data = state_data.get('diarization_data', {})
-            participants = state_data.get('participants_list', [])
+            speaker_mapping = session.speaker_mapping.copy()
+            participants = session.request.participants_list or []
 
             # Обрабатываем выбор
             if participant_idx_str == "none":
@@ -143,24 +143,10 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
                     await callback.answer("❌ Неверный формат индекса")
                     return
 
-            # Обновляем состояние в кеше
-            await mapping_state_cache.update_mapping(user_id_from_callback, speaker_mapping)
-
-            # Извлекаем speakers_text из кеша если доступен
-            transcription_result = state_data.get('transcription_result', {})
-            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
+            mapping_sessions.update_mapping(user_id, speaker_mapping)
 
             # Обновляем сообщение (возвращаемся к основному виду)
-            from src.ux.speaker_mapping_ui import update_mapping_message
-            await update_mapping_message(
-                callback.message,
-                speaker_mapping,
-                diarization_data,
-                participants,
-                user_id_from_callback,
-                current_editing_speaker=None,
-                speakers_text=speakers_text
-            )
+            await _show_main_view(callback, session, user_id)
 
         except Exception as e:
             logger.error(f"Ошибка в speaker_mapping_select_callback: {e}", exc_info=True)
@@ -172,53 +158,18 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         try:
             await _safe_callback_answer(callback)
 
-            # Парсим данные: sm_cancel:{user_id}
-            parts = callback.data.split(":")
-            if len(parts) < 2:
-                logger.error(f"Неверный формат callback data: {callback.data}")
-                await callback.answer("❌ Ошибка формата запроса")
-                return
-
-            user_id_from_callback = int(parts[1])
-
-            # Проверяем владельца
-            if callback.from_user.id != user_id_from_callback:
+            user_id = _owner_id(callback, 1)
+            if user_id is None:
                 await callback.answer("❌ Это не ваш запрос")
                 return
 
-            # Загружаем состояние
-            from src.services.mapping_state_cache import mapping_state_cache
-            state_data = await mapping_state_cache.load_state(user_id_from_callback)
-
-            if not state_data:
-                await safe_edit_text(
-                    callback.message,
-                    "❌ Состояние обработки не найдено или истекло.\n\n"
-                    "Пожалуйста, начните обработку заново."
-                )
+            session = mapping_sessions.peek(user_id)
+            if session is None:
+                await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
                 await callback.answer()
                 return
 
-            speaker_mapping = state_data.get('speaker_mapping', {})
-            diarization_data = state_data.get('diarization_data', {})
-            participants = state_data.get('participants_list', [])
-
-            # Извлекаем speakers_text из кеша если доступен
-            transcription_result = state_data.get('transcription_result', {})
-            speakers_text = transcription_result.get('speakers_text') if transcription_result else None
-
-            # Возвращаемся к основному виду
-            from src.ux.speaker_mapping_ui import update_mapping_message
-            await update_mapping_message(
-                callback.message,
-                speaker_mapping,
-                diarization_data,
-                participants,
-                user_id_from_callback,
-                current_editing_speaker=None,
-                speakers_text=speakers_text
-            )
-
+            await _show_main_view(callback, session, user_id)
             await callback.answer()
 
         except Exception as e:
@@ -231,33 +182,16 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         try:
             await _safe_callback_answer(callback, "⏳ Продолжаю обработку...")
 
-            # Парсим данные: sm_confirm:{user_id}
-            parts = callback.data.split(":")
-            if len(parts) < 2:
-                logger.error(f"Неверный формат callback data: {callback.data}")
-                await callback.answer("❌ Ошибка формата запроса")
-                return
-
-            user_id_from_callback = int(parts[1])
-
-            # Проверяем владельца
-            if callback.from_user.id != user_id_from_callback:
+            user_id = _owner_id(callback, 1)
+            if user_id is None:
                 await callback.answer("❌ Это не ваш запрос")
                 return
 
-            # Загружаем состояние
-            from src.services.mapping_state_cache import mapping_state_cache
-            state_data = await mapping_state_cache.load_state(user_id_from_callback)
-
-            if not state_data:
-                await safe_edit_text(
-                    callback.message,
-                    "❌ Состояние обработки не найдено или истекло.\n\n"
-                    "Пожалуйста, начните обработку заново."
-                )
+            # Атомарно изымаем сессию: повторный тап получит None
+            session = mapping_sessions.take(user_id)
+            if session is None:
+                await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
                 return
-
-            speaker_mapping = state_data.get('speaker_mapping', {})
 
             # Обновляем сообщение (кратко, без обещаний - реальная обработка начнется в следующем сообщении)
             await safe_edit_text(
@@ -269,60 +203,20 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
             # Очищаем состояние FSM
             await state.clear()
 
-            # Продолжаем обработку
+            # Продолжаем обработку — сессия передаётся владением
             await processing_service.continue_processing_after_mapping_confirmation(
-                user_id=user_id_from_callback,
-                confirmed_mapping=speaker_mapping,
+                session=session,
+                confirmed_mapping=session.speaker_mapping,
                 bot=callback.bot,
                 chat_id=callback.message.chat.id
             )
 
-            # Очищаем кеш состояния
-            await mapping_state_cache.clear_state(user_id_from_callback)
-
         except Exception as e:
-            # Расширенное логирование ошибки
-            import traceback
-
-            logger.error("❌ Ошибка в speaker_mapping_confirm_callback")
-            logger.error(f"Тип ошибки: {type(e).__name__}")
-            # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования
-            error_msg_safe = str(e).replace('{', '{{').replace('}', '}}')
-            logger.error(f"Детали: {error_msg_safe}")
-
-            # Логируем контекст callback
-            try:
-                if 'user_id_from_callback' in locals():
-                    logger.error("Контекст callback:")
-                    logger.error(f"  - User ID: {user_id_from_callback}")
-                    logger.error(f"  - Chat ID: {callback.message.chat.id}")
-                    logger.error(f"  - Callback data: {callback.data}")
-
-                    # Пытаемся загрузить состояние для дополнительного контекста
-                    try:
-                        from src.services.mapping_state_cache import mapping_state_cache
-                        state_data = await mapping_state_cache.load_state(user_id_from_callback)
-                        if state_data:
-                            request_data = state_data.get('request_data', {})
-                            logger.error(f"  - LLM провайдер: {request_data.get('llm_provider', 'unknown')}")
-                            logger.error(f"  - Файл: {request_data.get('file_name', 'unknown')}")
-                    except Exception as state_error:
-                        logger.warning(f"Не удалось получить дополнительный контекст: {state_error}")
-            except Exception as log_error:
-                logger.warning(f"Ошибка при логировании контекста: {log_error}")
-
-            # Полный traceback - используем несколько методов для гарантированного вывода
-            logger.error("Полный traceback:", exc_info=True)
-
-            # Дополнительно выводим traceback как строку для надёжности
-            tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
-            logger.error("Детальный traceback (построчно):")
-            for line in tb_lines:
-                logger.error(line.rstrip())
-
-            # Выводим стек вызовов
-            logger.error(f"Стек вызовов: {traceback.format_stack()}")
-
+            logger.error(
+                f"Ошибка в speaker_mapping_confirm_callback "
+                f"({type(e).__name__}): {e}",
+                exc_info=True,
+            )
             await safe_edit_text(
                 callback.message,
                 "❌ Произошла ошибка при продолжении обработки.\n\n"
@@ -335,34 +229,15 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         try:
             await _safe_callback_answer(callback, "⏳ Продолжаю обработку без сопоставления...")
 
-            # Парсим данные: sm_skip:{user_id}
-            parts = callback.data.split(":")
-            if len(parts) < 2:
-                logger.error(f"Неверный формат callback data: {callback.data}")
-                await callback.answer("❌ Ошибка формата запроса")
-                return
-
-            user_id_from_callback = int(parts[1])
-
-            # Проверяем владельца
-            if callback.from_user.id != user_id_from_callback:
+            user_id = _owner_id(callback, 1)
+            if user_id is None:
                 await callback.answer("❌ Это не ваш запрос")
                 return
 
-            # Загружаем состояние
-            from src.services.mapping_state_cache import mapping_state_cache
-            state_data = await mapping_state_cache.load_state(user_id_from_callback)
-
-            if not state_data:
-                await safe_edit_text(
-                    callback.message,
-                    "❌ Состояние обработки не найдено или истекло.\n\n"
-                    "Пожалуйста, начните обработку заново."
-                )
+            session = mapping_sessions.take(user_id)
+            if session is None:
+                await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
                 return
-
-            # Продолжаем с пустым mapping
-            empty_mapping = {}
 
             # Обновляем сообщение
             await safe_edit_text(
@@ -377,14 +252,11 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
 
             # Продолжаем обработку с пустым mapping
             await processing_service.continue_processing_after_mapping_confirmation(
-                user_id=user_id_from_callback,
-                confirmed_mapping=empty_mapping,
+                session=session,
+                confirmed_mapping={},
                 bot=callback.bot,
                 chat_id=callback.message.chat.id
             )
-
-            # Очищаем кеш состояния
-            await mapping_state_cache.clear_state(user_id_from_callback)
 
         except Exception as e:
             logger.error(f"Ошибка в speaker_mapping_skip_callback: {e}", exc_info=True)

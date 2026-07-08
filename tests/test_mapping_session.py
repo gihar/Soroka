@@ -11,10 +11,10 @@ from src.models.processing import ProcessingRequest, TranscriptionResult
 
 
 def _session():
-    from src.services.mapping_session import MappingSession
     from datetime import datetime
 
     from src.performance.metrics import ProcessingMetrics
+    from src.services.mapping_session import MappingSession
 
     request = ProcessingRequest(
         user_id=42, file_name="встреча.mp3", template_id=2, llm_provider="openai",
