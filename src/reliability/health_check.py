@@ -103,10 +103,9 @@ class LLMHealthCheck(HealthCheck):
         start_time = time.time()
         
         try:
-            from llm_providers import llm_manager
+            from src.llm import protocol_generator
 
-            openai_provider = llm_manager.providers.get("openai")
-            is_available = bool(openai_provider and openai_provider.is_available())
+            is_available = protocol_generator.is_available()
             available_providers = {"openai": "OpenAI"} if is_available else {}
 
             response_time = time.time() - start_time

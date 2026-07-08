@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
+from services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import sort_templates_by_name
 
@@ -42,8 +42,7 @@ async def _build_flat_template_keyboard(template_service: TemplateService,
     return keyboard, templates
 
 
-def setup_template_callbacks(user_service: UserService, template_service: TemplateService,
-                              llm_service: EnhancedLLMService, processing_service: ProcessingService) -> Router:
+def setup_template_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
     """Настройка обработчиков callback запросов для выбора шаблонов"""
     router = Router()
 

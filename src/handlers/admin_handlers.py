@@ -10,7 +10,6 @@ from loguru import logger
 from api.monitoring import monitoring_api
 from config import settings
 from reliability.health_check import health_checker
-from services.enhanced_llm_service import EnhancedLLMService
 from services.processing_service import ProcessingService
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_edit_text
@@ -23,8 +22,7 @@ except ImportError:
     CLEANUP_SERVICE_AVAILABLE = False
 
 
-def setup_admin_handlers(llm_service: EnhancedLLMService, 
-                        processing_service: ProcessingService) -> Router:
+def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     """Настройка административных обработчиков"""
     router = Router()
     
@@ -172,7 +170,8 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             await message.answer("🔄 Сбрасываю компоненты надежности...")
             
             # Сбрасываем компоненты
-            await llm_service.reset_reliability_components()
+            from src.llm import protocol_generator
+            await protocol_generator.reset()
             await processing_service.reset_reliability_components()
             
             # Сбрасываем health checker
@@ -700,7 +699,8 @@ def setup_admin_handlers(llm_service: EnhancedLLMService,
             await safe_edit_text(callback.message, "🔄 Сбрасываю компоненты надежности...")
             
             # Сбрасываем компоненты
-            await llm_service.reset_reliability_components()
+            from src.llm import protocol_generator
+            await protocol_generator.reset()
             await processing_service.reset_reliability_components()
             
             # Сбрасываем health checker
