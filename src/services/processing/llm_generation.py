@@ -64,16 +64,6 @@ class LLMGenerationService:
             # Подготавливаем данные для LLM
             template_variables = self.get_template_variables_from_template(template)
 
-            # Извлекаем анализ диаризации если есть
-            diarization_analysis = None
-            if hasattr(transcription_result, 'diarization_analysis'):
-                analysis_obj = transcription_result.diarization_analysis
-                if analysis_obj:
-                    if isinstance(analysis_obj, dict):
-                        diarization_analysis = analysis_obj
-                    elif hasattr(analysis_obj, 'to_dict'):
-                        diarization_analysis = analysis_obj.to_dict()
-
             # Консолидированная двухэтапная генерация — единственный путь;
             # надёжность (rate-limit → circuit-breaker → retry) внутри модуля
             from src.llm import protocol_generator
@@ -121,7 +111,6 @@ class LLMGenerationService:
                 transcription=transcription_text,
                 template_variables=template_variables,
                 diarization_data=transcription_result.diarization,
-                diarization_analysis=diarization_analysis,
                 participants_list=participants_list,
                 meeting_metadata=meeting_metadata,
                 speaker_mapping=request.speaker_mapping,

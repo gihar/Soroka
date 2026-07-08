@@ -24,7 +24,6 @@ from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
 from src.services.base_processing_service import BaseProcessingService
-from src.services.diarization_analyzer import diarization_analyzer
 from src.services.mapping_session import MappingSession
 from src.services.smart_template_selector import smart_selector
 
@@ -835,16 +834,6 @@ class ProcessingService(BaseProcessingService):
             all_templates = await self.template_service.get_all_templates()
             return all_templates[0] if all_templates else None
 
-        from src.services.meeting_classifier import meeting_classifier
-        meeting_type, type_scores = meeting_classifier.classify(
-            transcription_result.transcription,
-            diarization_analysis=None,
-        )
-        logger.info(
-            f"Тип встречи для рекомендации шаблона: {meeting_type} "
-            f"(оценки: {', '.join(f'{k}={v:.2f}' for k, v in list(type_scores.items())[:3])})"
-        )
-
         user_stats = await history_repo.get_user_stats(request.user_id)
         template_history = []
         if user_stats and user_stats.get('favorite_templates'):
@@ -858,8 +847,6 @@ class ProcessingService(BaseProcessingService):
             templates=templates,
             top_k=3,
             user_history=template_history,
-            meeting_type=meeting_type,
-            type_scores=type_scores,
             meeting_topic=request.meeting_topic,
         )
 
@@ -867,7 +854,7 @@ class ProcessingService(BaseProcessingService):
             best_template, confidence = suggestions[0]
             logger.info(
                 f"Рекомендован шаблон '{best_template.name}' "
-                f"(уверенность: {confidence:.2%}, тип встречи: {meeting_type})"
+                f"(уверенность: {confidence:.2%})"
             )
             return best_template
 
@@ -945,27 +932,6 @@ class ProcessingService(BaseProcessingService):
                 f"Предобработка завершена: сокращение на "
                 f"{preprocessed['statistics']['reduction_percent']}%"
             )
-
-        # Этап расширенного анализа диаризации
-        if (
-            settings.enable_diarization_analysis
-            and hasattr(transcription_result, 'diarization')
-        ):
-            if transcription_result.diarization:
-                logger.info("Применение расширенного анализа диаризации")
-
-                analysis_result = diarization_analyzer.enrich_diarization_data(
-                    transcription_result.diarization,
-                    transcription_result.transcription,
-                )
-
-                transcription_result.diarization_analysis = analysis_result
-
-                logger.info(
-                    f"Анализ диаризации завершен: "
-                    f"{analysis_result.total_speakers} спикеров, "
-                    f"тип встречи: {analysis_result.meeting_type}"
-                )
 
         await performance_cache.set(
             cache_key, transcription_result, cache_type="transcription"

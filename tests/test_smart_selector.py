@@ -169,10 +169,10 @@ async def test_extract_keywords():
 
 
 @pytest.mark.asyncio
-async def test_suggest_with_meeting_type_boost():
-    """Тест категорийного boost для типа встречи"""
+async def test_category_boost_from_transcription():
+    """Категорийный буст считается из транскрипции — техшаблон обходит общий."""
     selector = SmartTemplateSelector()
-    
+
     templates = [
         Template(
             id=1,
@@ -197,40 +197,17 @@ async def test_suggest_with_meeting_type_boost():
             created_at=datetime.now()
         )
     ]
-    
-    # Тестовая транскрипция (техническая)
+
     transcription = """
     Обсудим архитектуру нашего API.
     Нужно выбрать базу данных и настроить сервер.
     Рассмотрим алгоритмы кэширования.
     """
-    
-    # Без meeting_type - выбор на основе только similarity
-    suggestions_without_type = await selector.suggest_templates(
-        transcription, templates, top_k=2
-    )
-    
-    # С meeting_type='technical' - должен получить boost
-    suggestions_with_type = await selector.suggest_templates(
-        transcription, templates, top_k=2, meeting_type='technical'
-    )
-    
-    # Технический шаблон должен иметь более высокий score с boost
-    assert len(suggestions_with_type) > 0
-    tech_template_with_boost = next(
-        (s for s in suggestions_with_type if s[0].id == 2), None
-    )
-    assert tech_template_with_boost is not None
-    
-    # Проверяем, что boost действительно применился
-    if len(suggestions_without_type) > 0:
-        tech_template_without_boost = next(
-            (s for s in suggestions_without_type if s[0].id == 2), None
-        )
-        if tech_template_without_boost:
-            # Score с boost должен быть выше
-            assert tech_template_with_boost[1] > tech_template_without_boost[1]
 
+    suggestions = await selector.suggest_templates(transcription, templates, top_k=2)
+
+    assert len(suggestions) > 0
+    assert suggestions[0][0].id == 2  # техшаблон первый: similarity + категорийный буст
 
 @pytest.mark.asyncio
 async def test_technical_meeting_selects_technical_template():
@@ -269,7 +246,7 @@ async def test_technical_meeting_selects_technical_template():
     """
     
     suggestions = await selector.suggest_templates(
-        transcription, templates, top_k=2, meeting_type='technical'
+        transcription, templates, top_k=2
     )
     
     assert len(suggestions) > 0
@@ -315,7 +292,7 @@ async def test_educational_meeting_selects_educational_template():
     """
     
     suggestions = await selector.suggest_templates(
-        transcription, templates, top_k=2, meeting_type='educational'
+        transcription, templates, top_k=2
     )
     
     assert len(suggestions) > 0
@@ -323,3 +300,22 @@ async def test_educational_meeting_selects_educational_template():
     assert suggestions[0][0].id == 2
     assert suggestions[0][1] > 0.3
 
+
+
+@pytest.mark.asyncio
+async def test_score_categories_internal_seam():
+    """Скоринг категорий — внутренний шов селектора (бывший meeting_classifier)."""
+    selector = SmartTemplateSelector()
+
+    transcription = (
+        "Обсудим архитектуру нашего API. Нужно выбрать базу данных и настроить сервер. "
+        "Рассмотрим алгоритмы кэширования и код деплоя."
+    )
+    top_category, scores = selector._score_categories(transcription)
+
+    assert top_category == "technical"
+    assert scores["technical"] > scores["business"]
+
+    # короткий текст без сигналов → general
+    top_category, _ = selector._score_categories("привет как дела")
+    assert top_category == "general"

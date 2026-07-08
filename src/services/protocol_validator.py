@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from src.models.diarization_analysis import ValidationResult
+from src.models.validation import ValidationResult
 
 
 class ProtocolValidator:
