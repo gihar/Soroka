@@ -54,15 +54,15 @@ def _make_args():
 
 
 def _patch_common(monkeypatch, call_log, schedule_raises=False):
-    import src.services.mapping_state_cache as msc
+    import src.services.mapping_session as ms
     import src.utils.telegram_safe as ts
     import src.ux.speaker_audio_preview as preview
     import src.ux.speaker_mapping_ui as ui
 
-    async def fake_save_state(user_id, state_data):
+    def fake_save_state(user_id, session):
         call_log.append("save_state")
 
-    monkeypatch.setattr(msc.mapping_state_cache, "save_state", fake_save_state)
+    monkeypatch.setattr(ms.mapping_sessions, "save", fake_save_state)
 
     async def fake_edit(*a, **k):
         return None
