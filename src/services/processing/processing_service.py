@@ -19,7 +19,7 @@ from src.database import history_repo, queue_repo
 from src.exceptions.processing import ProcessingError
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
-from src.performance.cache_system import cache_transcription, performance_cache
+from src.performance.cache_system import performance_cache
 from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, ProcessingMetrics, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
@@ -911,7 +911,6 @@ class ProcessingService(BaseProcessingService):
     # Transcription
     # ------------------------------------------------------------------
 
-    @cache_transcription()
     async def _optimized_transcription(
         self, file_path: str, request: ProcessingRequest,
         processing_metrics, progress_tracker=None,
