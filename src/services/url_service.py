@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import aiohttp
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 
 

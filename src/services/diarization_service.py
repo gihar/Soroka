@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 
 # Импортируем OOM защиту
 try:

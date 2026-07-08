@@ -200,7 +200,7 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             mode = callback.data.replace("set_transcription_mode_", "")
 
             # Обновляем настройки
-            from config import settings
+            from src.config import settings
             settings.transcription_mode = mode
 
             mode_names = {

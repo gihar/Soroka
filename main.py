@@ -11,7 +11,7 @@ import sys
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 
 # Добавляем src в путь для импортов
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))

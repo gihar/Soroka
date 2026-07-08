@@ -8,9 +8,9 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton
 from loguru import logger
 
 from api.monitoring import monitoring_api
-from config import settings
 from reliability.health_check import health_checker
 from services.processing_service import ProcessingService
+from src.config import settings
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_edit_text
 

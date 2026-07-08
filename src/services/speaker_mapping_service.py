@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from loguru import logger
 
-from config import settings
+from src.config import settings
 from src.llm import protocol_generator
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
