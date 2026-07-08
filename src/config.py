@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
     
     # Транскрипция
-    transcription_mode: str = Field("local", description="Режим транскрипции: local (локально), cloud (облако), hybrid (гибридный), speechmatics, deepgram или leopard")
+    transcription_mode: str = Field("local", description="Режим транскрипции: local | cloud | hybrid (синоним cloud) | speechmatics | deepgram | leopard; при сбое или недоступности бэкенда — откат на локальный Whisper")
     groq_api_key: Optional[str] = Field(None, description="API ключ Groq для облачной транскрипции")
     groq_model: str = Field("whisper-large-v3-turbo", description="Модель Groq для транскрипции")
     
