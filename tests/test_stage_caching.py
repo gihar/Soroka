@@ -31,6 +31,7 @@ def _request():
         participants_list=None, speaker_mapping=None,
         meeting_topic=None, meeting_date=None, meeting_time=None,
         meeting_agenda=None, project_list=None, user_id=1, file_name="f.mp3",
+        template_id=2, llm_provider="openai", language="ru",
     )
 
 
@@ -56,3 +57,22 @@ async def test_llm_generation_runs_on_every_call(gen_service, monkeypatch):
         assert result["decisions"] == "решения"
 
     assert fake_generate.await_count == 2
+
+
+def test_result_cache_key_includes_agenda_and_projects():
+    """Смена повестки или списка проектов → другой ключ кеша результата."""
+    from src.services.processing.processing_history import ProcessingHistoryService
+
+    base = _request()
+    with_agenda = _request()
+    with_agenda.meeting_agenda = "1. Бюджет 2. Сроки"
+    with_projects = _request()
+    with_projects.project_list = "Проект Альфа"
+
+    key_base = ProcessingHistoryService.generate_result_cache_key(base, "abc123")
+    key_agenda = ProcessingHistoryService.generate_result_cache_key(with_agenda, "abc123")
+    key_projects = ProcessingHistoryService.generate_result_cache_key(with_projects, "abc123")
+
+    assert key_base != key_agenda
+    assert key_base != key_projects
+    assert key_agenda != key_projects

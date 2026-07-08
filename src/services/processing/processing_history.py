@@ -95,5 +95,7 @@ class ProcessingHistoryService:
             "meeting_date": request.meeting_date,
             "meeting_time": request.meeting_time,
             "speaker_mapping": request.speaker_mapping,
+            "meeting_agenda": request.meeting_agenda,
+            "project_list": request.project_list,
         }
         return performance_cache._generate_key("full_result", key_data)
