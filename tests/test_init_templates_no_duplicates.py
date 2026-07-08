@@ -7,11 +7,12 @@ from src.services.template_service import TemplateService
 @pytest.mark.asyncio
 async def test_init_renames_without_duplicates(test_db):
     # старое состояние БД: англоязычный системный + системная сирота
-    await test_db.create_template(name="Daily Standup", content="old content placeholder", created_by=None, is_default=True)
-    await test_db.create_template(name="Мастер-класс", content="orphan content placeholder", created_by=None, is_default=True)
+    from src.database.template_repo import TemplateRepository
+    repo = TemplateRepository(test_db)
+    await repo.create_template(name="Daily Standup", content="old content placeholder", created_by=None, is_default=True)
+    await repo.create_template(name="Мастер-класс", content="orphan content placeholder", created_by=None, is_default=True)
 
-    service = TemplateService()
-    service.db = test_db  # направляем на временную БД вместо глобальной
+    service = TemplateService(templates=repo)
 
     await service.init_default_templates()
 

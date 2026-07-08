@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
 from loguru import logger
 
 from src.exceptions.configuration import ActivePresetDeletionError
@@ -22,8 +21,7 @@ class ModelPresetRepository:
 
     async def get_all(self) -> List[Dict[str, Any]]:
         """Get all presets ordered by created_at."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             cursor = await db.execute(
                 "SELECT * FROM model_presets ORDER BY created_at"
             )
@@ -32,8 +30,7 @@ class ModelPresetRepository:
 
     async def get_enabled(self) -> List[Dict[str, Any]]:
         """Get enabled presets ordered by created_at."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             cursor = await db.execute(
                 "SELECT * FROM model_presets WHERE is_enabled = 1 ORDER BY created_at"
             )
@@ -54,8 +51,7 @@ class ModelPresetRepository:
 
     async def get_by_key(self, key: str) -> Optional[Dict[str, Any]]:
         """Get a single preset by its unique key."""
-        async with aiosqlite.connect(self._db.db_path) as db:
-            db.row_factory = aiosqlite.Row
+        async with self._db.connect() as db:
             cursor = await db.execute(
                 "SELECT * FROM model_presets WHERE key = ?",
                 (key,),
@@ -76,7 +72,7 @@ class ModelPresetRepository:
 
         When api_key is None the existing value is preserved via COALESCE.
         """
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute(
                 """
                 INSERT INTO model_presets (key, name, model, base_url, api_key, admin_only)
@@ -118,7 +114,7 @@ class ModelPresetRepository:
                 f"Allowed fields: {', '.join(sorted(_ALLOWED_FIELDS))}"
             )
 
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             if field == "is_enabled" and int(value) == 0:
                 await self._raise_if_active(db, key, operation="отключить")
@@ -134,7 +130,7 @@ class ModelPresetRepository:
 
         Raises `ActivePresetDeletionError` if `key` is the globally active model.
         """
-        async with aiosqlite.connect(self._db.db_path) as db:
+        async with self._db.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             await self._raise_if_active(db, key, operation="удалить")
             cursor = await db.execute(

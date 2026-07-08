@@ -10,7 +10,7 @@ import os
 import aiofiles
 from loguru import logger
 
-from database import db
+from src.database import history_repo
 from src.performance.cache_system import performance_cache
 
 
@@ -39,7 +39,7 @@ class ProcessingHistoryService:
                     "",
                 ) or ""
 
-            await db.save_processing_result(
+            await history_repo.save_processing_result(
                 user_id=user.id,
                 file_name=request.file_name,
                 template_id=request.template_id,

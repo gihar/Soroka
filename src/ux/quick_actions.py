@@ -395,11 +395,11 @@ def setup_quick_actions_handlers() -> Router:
         try:
             from datetime import datetime
 
-            from database import db
             from reliability.middleware import monitoring_middleware
+            from src.database import history_repo
             
             # Получаем статистику пользователя из базы данных
-            user_stats = await db.get_user_stats(message.from_user.id)
+            user_stats = await history_repo.get_user_stats(message.from_user.id)
             
             # Получаем системную статистику
             system_stats = monitoring_middleware.get_stats()

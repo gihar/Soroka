@@ -125,10 +125,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             from datetime import datetime
 
-            from database import db
             from reliability.middleware import monitoring_middleware
+            from src.database import history_repo
 
-            user_stats = await db.get_user_stats(callback.from_user.id)
+            user_stats = await history_repo.get_user_stats(callback.from_user.id)
             system_stats = monitoring_middleware.get_stats()
 
             if user_stats:
@@ -222,12 +222,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             return
 
         try:
-            from database import db as app_db
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import app_settings_repo, model_preset_repo
 
-            preset_repo = ModelPresetRepository(app_db)
-            app_settings_repo = AppSettingsRepository(app_db)
+            preset_repo = model_preset_repo
 
             presets = await preset_repo.get_enabled()
             if not presets:
@@ -286,13 +283,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             preset_key = callback.data.replace("set_active_model_", "", 1)
 
-            from database import db as app_db
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import app_settings_repo, model_preset_repo
             from src.exceptions.configuration import AdminConfigurationError
 
-            app_settings_repo = AppSettingsRepository(app_db)
-            preset_repo = ModelPresetRepository(app_db)
+            preset_repo = model_preset_repo
 
             try:
                 await app_settings_repo.set_active_model_key(

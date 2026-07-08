@@ -522,8 +522,8 @@ def setup_participants_handlers() -> Router:
                 ])
 
                 # Обновляем пользователя в БД
-                from database import db
-                await db.update_user_saved_participants(callback.from_user.id, participants_json)
+                from src.database import user_repo
+                await user_repo.update_saved_participants(callback.from_user.id, participants_json)
 
             await callback.answer("✅ Информация сохранена и будет использована")
 
@@ -576,8 +576,8 @@ def setup_participants_handlers() -> Router:
             participants_json = participants_service.participants_to_json(participants)
 
             # Обновляем пользователя в БД
-            from database import db
-            await db.update_user_saved_participants(callback.from_user.id, participants_json)
+            from src.database import user_repo
+            await user_repo.update_saved_participants(callback.from_user.id, participants_json)
 
             await callback.answer("✅ Список сохранен и будет использован")
 

@@ -138,8 +138,8 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         # Сохраняем message_id в задаче
         if queue_tracker.message_id:
             queued_task.message_id = queue_tracker.message_id
-            from database import db
-            await db.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
+            from src.database import queue_repo
+            await queue_repo.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
 
         # Запускаем фоновое обновление позиции в очереди
         from src.handlers.message_handlers import _monitor_queue_position

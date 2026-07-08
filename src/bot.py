@@ -10,7 +10,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from loguru import logger
 
 from config import settings
-from database import db
 
 # Импорты надежности
 from reliability import health_checker
@@ -20,6 +19,7 @@ from reliability.middleware import (
     monitoring_middleware,
     rate_limiting_middleware,
 )
+from src.database import db
 
 # Импорты OOM защиты
 try:
@@ -223,8 +223,7 @@ class EnhancedTelegramBot:
             logger.info("База данных инициализирована")
 
             # 1.5. Синхронизация пресетов моделей из .env в БД
-            from src.database.model_preset_repo import ModelPresetRepository
-            model_preset_repo = ModelPresetRepository(db)
+            from src.database import model_preset_repo
             await model_preset_repo.sync_from_config()
 
             # 2. Инициализируем базовые шаблоны
@@ -319,17 +318,14 @@ class EnhancedTelegramBot:
         # Проверяем доступность LLM провайдера (OpenAI) и наличие активного пресета
         try:
             from llm_providers import llm_manager
-            from src.database.app_settings_repo import AppSettingsRepository
-            from src.database.database import db as app_db
-            from src.database.model_preset_repo import ModelPresetRepository
+            from src.database import app_settings_repo, model_preset_repo
 
             openai_available = llm_manager.providers["openai"].is_available()
             logger.info(f"OpenAI провайдер доступен: {openai_available}")
             if not openai_available:
                 logger.error("OpenAI провайдер недоступен (нет API ключа)!")
 
-            app_settings_repo = AppSettingsRepository(app_db)
-            preset_repo = ModelPresetRepository(app_db)
+            preset_repo = model_preset_repo
             active_key = await app_settings_repo.get_active_model_key()
             active_preset = (
                 await preset_repo.get_by_key(active_key) if active_key else None
