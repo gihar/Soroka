@@ -13,13 +13,12 @@ from loguru import logger
 from config import settings
 from src.exceptions.processing import (
     CloudTranscriptionError,
-    DeepgramAPIError,
     GroqAPIError,
-    SpeechmaticsAPIError,
     TranscriptionError,
 )
 from src.models.processing import TranscriptionResult
 from src.performance.oom_protection import get_oom_protection, oom_protected
+from src.services.transcription_backends import build_backends
 
 # Leopard (Picovoice) STT — lazy import for faster startup
 LEOPARD_AVAILABLE = None  # resolved on first use
@@ -102,6 +101,9 @@ class TranscriptionService:
         
         # Настраиваем callbacks для очистки памяти
         self.oom_protection.add_cleanup_callback(self._cleanup_models)
+
+        # Реестр адаптеров бэкендов транскрипции
+        self._backends = build_backends(self)
     
     @oom_protected(estimated_memory_mb=200)  # Whisper модели занимают ~200MB
     def _load_whisper_model(self, model_size: str = "base"):
@@ -572,16 +574,7 @@ class TranscriptionService:
         file_size_mb = file_size / (1024 * 1024)
         logger.info(f"Начало транскрибации с диаризацией файла: {file_path} (размер: {file_size_mb:.1f}MB)")
         
-        result = TranscriptionResult(
-            transcription="",
-            diarization=None,
-            speakers_text={},
-            formatted_transcript="",
-            speakers_summary="",
-            compression_info=None
-        )
-        
-        # Инициализируем информацию о сжатии
+        # Дефолтная информация о сжатии (если адаптер её не заполнил)
         compression_info = {
             "compressed": False,
             "original_size_mb": 0,
@@ -591,301 +584,17 @@ class TranscriptionService:
         }
         
         try:
-            # Выбираем метод транскрипции в зависимости от настроек
-            if settings.transcription_mode == "leopard":
-                # Локальная транскрипция через Picovoice Leopard
-                transcription, compression_info = await self._transcribe_with_leopard(file_path)
+            backend = self._backends.get(settings.transcription_mode) or self._backends["local"]
+            result = await self._run_with_fallback(backend, file_path, language)
+            result = await self._ensure_diarization(result, file_path, language)
 
-                # Применяем диаризацию при необходимости
-                if DIARIZATION_AVAILABLE and settings.enable_diarization:
-                    try:
-                        logger.info("Применение диаризации к результатам Leopard транскрипции...")
-                        diarization_result = await diarization_service.diarize_file(
-                            file_path, language
-                        )
-                        if diarization_result:
-                            result.diarization = diarization_result.to_dict()
-                            result.speakers_text = diarization_result.get_speakers_text()
-                            result.formatted_transcript = diarization_result.get_formatted_transcript()
-                            result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                            logger.info(f"Диаризация применена. Найдено говорящих: {len(diarization_result.speakers)}")
-                    except Exception as e:
-                        logger.warning(f"Ошибка диаризации после Leopard: {e}")
-
-                result.transcription = transcription
-                if not result.formatted_transcript:
-                    result.formatted_transcript = transcription
-                result.compression_info = compression_info
-                
-                return result
-            
-            if settings.transcription_mode == "deepgram" and DEEPGRAM_AVAILABLE and deepgram_service.is_available():
-                # Транскрипция через Deepgram API
-                try:
-                    logger.info("Выполнение транскрипции через Deepgram...")
-                    
-                    processed_file, compression_info = await self._preprocess_for_deepgram(file_path)
-
-                    # Выполняем транскрипцию через Deepgram (с диаризацией если включена)
-                    result = await deepgram_service.transcribe_file(
-                        file_path=processed_file,
-                        language=language,
-                        enable_diarization=settings.enable_diarization
-                    )
-
-                    # Сохраняем информацию о сжатии в результате
-                    if result:
-                        result.compression_info = compression_info
-                    
-                    logger.info(f"Транскрипция через Deepgram завершена. Длина текста: {len(result.transcription)} символов")
-                    if settings.enable_diarization and result.diarization:
-                        logger.info(f"Диаризация выполнена через Deepgram. Найдено говорящих: {len(result.speakers_text) if result.speakers_text else 0}")
-                    
-                    return result
-                    
-                except (CloudTranscriptionError, DeepgramAPIError) as e:
-                    # При ошибке Deepgram переключаемся на локальную транскрипцию
-                    logger.warning(f"Ошибка транскрипции через Deepgram, переключаемся на локальную: {e}")
-                    self._load_whisper_model()
-                    
-                    whisper_result = await self._transcribe_with_progress(
-                        file_path, language
-                    )
-                    
-                    transcription = whisper_result["text"].strip()
-                    
-                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
-                    
-                    # Применяем диаризацию к результатам fallback транскрипции
-                    if DIARIZATION_AVAILABLE and settings.enable_diarization:
-                        try:
-                            logger.info("Применение диаризации к результатам fallback транскрипции...")
-                            diarization_result = await diarization_service.diarize_file(
-                                file_path, language
-                            )
-                            
-                            if diarization_result:
-                                result.diarization = diarization_result.to_dict()
-                                result.speakers_text = diarization_result.get_speakers_text()
-                                result.formatted_transcript = diarization_result.get_formatted_transcript()
-                                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                                
-                                logger.info(f"Диаризация применена к fallback транскрипции. Найдено говорящих: {len(diarization_result.speakers)}")
-                                
-                        except Exception as e:
-                            logger.warning(f"Ошибка при применении диаризации к fallback транскрипции: {e}")
-                    
-                    result.transcription = transcription
-                    if not result.formatted_transcript:
-                        result.formatted_transcript = transcription
-                    result.compression_info = compression_info
-                    
-                    return result
-            
-            if settings.transcription_mode == "speechmatics" and SPEECHMATICS_AVAILABLE and speechmatics_service.is_available():
-                # Транскрипция через Speechmatics API
-                try:
-                    logger.info("Выполнение транскрипции через Speechmatics...")
-                    
-                    processed_file, compression_info = await self._preprocess_for_speechmatics(file_path)
-
-                    # Выполняем транскрипцию через Speechmatics (с диаризацией если включена)
-                    result = await speechmatics_service.transcribe_file(
-                        file_path=processed_file,
-                        language=language,
-                        enable_diarization=settings.enable_diarization
-                    )
-
-                    # Сохраняем информацию о сжатии в результате
-                    if result:
-                        result.compression_info = compression_info
-                    
-                    logger.info(f"Транскрипция через Speechmatics завершена. Длина текста: {len(result.transcription)} символов")
-                    if settings.enable_diarization and result.diarization:
-                        logger.info(f"Диаризация выполнена через Speechmatics. Найдено говорящих: {len(result.speakers_text) if result.speakers_text else 0}")
-                    
-                    return result
-                    
-                except (CloudTranscriptionError, SpeechmaticsAPIError) as e:
-                    # При ошибке Speechmatics переключаемся на локальную транскрипцию
-                    logger.warning(f"Ошибка транскрипции через Speechmatics, переключаемся на локальную: {e}")
-                    self._load_whisper_model()
-                    
-                    whisper_result = await self._transcribe_with_progress(
-                        file_path, language
-                    )
-                    
-                    transcription = whisper_result["text"].strip()
-                    
-                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
-                    
-                    # Применяем диаризацию к результатам fallback транскрипции
-                    if DIARIZATION_AVAILABLE and settings.enable_diarization:
-                        try:
-                            logger.info("Применение диаризации к результатам fallback транскрипции...")
-                            diarization_result = await diarization_service.diarize_file(
-                                file_path, language
-                            )
-                            
-                            if diarization_result:
-                                result.diarization = diarization_result.to_dict()
-                                result.speakers_text = diarization_result.get_speakers_text()
-                                result.formatted_transcript = diarization_result.get_formatted_transcript()
-                                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                                
-                                logger.info(f"Диаризация применена к fallback транскрипции. Найдено говорящих: {len(diarization_result.speakers)}")
-                                
-                        except Exception as e:
-                            logger.warning(f"Ошибка при применении диаризации к fallback транскрипции: {e}")
-                    
-                    result.transcription = transcription
-                    if not result.formatted_transcript:
-                        result.formatted_transcript = transcription
-                    result.compression_info = compression_info
-                    
-                    return result
-                    
-            elif settings.transcription_mode == "cloud" and self.groq_client:
-                # Пробуем облачную транскрипцию с автоматическим fallback
-                try:
-                    # Облачная транскрипция через Groq (проверка размера происходит внутри)
-                    logger.info("Выполнение облачной транскрипции через Groq...")
-                    transcription, compression_info = await self._transcribe_with_groq(file_path)
-                
-                except (CloudTranscriptionError, GroqAPIError) as e:
-                    # При ошибке облачной транскрипции автоматически переключаемся на локальную
-                    logger.warning(f"Ошибка облачной транскрипции, переключаемся на локальную: {e}")
-                    self._load_whisper_model()
-                    
-                    whisper_result = await self._transcribe_with_progress(
-                        file_path, language
-                    )
-                    
-                    transcription = whisper_result["text"].strip()
-                    
-                    logger.info(f"Локальная транскрибация завершена после fallback. Длина текста: {len(transcription)} символов")
-                    
-                    # Применяем диаризацию к результатам fallback транскрипции
-                    if DIARIZATION_AVAILABLE and settings.enable_diarization:
-                        try:
-                            logger.info("Применение диаризации к результатам fallback транскрипции...")
-                            diarization_result = await diarization_service.diarize_file(
-                                file_path, language
-                            )
-                            
-                            if diarization_result:
-                                result.diarization = diarization_result.to_dict()
-                                result.speakers_text = diarization_result.get_speakers_text()
-                                result.formatted_transcript = diarization_result.get_formatted_transcript()
-                                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                                
-                                logger.info(f"Диаризация применена к fallback транскрипции. Найдено говорящих: {len(diarization_result.speakers)}")
-                                
-                        except Exception as e:
-                            logger.warning(f"Ошибка при применении диаризации к fallback транскрипции: {e}")
-                    
-                    result.transcription = transcription
-                    if not result.formatted_transcript:
-                        result.formatted_transcript = transcription
-                    result.compression_info = compression_info
-                    
-                    return result
-                    
-            elif settings.transcription_mode == "hybrid" and self.groq_client:
-                # Гибридный подход: облачная транскрипция + локальная диаризация
-                
-                logger.info("Выполнение гибридной транскрипции: облачная + диаризация...")
-                
-                # Пробуем облачную транскрипцию с fallback на локальную
-                try:
-                    # Сначала выполняем облачную транскрипцию (проверка размера происходит внутри)
-                    
-                    transcription, compression_info = await self._transcribe_with_groq(file_path)
-                
-                except (CloudTranscriptionError, GroqAPIError) as e:
-                    # При ошибке облачной транскрипции автоматически переключаемся на локальную
-                    logger.warning(f"Ошибка облачной транскрипции в гибридном режиме, переключаемся на локальную: {e}")
-                    
-                    self._load_whisper_model()
-                    
-                    whisper_result = await self._transcribe_with_progress(
-                        file_path, language
-                    )
-                    
-                    transcription = whisper_result["text"].strip()
-                
-                # Затем применяем диаризацию к уже полученному тексту
-                if DIARIZATION_AVAILABLE and settings.enable_diarization:
-                    logger.info("Применение диаризации к тексту...")
-                    
-                    try:
-                        # Используем диаризацию для разделения говорящих
-                        diarization_result = await diarization_service.diarize_file(
-                            file_path, language
-                        )
-                        
-                        if diarization_result:
-                            # Обновляем результат с диаризацией
-                            result.diarization = diarization_result.to_dict()
-                            result.speakers_text = diarization_result.get_speakers_text()
-                            result.formatted_transcript = diarization_result.get_formatted_transcript()
-                            result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                            
-                            logger.info(f"Гибридная обработка завершена. Найдено говорящих: {len(diarization_result.speakers)}")
-                            result.transcription = transcription
-                            return result
-                            
-                    except Exception as e:
-                        logger.warning(f"Ошибка при диаризации в гибридном режиме: {e}")
-                        # Продолжаем без диаризации
-                
-                
-                logger.info(f"Гибридная транскрибация завершена. Длина текста: {len(transcription)} символов")
-                
-            else:
-                # Fallback к обычной транскрипции через Whisper
-                self._load_whisper_model()
-                
-                logger.info("Выполнение стандартной транскрипции...")
-                
-                # Создаем обертку для отслеживания прогресса
-                whisper_result = await self._transcribe_with_progress(
-                    file_path, language
-                )
-                
-                transcription = whisper_result["text"].strip()
-                
-                logger.info(f"Стандартная транскрибация завершена. Длина текста: {len(transcription)} символов")
-            
-            # Применяем диаризацию к результатам локальной транскрипции, если включена
-            # (для Speechmatics диаризация уже включена в сам сервис)
-            if DIARIZATION_AVAILABLE and settings.enable_diarization and settings.transcription_mode != "speechmatics":
-                try:
-                    logger.info("Применение диаризации к результатам локальной транскрипции...")
-                    diarization_result = await diarization_service.diarize_file(
-                        file_path, language
-                    )
-                    
-                    if diarization_result:
-                        # Обновляем результат с диаризацией
-                        result.diarization = diarization_result.to_dict()
-                        result.speakers_text = diarization_result.get_speakers_text()
-                        result.formatted_transcript = diarization_result.get_formatted_transcript()
-                        result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
-                        
-                        logger.info(f"Диаризация применена к локальной транскрипции. Найдено говорящих: {len(diarization_result.speakers)}")
-                        
-                except Exception as e:
-                    logger.warning(f"Ошибка при применении диаризации: {e}")
-                    # Продолжаем без диаризации
-            
-            result.transcription = transcription
             if not result.formatted_transcript:  # Если диаризация не сработала
-                result.formatted_transcript = transcription  # Без разделения говорящих
-            result.compression_info = compression_info
-            
+                result.formatted_transcript = result.transcription  # Без разделения говорящих
+            if result.compression_info is None:
+                result.compression_info = compression_info
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Ошибка при транскрибации файла {file_path}: {e}")
             if "ffmpeg" in str(e).lower():
@@ -894,7 +603,46 @@ class TranscriptionService:
                     file_path
                 )
             raise TranscriptionError(str(e), file_path)
-    
+
+    async def _run_with_fallback(self, backend, file_path: str, language: str) -> TranscriptionResult:
+        """Единая политика: недоступен или типизированная ошибка → локальный Whisper."""
+        whisper = self._backends["local"]
+
+        if backend is not whisper and not backend.is_available():
+            logger.warning(f"Бэкенд '{backend.name}' недоступен — используем локальный Whisper")
+            return await whisper.transcribe(file_path, language)
+
+        try:
+            return await backend.transcribe(file_path, language)
+        except TranscriptionError as e:
+            if backend is whisper:
+                raise
+            logger.warning(f"Ошибка бэкенда '{backend.name}', переключаемся на локальную транскрипцию: {e}")
+            return await whisper.transcribe(file_path, language)
+
+    async def _ensure_diarization(self, result: TranscriptionResult, file_path: str,
+                                  language: str) -> TranscriptionResult:
+        """Применить локальную диаризацию ровно один раз, если бэкенд её не дал."""
+        if not (DIARIZATION_AVAILABLE and settings.enable_diarization):
+            return result
+        if result.diarization:
+            return result
+
+        try:
+            logger.info("Применение локальной диаризации к транскрипции...")
+            diarization_result = await diarization_service.diarize_file(file_path, language)
+            if diarization_result:
+                result.diarization = diarization_result.to_dict()
+                result.speakers_text = diarization_result.get_speakers_text()
+                result.formatted_transcript = diarization_result.get_formatted_transcript()
+                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                logger.info(f"Диаризация применена. Найдено говорящих: {len(diarization_result.speakers)}")
+        except Exception as e:
+            logger.warning(f"Ошибка при применении диаризации: {e}")
+            # Продолжаем без диаризации
+
+        return result
+
     async def _transcribe_with_progress(self, file_path: str, language: str):
         """Транскрипция (не блокирует event loop)"""
         import threading
