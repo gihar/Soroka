@@ -4,7 +4,6 @@ LLM generation service.
 Extracted from ProcessingService to isolate LLM interaction logic.
 """
 
-import json
 import time
 from typing import Any, Dict, Optional
 
@@ -12,7 +11,6 @@ from loguru import logger
 
 from config import settings
 from src.exceptions.configuration import AdminConfigurationError
-from src.performance.cache_system import cache_llm_response, performance_cache
 from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.services.protocol_validator import protocol_validator
 
@@ -43,7 +41,6 @@ class LLMGenerationService:
         self._user_service = user_service
         self._template_service = template_service
 
-    @cache_llm_response()
     async def optimized_llm_generation(
         self,
         transcription_result: Any,
@@ -59,26 +56,6 @@ class LLMGenerationService:
         preset_repo = model_preset_repo
         active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
         llm_model_name = active_preset["name"]  # noqa: F841
-
-        # Создаем ключ кэша на основе модели, транскрипции и шаблона
-        transcription_hash = hash(str(transcription_result.transcription))
-        template_hash = hash(str(template))
-        participants_hash = (
-            hash(json.dumps(
-                sorted(request.participants_list, key=lambda x: x.get('name', '')),
-                sort_keys=True,
-            )) if request.participants_list else "none"
-        )
-        cache_key = (
-            f"llm:{active_preset['key']}:{transcription_hash}:{template_hash}:{participants_hash}"
-        )
-
-        # Проверяем кэш
-        cached_llm_result = await performance_cache.get(cache_key)
-        if cached_llm_result:
-            logger.info("Использован кэшированный результат LLM")
-            processing_metrics.llm_duration = 0.1
-            return cached_llm_result
 
         # Выполняем генерацию LLM
         with PerformanceTimer("llm_generation", metrics_collector):
@@ -211,9 +188,6 @@ class LLMGenerationService:
                         f"(без кеша: ${cache_summary['cost_without_cache']:.4f})"
                     )
                 logger.info("=" * 60)
-
-        # Кэшируем результат
-        await performance_cache.set(cache_key, llm_result_data, cache_type="llm_response")
 
         return llm_result_data
 

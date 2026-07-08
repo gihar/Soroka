@@ -11,11 +11,7 @@ from .async_optimization import (
     thread_manager,
 )
 from .cache_system import (
-    CacheDecorator,
     PerformanceCache,
-    cache_diarization,
-    cache_llm_response,
-    cache_transcription,
     performance_cache,
 )
 from .memory_management import (
@@ -32,10 +28,6 @@ __all__ = [
     # Cache system
     "performance_cache",
     "PerformanceCache", 
-    "CacheDecorator",
-    "cache_transcription",
-    "cache_llm_response", 
-    "cache_diarization",
     
     # Metrics
     "metrics_collector",
