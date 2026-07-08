@@ -24,7 +24,6 @@ from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
 from src.services.base_processing_service import BaseProcessingService
-from src.services.diarization_analyzer import diarization_analyzer
 from src.services.mapping_session import MappingSession
 from src.services.smart_template_selector import smart_selector
 
@@ -933,27 +932,6 @@ class ProcessingService(BaseProcessingService):
                 f"Предобработка завершена: сокращение на "
                 f"{preprocessed['statistics']['reduction_percent']}%"
             )
-
-        # Этап расширенного анализа диаризации
-        if (
-            settings.enable_diarization_analysis
-            and hasattr(transcription_result, 'diarization')
-        ):
-            if transcription_result.diarization:
-                logger.info("Применение расширенного анализа диаризации")
-
-                analysis_result = diarization_analyzer.enrich_diarization_data(
-                    transcription_result.diarization,
-                    transcription_result.transcription,
-                )
-
-                transcription_result.diarization_analysis = analysis_result
-
-                logger.info(
-                    f"Анализ диаризации завершен: "
-                    f"{analysis_result.total_speakers} спикеров, "
-                    f"тип встречи: {analysis_result.meeting_type}"
-                )
 
         await performance_cache.set(
             cache_key, transcription_result, cache_type="transcription"

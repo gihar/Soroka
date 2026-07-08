@@ -114,7 +114,6 @@ class Settings(BaseSettings):
     cache_max_age_hours: int = Field(24, description="Максимальный возраст кэш файлов в часах")
     
     # Улучшения качества протоколов
-    enable_diarization_analysis: bool = Field(True, description="Включить расширенный анализ данных диаризации")
     enable_text_preprocessing: bool = Field(True, description="Включить предобработку текста транскрипции")
     enable_protocol_validation: bool = Field(True, description="Включить валидацию и оценку качества протоколов")
     meeting_type_detection: bool = Field(True, description="Включить автоопределение типа встречи")
