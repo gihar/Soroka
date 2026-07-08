@@ -331,3 +331,7 @@ class ProtocolGenerator:
                     str(e), provider="openai", model=selected_model
                 ) from e
             raise
+
+
+# Глобальный экземпляр (один circuit-breaker/rate-limiter на процесс)
+protocol_generator = ProtocolGenerator()
