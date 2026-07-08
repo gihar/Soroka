@@ -50,7 +50,6 @@ class ProcessingService(BaseProcessingService):
         # Composed services
         self.formatter = ProtocolFormatter()
         self.llm_gen = LLMGenerationService(
-            llm_service=self.llm_service,
             user_service=self.user_service,
             template_service=self.template_service,
         )

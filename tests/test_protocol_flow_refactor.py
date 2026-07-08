@@ -170,7 +170,7 @@ async def test_load_state_missing_returns_none():
 async def test_get_model_display_name_from_preset():
     from src.services.processing.llm_generation import LLMGenerationService
 
-    svc = LLMGenerationService(llm_service=None, user_service=None, template_service=None)
+    svc = LLMGenerationService(user_service=None, template_service=None)
 
     assert await svc.get_model_display_name({"name": "GPT-4o"}) == "GPT-4o"
     assert await svc.get_model_display_name({"model": "gpt-4o-mini"}) == "gpt-4o-mini"
@@ -179,7 +179,7 @@ async def test_get_model_display_name_from_preset():
 async def test_resolve_model_display_name_never_raises():
     from src.services.processing.llm_generation import LLMGenerationService
 
-    svc = LLMGenerationService(llm_service=None, user_service=None, template_service=None)
+    svc = LLMGenerationService(user_service=None, template_service=None)
     name = await svc.resolve_model_display_name()
     # When no active preset is configured the helper degrades to "?" rather than raising.
     assert isinstance(name, str)

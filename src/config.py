@@ -128,7 +128,6 @@ class Settings(BaseSettings):
     max_context_tokens_stage2: int = Field(10000, description="Максимальное количество токенов контекста для Stage 2 (используются релевантные фрагменты)")
 
     # Новая консолидированная архитектура (2 запроса вместо 5-6)
-    enable_consolidated_two_request: bool = Field(True, description="Включить новую консолидированную архитектуру (2 запроса вместо 5-6)")
     consolidated_protocol_quality_threshold: float = Field(0.7, description="Порог качества для использования консолидированного метода (0.0-1.0)")
     consolidated_max_tokens_request1: int = Field(4000, description="Максимальное токенов для запроса 1 (извлечение)")
     consolidated_max_tokens_request2: int = Field(3000, description="Максимальное токенов для запроса 2 (протокол)")
