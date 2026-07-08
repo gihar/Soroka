@@ -46,20 +46,25 @@ async def test_whisper_backend_transcribes_and_strips(service):
     assert tb.WhisperBackend(service).is_available() is True  # всегда доступен
 
 
-async def test_groq_backend_delegates_and_threads_compression(service):
+async def test_groq_backend_delegates_and_threads_compression(service, tmp_path):
     from src.services import transcription_backends as tb
 
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"x" * 100)
     compression = {"compressed": True, "original_size_mb": 10, "compressed_size_mb": 2,
                    "compression_ratio": 80, "compression_saved_mb": 8}
-    service._transcribe_with_groq = AsyncMock(return_value=("текст groq", compression))
+    service._preprocess_audio = AsyncMock(return_value=(str(audio), compression))
+    service.oom_protection = MagicMock()
+    service.oom_protection.can_process_file.return_value = (True, "ok")
     backend = tb.GroqBackend(service)
 
     assert backend.is_available() is False  # groq_client = None
 
     service.groq_client = MagicMock()
+    service.groq_client.audio.transcriptions.create.return_value = MagicMock(text="текст groq")
     assert backend.is_available() is True
 
-    result = await backend.transcribe("f.mp3", "ru")
+    result = await backend.transcribe(str(audio), "ru")
     assert result.transcription == "текст groq"
     assert result.compression_info == compression
 
@@ -68,18 +73,18 @@ async def test_leopard_backend_delegates_and_checks_key(service, monkeypatch):
     import src.services.transcription_service as ts_module
     from src.services import transcription_backends as tb
 
-    service._transcribe_with_leopard = AsyncMock(return_value=("текст leopard", dict()))
     backend = tb.LeopardBackend(service)
-
     monkeypatch.setattr(ts_module, "LEOPARD_AVAILABLE", True)
     monkeypatch.setattr(tb.settings, "picovoice_access_key", "key")
     assert backend.is_available() is True
 
-    monkeypatch.setattr(tb.settings, "picovoice_access_key", None)
-    assert backend.is_available() is False
-
+    backend._prepare_file = lambda path: path
+    monkeypatch.setattr(backend, "_run_leopard_sync", staticmethod(lambda path: "текст leopard"))
     result = await backend.transcribe("f.mp3", "ru")
     assert result.transcription == "текст leopard"
+
+    monkeypatch.setattr(tb.settings, "picovoice_access_key", None)
+    assert backend.is_available() is False
 
 
 def _native_result(text="текст с диаризацией"):
@@ -98,7 +103,7 @@ async def test_speechmatics_backend_returns_native_diarization(service, monkeypa
 
     compression = {"compressed": True, "original_size_mb": 5, "compressed_size_mb": 1,
                    "compression_ratio": 80, "compression_saved_mb": 4}
-    service._preprocess_for_speechmatics = AsyncMock(return_value=("f.mp3", compression))
+    service._preprocess_audio = AsyncMock(return_value=("f.mp3", compression))
     stub = MagicMock()
     stub.is_available.return_value = True
     stub.transcribe_file = AsyncMock(return_value=_native_result())
@@ -119,7 +124,7 @@ async def test_deepgram_backend_native_diarization_and_error_passthrough(service
     from src.exceptions.processing import DeepgramAPIError
     from src.services import transcription_backends as tb
 
-    service._preprocess_for_deepgram = AsyncMock(return_value=("f.mp3", dict()))
+    service._preprocess_audio = AsyncMock(return_value=("f.mp3", dict()))
     stub = MagicMock()
     stub.is_available.return_value = True
     stub.transcribe_file = AsyncMock(return_value=_native_result("deepgram текст"))
