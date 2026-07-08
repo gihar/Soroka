@@ -217,11 +217,6 @@ OPENAI_API_LIMIT = RateLimitConfig(
     burst_limit=20            # максимум 20 запросов подряд
 )
 
-ANTHROPIC_API_LIMIT = RateLimitConfig(
-    requests_per_window=100,  # 100 запросов
-    window_size=60.0,         # за минуту  
-    burst_limit=30            # максимум 30 запросов подряд
-)
 
 USER_REQUEST_LIMIT = RateLimitConfig(
     requests_per_window=10,   # 10 запросов

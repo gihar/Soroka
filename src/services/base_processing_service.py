@@ -6,7 +6,6 @@ from typing import Any, Dict
 
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.reliability import get_circuit_breaker, get_fallback_manager
-from src.services.enhanced_llm_service import EnhancedLLMService
 from src.services.file_service import FileService
 from src.services.template_service import TemplateService
 from src.services.transcription_service import TranscriptionService
@@ -18,7 +17,6 @@ class BaseProcessingService:
     
     def __init__(self):
         self.transcription_service = TranscriptionService()
-        self.llm_service = EnhancedLLMService()
         self.user_service = UserService()
         self.template_service = TemplateService()
         self.file_service = FileService()

@@ -8,13 +8,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services.enhanced_llm_service import EnhancedLLMService
 from services.template_service import TemplateService
 from services.user_service import UserService
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 
-                          llm_service: EnhancedLLMService) -> Router:
+) -> Router:
     """Настройка обработчиков команд"""
     router = Router()
     

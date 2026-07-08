@@ -155,37 +155,6 @@ def setup_message_handlers(file_service: FileService, template_service: Template
     return router
 
 
-async def _show_llm_selection_for_file(message: Message, state: FSMContext, llm_service, processing_service):
-    """LLM selection is gone — go straight to processing.
-
-    Kept under its original name to avoid call-site churn; it now just sets the
-    provider to 'openai' in state and starts processing.
-    """
-    try:
-        state_data = await state.get_data()
-        template_id = state_data.get('template_id')
-        file_id = state_data.get('file_id')
-        file_path = state_data.get('file_path')
-
-        if not template_id:
-            await message.answer("❌ Ошибка: шаблон не выбран")
-            return
-        if not file_id and not file_path:
-            await message.answer("❌ Ошибка: файл не найден")
-            return
-
-        await state.update_data(llm_provider='openai')
-
-        await message.answer(
-            "⏳ Начинаю обработку файла...",
-            parse_mode="Markdown",
-        )
-        await _start_file_processing(message, state, processing_service)
-    except Exception as e:
-        logger.error(f"Ошибка в _show_llm_selection_for_file: {e}")
-        await message.answer("❌ Произошла ошибка при запуске обработки.")
-
-
 async def _start_file_processing(message: Message, state: FSMContext, processing_service):
     """Начать обработку файла"""
     from src.models.processing import ProcessingRequest

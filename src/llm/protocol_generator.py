@@ -1,4 +1,11 @@
-"""OpenAI GPT provider."""
+"""Генерация протокола: глубокий модуль.
+
+Двухэтапная генерация со строгими схемами (анализ → генерация), кеш
+OpenAI-совместимых клиентов по пресетам модели и стек надёжности
+(rate-limit → circuit-breaker → retry) — безусловно вокруг каждого вызова.
+402 (кончились кредиты) классифицируется в LLMInsufficientCreditsError,
+не ретраится и пролетает насквозь.
+"""
 import asyncio
 from typing import Any, Dict, Optional
 
@@ -8,7 +15,6 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions.processing import LLMInsufficientCreditsError
-from src.llm.base import LLMProvider
 from src.llm.json_utils import safe_json_parse
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import (
@@ -17,38 +23,59 @@ from src.prompts.prompts import (
     build_generation_prompt,
     build_generation_system_prompt,
 )
+from src.reliability import (
+    DEFAULT_CIRCUIT_BREAKER_CONFIG,
+    LLM_RETRY_CONFIG,
+    OPENAI_API_LIMIT,
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    RetryManager,
+    global_rate_limiter,
+)
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
 
 def _is_insufficient_credits_error(exc: Exception) -> bool:
-    """Detect an OpenAI/OpenRouter ``402 Payment Required`` (out of credits) error.
-
-    Checks the SDK ``status_code`` first, then falls back to the message text so
-    the error is recognised even if it arrives wrapped or without the attribute.
-    """
+    """Detect an OpenAI/OpenRouter ``402 Payment Required`` (out of credits) error."""
     if getattr(exc, "status_code", None) == 402:
         return True
     text = str(exc).lower()
     return "error code: 402" in text or "more credits" in text
 
 
-class OpenAIProvider(LLMProvider):
-    """Provider for OpenAI GPT."""
+class ProtocolGenerator:
+    """Глубокий модуль генерации протокола (интерфейс — тестовая поверхность)."""
 
-    def __init__(self):
+    def __init__(self, retry_manager: Optional[RetryManager] = None,
+                 circuit_breaker: Optional[CircuitBreaker] = None,
+                 rate_limiter=None):
         self.default_client = None
-        self.http_client = None
         self._client_cache = {}
         self._http_clients = []  # track for cleanup
         if settings.openai_api_key:
-            openai.api_key = settings.openai_api_key
-            self.http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
-            self._http_clients.append(self.http_client)
+            http_client = httpx.Client(verify=settings.ssl_verify, timeout=settings.llm_timeout_seconds)
+            self._http_clients.append(http_client)
             self.default_client = openai.OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
-                http_client=self.http_client
+                http_client=http_client,
             )
+
+        self._retry = retry_manager or RetryManager(LLM_RETRY_CONFIG)
+        self._circuit_breaker = circuit_breaker or CircuitBreaker(
+            "openai_llm",
+            CircuitBreakerConfig(
+                failure_threshold=DEFAULT_CIRCUIT_BREAKER_CONFIG.failure_threshold,
+                recovery_timeout=DEFAULT_CIRCUIT_BREAKER_CONFIG.recovery_timeout,
+                success_threshold=DEFAULT_CIRCUIT_BREAKER_CONFIG.success_threshold,
+                timeout=settings.llm_timeout_seconds,
+            ),
+        )
+        self._rate_limiter = rate_limiter or global_rate_limiter.get_or_create(
+            "openai_api", OPENAI_API_LIMIT
+        )
+
+    # ------------------------------------------------------------------ клиенты
 
     def _get_client(self, preset: dict = None):
         """Get or create an OpenAI client for the given preset."""
@@ -83,18 +110,13 @@ class OpenAIProvider(LLMProvider):
         self._client_cache.clear()
 
     def invalidate_cache_for(self, base_url: str, api_key_hash: Optional[int]) -> None:
-        """Remove the cached OpenAI client for the given (base_url, api_key_hash) tuple.
-
-        Used after a preset is updated so the next call rebuilds the client with the
-        new credentials.
-        """
-        cache_key = (base_url, api_key_hash)
-        client = self._client_cache.pop(cache_key, None)
+        """Remove the cached client for the given (base_url, api_key_hash) tuple."""
+        client = self._client_cache.pop((base_url, api_key_hash), None)
         if client is not None:
             logger.info(f"Invalidated OpenAI client cache for {base_url}")
 
     def invalidate_cache_for_base_url(self, base_url: str) -> None:
-        """Remove all cached OpenAI clients for the given base_url, regardless of api_key."""
+        """Remove all cached clients for the given base_url, regardless of api_key."""
         keys_to_remove = [k for k in self._client_cache if k[0] == base_url]
         for k in keys_to_remove:
             self._client_cache.pop(k)
@@ -102,14 +124,74 @@ class OpenAIProvider(LLMProvider):
             logger.info(f"Invalidated {len(keys_to_remove)} OpenAI client(s) for {base_url}")
 
     def is_available(self) -> bool:
-        return self.default_client is not None and settings.openai_api_key is not None
+        """Клиент сконфигурирован и модуль готов принимать вызовы."""
+        return self.default_client is not None
 
-    async def generate_protocol(self, transcription: str, template_variables: Dict[str, str],
-                                diarization_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        """Generate protocol using OpenAI GPT (Two-stage process)."""
+    # ------------------------------------------------------------- надёжность
+
+    async def _protected(self, fn, *args, **kwargs):
+        """rate-limit → circuit-breaker → retry вокруг любого вызова модели."""
+        await self._rate_limiter.acquire()
+
+        async def attempt():
+            return await self._retry.execute_with_retry(fn, *args, **kwargs)
+
+        return await self._circuit_breaker.call(attempt)
+
+    def get_reliability_stats(self) -> Dict[str, Any]:
+        return {
+            "circuit_breaker": self._circuit_breaker.get_stats(),
+            "rate_limiter": self._rate_limiter.get_stats(),
+        }
+
+    async def reset(self):
+        """Сбросить компоненты надёжности (админская операция)."""
+        await self._circuit_breaker.reset()
+        logger.info("Сброшены компоненты надежности LLM")
+
+    # -------------------------------------------------------------- интерфейс
+
+    async def generate(self, *, preset: Optional[Dict[str, Any]],
+                       transcription: str, template_variables: Dict[str, str],
+                       diarization_data: Optional[Dict[str, Any]] = None,
+                       **context) -> Dict[str, Any]:
+        """Сгенерировать протокол по транскрипции (двухэтапно, с надёжностью)."""
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
+        return await self._protected(
+            self._generate_two_stage,
+            preset=preset,
+            transcription=transcription,
+            template_variables=template_variables,
+            diarization_data=diarization_data,
+            **context,
+        )
 
+    async def structured_call(self, *, system_prompt: str, user_prompt: str,
+                              schema: Dict[str, Any], model: str = None,
+                              preset: Optional[Dict[str, Any]] = None,
+                              step_name: str = "StructuredCall") -> Dict[str, Any]:
+        """Один вызов модели со строгой схемой ответа (с надёжностью)."""
+        if not self.is_available():
+            raise ValueError("OpenAI API не настроен")
+        client = self._get_client(preset)
+        return await self._protected(
+            self._call_openai,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema,
+            step_name=step_name,
+            model=model,
+            client=client,
+        )
+
+    # ----------------------------------------------------------- реализация
+
+    async def _generate_two_stage(self, *, preset: Optional[Dict[str, Any]],
+                                  transcription: str, template_variables: Dict[str, str],
+                                  diarization_data: Optional[Dict[str, Any]] = None,
+                                  **kwargs) -> Dict[str, Any]:
+        """Two-stage generation: analysis (тип встречи + спикеры) → protocol."""
         participants = kwargs.get('participants')
         meeting_metadata = {
             'meeting_topic': kwargs.get('meeting_topic', ''),
@@ -132,36 +214,35 @@ class OpenAIProvider(LLMProvider):
         provided_meeting_type = kwargs.get('meeting_type')
         provided_speaker_mapping = kwargs.get('speaker_mapping')
 
-        preset_dict = kwargs.get('preset')
-        if preset_dict and preset_dict.get('model'):
-            selected_model = preset_dict['model']
+        if preset and preset.get('model'):
+            selected_model = preset['model']
             logger.info(
                 f"Используется модель: {selected_model} "
-                f"(ключ: {preset_dict.get('key')})"
+                f"(ключ: {preset.get('key')})"
             )
         else:
             selected_model = settings.openai_model
 
         if provided_meeting_type and provided_speaker_mapping:
-            logger.info(f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление спикеров ({len(provided_speaker_mapping)} спикеров) уже определены")
+            logger.info(
+                f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление "
+                f"спикеров ({len(provided_speaker_mapping)} спикеров) уже определены"
+            )
             meeting_type = provided_meeting_type
             speaker_mapping = provided_speaker_mapping
             analysis_result = {}
         else:
             logger.info("Запуск ЭТАПА 1: Анализ встречи и сопоставление спикеров")
 
-            analysis_system_prompt = build_analysis_system_prompt()
-            analysis_user_prompt = build_analysis_prompt(
-                transcription=analysis_transcription,
-                participants_list=participants_list_str,
-                meeting_metadata=meeting_metadata,
-                meeting_agenda=kwargs.get('meeting_agenda'),
-                project_list=kwargs.get('project_list')
-            )
-
             analysis_result = await self._call_openai(
-                system_prompt=analysis_system_prompt,
-                user_prompt=analysis_user_prompt,
+                system_prompt=build_analysis_system_prompt(),
+                user_prompt=build_analysis_prompt(
+                    transcription=analysis_transcription,
+                    participants_list=participants_list_str,
+                    meeting_metadata=meeting_metadata,
+                    meeting_agenda=kwargs.get('meeting_agenda'),
+                    project_list=kwargs.get('project_list')
+                ),
                 schema=MEETING_ANALYSIS_SCHEMA,
                 step_name="Analysis",
                 model=settings.analysis_stage_model
@@ -172,24 +253,20 @@ class OpenAIProvider(LLMProvider):
 
             logger.info(f"ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
 
-        # Stage 2: Generation
         logger.info("Запуск ЭТАПА 2: Генерация протокола")
 
-        client = self._get_client(preset_dict)
-
-        generation_system_prompt = build_generation_system_prompt(template_variables=template_variables)
-        generation_user_prompt = build_generation_prompt(
-            transcription=analysis_transcription,
-            template_variables=template_variables,
-            speaker_mapping=speaker_mapping,
-            meeting_type=meeting_type,
-            meeting_agenda=kwargs.get('meeting_agenda'),
-            project_list=kwargs.get('project_list')
-        )
+        client = self._get_client(preset)
 
         generation_result = await self._call_openai(
-            system_prompt=generation_system_prompt,
-            user_prompt=generation_user_prompt,
+            system_prompt=build_generation_system_prompt(template_variables=template_variables),
+            user_prompt=build_generation_prompt(
+                transcription=analysis_transcription,
+                template_variables=template_variables,
+                speaker_mapping=speaker_mapping,
+                meeting_type=meeting_type,
+                meeting_agenda=kwargs.get('meeting_agenda'),
+                project_list=kwargs.get('project_list')
+            ),
             schema=PROTOCOL_DATA_SCHEMA,
             step_name="Generation",
             model=selected_model,
@@ -202,7 +279,9 @@ class OpenAIProvider(LLMProvider):
         final_result = protocol_data.copy()
         final_result['_meeting_type'] = meeting_type
         final_result['_speaker_mapping'] = speaker_mapping
-        final_result['_analysis_confidence'] = 0.0 if provided_meeting_type else analysis_result.get('analysis_confidence', 0.0)
+        final_result['_analysis_confidence'] = (
+            0.0 if provided_meeting_type else analysis_result.get('analysis_confidence', 0.0)
+        )
         final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
 
         return final_result
@@ -221,8 +300,8 @@ class OpenAIProvider(LLMProvider):
 
         logger.info(f"Отправляем запрос в OpenAI [{step_name}] с моделью {selected_model}")
 
-        async def _api_call():
-            return await asyncio.to_thread(
+        try:
+            response = await asyncio.to_thread(
                 active_client.chat.completions.create,
                 model=selected_model,
                 messages=[
@@ -233,9 +312,6 @@ class OpenAIProvider(LLMProvider):
                 response_format={"type": "json_schema", "json_schema": schema},
                 extra_headers=extra_headers
             )
-
-        try:
-            response = await _api_call()
             content = response.choices[0].message.content
 
             if settings.log_cache_metrics:
@@ -255,3 +331,7 @@ class OpenAIProvider(LLMProvider):
                     str(e), provider="openai", model=selected_model
                 ) from e
             raise
+
+
+# Глобальный экземпляр (один circuit-breaker/rate-limiter на процесс)
+protocol_generator = ProtocolGenerator()

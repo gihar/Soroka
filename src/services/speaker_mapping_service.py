@@ -2,14 +2,12 @@
 Сервис для автоматического сопоставления спикеров с участниками через LLM
 """
 
-import asyncio
-import json
 from typing import Any, Dict, List, Optional, Set
 
 from loguru import logger
 
 from config import settings
-from llm_providers import llm_manager, safe_json_parse
+from src.llm import protocol_generator
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
 
@@ -541,76 +539,38 @@ class SpeakerMappingService:
                 logger.debug(f"User prompt:\n{prompt}")
                 logger.debug("=" * 80)
             
-            # Создаем минимальный запрос к LLM
-            provider = llm_manager.providers.get(llm_provider)
-            if not provider or not provider.is_available():
-                raise ValueError(f"LLM провайдер {llm_provider} недоступен")
-            
-            # Для OpenAI используем специальный вызов
-            if llm_provider == "openai":
-                import openai
-
-                from config import settings as cfg
-                
-                client = openai.OpenAI(
-                    api_key=cfg.openai_api_key,
-                    base_url=cfg.openai_base_url or "https://api.openai.com/v1"
-                )
-                
-                # Формируем extra_headers
-                extra_headers = {}
-                if cfg.http_referer:
-                    extra_headers["HTTP-Referer"] = cfg.http_referer
-                if cfg.x_title:
-                    extra_headers["X-Title"] = cfg.x_title
-                
-                async def _call_openai():
-                    return await asyncio.to_thread(
-                        client.chat.completions.create,
-                        model=cfg.speaker_mapping_model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.1,
-                        response_format={"type": "json_schema", "json_schema": SPEAKER_MAPPING_SCHEMA},
-                        extra_headers=extra_headers
-                    )
-                
-                response = await _call_openai()
-                content = response.choices[0].message.content
-                
-                # Логирование ответа (если включено)
-                if settings.llm_debug_log:
-                    logger.debug("=" * 80)
-                    logger.debug("=== LLM MAPPING RESPONSE ===")
-                    logger.debug("=" * 80)
-                    logger.debug(f"Raw content:\n{content}")
-                    logger.debug("=" * 80)
-                
-                # Парсим JSON с использованием safe_json_parse
-                try:
-                    result = safe_json_parse(content, context="SpeakerMappingService LLM response")
-                except (ValueError, json.JSONDecodeError) as e:
-                    raise SpeakerMappingLLMError(f"JSON parse failed: {e}") from e
-                
-                # Краткое резюме результата (если включено логирование)
-                if settings.llm_debug_log:
-                    mapped_count = len(result.get('speaker_mappings', {}))
-                    unmapped_count = len(result.get('unmapped_speakers', []))
-                    confidence_scores = result.get('confidence_scores', {})
-                    avg_confidence = sum(confidence_scores.values()) / max(len(confidence_scores), 1) if confidence_scores else 0.0
-                    logger.info(f"✅ LLM сопоставил {mapped_count} спикеров, {unmapped_count} несопоставленных")
-                    logger.info(f"📊 Средняя уверенность: {avg_confidence:.2f}")
-                
-                return result
-            
-            else:
+            if llm_provider != "openai":
                 # Для других провайдеров используем стандартный метод
                 logger.warning(f"Сопоставление спикеров не оптимизировано для {llm_provider}")
-                # Возвращаем пустой результат
                 return {}
-            
+
+            result = await protocol_generator.structured_call(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                schema=SPEAKER_MAPPING_SCHEMA,
+                model=settings.speaker_mapping_model,
+                step_name="SpeakerMapping",
+            )
+
+            # Логирование ответа (если включено)
+            if settings.llm_debug_log:
+                logger.debug("=" * 80)
+                logger.debug("=== LLM MAPPING RESPONSE ===")
+                logger.debug("=" * 80)
+                logger.debug(f"Parsed result:\n{result}")
+                logger.debug("=" * 80)
+
+            # Краткое резюме результата (если включено логирование)
+            if settings.llm_debug_log:
+                mapped_count = len(result.get('speaker_mappings', {}))
+                unmapped_count = len(result.get('unmapped_speakers', []))
+                confidence_scores = result.get('confidence_scores', {})
+                avg_confidence = sum(confidence_scores.values()) / max(len(confidence_scores), 1) if confidence_scores else 0.0
+                logger.info(f"✅ LLM сопоставил {mapped_count} спикеров, {unmapped_count} несопоставленных")
+                logger.info(f"📊 Средняя уверенность: {avg_confidence:.2f}")
+
+            return result
+
         except SpeakerMappingLLMError:
             raise
         except Exception as e:

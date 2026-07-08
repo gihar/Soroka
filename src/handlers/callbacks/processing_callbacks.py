@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from loguru import logger
 
-from services import EnhancedLLMService, ProcessingService, TemplateService, UserService
+from services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 
 from .helpers import _safe_callback_answer
@@ -189,8 +189,7 @@ async def _cancel_task_callback(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка при отмене задачи", show_alert=True)
 
 
-def setup_processing_callbacks(user_service: UserService, template_service: TemplateService,
-                                llm_service: EnhancedLLMService, processing_service: ProcessingService) -> Router:
+def setup_processing_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
     """Настройка обработчиков callback запросов для обработки файлов"""
     router = Router()
 

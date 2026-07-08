@@ -42,7 +42,7 @@ except ImportError:
 from handlers import setup_callback_handlers, setup_command_handlers, setup_message_handlers, setup_template_handlers
 from handlers.admin_handlers import setup_admin_handlers
 from handlers.participants_handlers import setup_participants_handlers
-from services import EnhancedLLMService, FileService, ProcessingService, TemplateService, UserService
+from services import FileService, ProcessingService, TemplateService, UserService
 
 
 class EnhancedTelegramBot:
@@ -63,7 +63,6 @@ class EnhancedTelegramBot:
         self.user_service = UserService()
         self.template_service = TemplateService()
         self.file_service = FileService()
-        self.llm_service = EnhancedLLMService()
         self.processing_service = ProcessingService()
         
         # Инициализация менеджера очереди задач
@@ -146,14 +145,12 @@ class EnhancedTelegramBot:
     def _setup_handlers(self):
         """Настройка всех обработчиков"""
         # Административные обработчики - ПЕРВЫМИ для приоритета
-        admin_router = setup_admin_handlers(
-            self.llm_service, self.processing_service
-        )
+        admin_router = setup_admin_handlers(self.processing_service)
         self.dp.include_router(admin_router)
         
         # Команды
         command_router = setup_command_handlers(
-            self.user_service, self.template_service, self.llm_service
+            self.user_service, self.template_service
         )
         self.dp.include_router(command_router)
         
@@ -165,7 +162,7 @@ class EnhancedTelegramBot:
         
         # Callback запросы - используем enhanced сервисы
         callback_router = setup_callback_handlers(
-            self.user_service, self.template_service, self.llm_service, self.processing_service
+            self.user_service, self.template_service, self.processing_service
         )
         self.dp.include_router(callback_router)
         
@@ -317,10 +314,10 @@ class EnhancedTelegramBot:
         
         # Проверяем доступность LLM провайдера (OpenAI) и наличие активного пресета
         try:
-            from llm_providers import llm_manager
             from src.database import app_settings_repo, model_preset_repo
+            from src.llm import protocol_generator
 
-            openai_available = llm_manager.providers["openai"].is_available()
+            openai_available = protocol_generator.is_available()
             logger.info(f"OpenAI провайдер доступен: {openai_available}")
             if not openai_available:
                 logger.error("OpenAI провайдер недоступен (нет API ключа)!")
@@ -466,11 +463,12 @@ class EnhancedTelegramBot:
     def get_system_stats(self) -> dict:
         """Получить полную статистику системы"""
         try:
+            from src.llm import protocol_generator
             return {
                 "health": health_checker.get_health_summary(),
                 "monitoring": monitoring_middleware.get_stats(),
                 "processing": self.processing_service.get_reliability_stats(),
-                "llm": self.llm_service.get_reliability_stats()
+                "llm": protocol_generator.get_reliability_stats()
             }
         except Exception as e:
             logger.error(f"Ошибка при получении статистики: {e}")
