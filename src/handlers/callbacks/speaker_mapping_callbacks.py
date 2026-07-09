@@ -49,6 +49,7 @@ async def _show_main_view(callback: CallbackQuery, session: MappingSession,
         user_id,
         current_editing_speaker=editing_speaker,
         speakers_text=session.transcription_result.speakers_text,
+        speakers_with_audio=session.speakers_with_audio,
     )
 
 

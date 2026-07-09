@@ -242,23 +242,156 @@ async def test_no_audio_fallback_when_voice_succeeds(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_schedule_runs_previews_in_background(monkeypatch):
-    ran = []
+async def test_returns_delivered_speakers(monkeypatch, tmp_path):
+    """Возвращается множество спикеров, чьи фрагменты реально доставлены."""
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
 
-    async def fake_send(**kwargs):
-        ran.append(kwargs)
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        # SPEAKER_1 (start=0.0) не нарезается, SPEAKER_2 (start=6.0) успешен
+        if start == 0.0:
+            return False
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
 
-    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_send)
+    async def fake_send_voice(bot, chat_id, voice, caption=None, **k):
+        return "MSG"
 
-    task = preview.schedule_speaker_audio_previews(
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_send_voice)
+
+    delivered = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
-        speakers=["SPEAKER_1"],
+        speakers=["SPEAKER_1", "SPEAKER_2"],
         diarization_data=_diarization(),
-        temp_file_path="x",
+        temp_file_path=str(src),
         speakers_text={},
     )
 
-    assert task is not None
-    await task  # в проде НЕ ждём; здесь ждём, чтобы проверить, что задача отработала
-    assert len(ran) == 1
-    assert ran[0]["chat_id"] == 1
+    assert delivered == {"SPEAKER_2"}
+
+
+@pytest.mark.asyncio
+async def test_returns_empty_set_when_disabled_or_no_file(monkeypatch, tmp_path):
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    monkeypatch.setattr(preview.settings, "speaker_audio_preview_enabled", False)
+    delivered_disabled = await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={},
+    )
+
+    monkeypatch.setattr(preview.settings, "speaker_audio_preview_enabled", True)
+    delivered_no_file = await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=None,
+        speakers_text={},
+    )
+
+    assert delivered_disabled == set()
+    assert delivered_no_file == set()
+
+
+@pytest.mark.asyncio
+async def test_audio_fallback_counts_as_delivered(monkeypatch, tmp_path):
+    """Фоллбек «голосовое → аудиофайл» — это доставка."""
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
+
+    async def fake_voice(bot, chat_id, voice, caption=None, **k):
+        return None  # голосовые запрещены
+
+    async def fake_audio(bot, chat_id, audio, caption=None, **k):
+        return "MSG"
+
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_voice)
+    monkeypatch.setattr(preview, "safe_send_audio", fake_audio)
+
+    delivered = await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={},
+    )
+
+    assert delivered == {"SPEAKER_1"}
+
+
+@pytest.mark.asyncio
+async def test_send_failure_means_not_delivered(monkeypatch, tmp_path):
+    """Ни голосовое, ни аудиофайл не ушли → спикер не считается доставленным."""
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
+
+    async def fake_send_none(bot, chat_id, caption=None, **k):
+        return None
+
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_send_none)
+    monkeypatch.setattr(preview, "safe_send_audio", fake_send_none)
+
+    delivered = await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={},
+    )
+
+    assert delivered == set()
+
+
+@pytest.mark.asyncio
+async def test_caption_snippet_up_to_200_chars(monkeypatch, tmp_path):
+    """Подпись фрагмента — единственная цитата спикера, лимит 200 символов."""
+    src = tmp_path / "audio.wav"
+    src.write_bytes(b"fake-audio")
+
+    captions = []
+
+    async def fake_cut(src_path, start, duration, out_path, **k):
+        with open(out_path, "wb") as f:
+            f.write(b"ogg")
+        return True
+
+    async def fake_send_voice(bot, chat_id, voice, caption=None, **k):
+        captions.append(caption)
+        return "MSG"
+
+    monkeypatch.setattr(preview, "cut_voice_fragment", fake_cut)
+    monkeypatch.setattr(preview, "safe_send_voice", fake_send_voice)
+
+    long_text = "а" * 300
+    await preview.send_speaker_audio_previews(
+        bot=object(), chat_id=1, user_id=7,
+        speakers=["SPEAKER_1"],
+        diarization_data=_diarization(),
+        temp_file_path=str(src),
+        speakers_text={"SPEAKER_1": long_text},
+    )
+
+    assert len(captions) == 1
+    assert "а" * 200 in captions[0]
+    assert "а" * 201 not in captions[0]
+    assert "…" in captions[0]
+
+

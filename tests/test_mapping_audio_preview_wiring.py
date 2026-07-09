@@ -1,8 +1,9 @@
-"""Аудиопревью планируется ФОНОМ ПОСЛЕ показа карточки и не ломает паузу при ошибке.
+"""Фрагменты записи отправляются ДО карточки сопоставления (#55).
 
-Регрессия, которую это закрывает: раньше превью awaitилось ВСТРОЕННО перед показом
-карточки, и падающие отправки голосовых (VOICE_MESSAGES_FORBIDDEN + ретраи) на ~8с
-блокировали и сбивали порядок UI сопоставления.
+Новый канон: сначала нарезаются и отправляются фрагменты (с ожиданием),
+по факту доставки решается, кому в карточке нужна текстовая цитата;
+карточка уходит последним сообщением — кнопки всегда внизу чата.
+Ошибка превью не ломает паузу: карточка показывается со всеми цитатами.
 """
 
 import os
@@ -53,7 +54,8 @@ def _make_args():
     return request, transcription_result, progress_tracker, processing_metrics
 
 
-def _patch_common(monkeypatch, call_log, schedule_raises=False):
+def _patch_common(monkeypatch, call_log, saved_sessions, show_kwargs,
+                  delivered={"SPEAKER_1"}, previews_raise=False):
     import src.services.mapping_session as ms
     import src.utils.telegram_safe as ts
     import src.ux.speaker_audio_preview as preview
@@ -61,6 +63,7 @@ def _patch_common(monkeypatch, call_log, schedule_raises=False):
 
     def fake_save_state(user_id, session):
         call_log.append("save_state")
+        saved_sessions.append(session)
 
     monkeypatch.setattr(ms.mapping_sessions, "save", fake_save_state)
 
@@ -69,27 +72,26 @@ def _patch_common(monkeypatch, call_log, schedule_raises=False):
 
     monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
 
-    # schedule_speaker_audio_previews — СИНХРОННАЯ, возвращает управление сразу
-    # (fire-and-forget), не awaitится в проде.
-    def fake_schedule(**kwargs):
-        call_log.append("schedule")
-        if schedule_raises:
-            raise RuntimeError("scheduling failed")
-        return None
+    async def fake_previews(**kwargs):
+        call_log.append("previews")
+        if previews_raise:
+            raise RuntimeError("previews failed")
+        return set(delivered)
 
-    monkeypatch.setattr(preview, "schedule_speaker_audio_previews", fake_schedule)
+    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_previews)
 
     async def fake_show(**kwargs):
         call_log.append("show")
+        show_kwargs.append(kwargs)
         return SimpleNamespace()  # truthy message => пауза
 
     monkeypatch.setattr(ui, "show_mapping_confirmation", fake_show)
 
 
 @pytest.mark.asyncio
-async def test_previews_scheduled_after_show(monkeypatch):
-    call_log = []
-    _patch_common(monkeypatch, call_log)
+async def test_previews_sent_before_card(monkeypatch):
+    call_log, saved_sessions, show_kwargs = [], [], []
+    _patch_common(monkeypatch, call_log, saved_sessions, show_kwargs)
 
     service = _make_service()
     request, tr, pt, pm = _make_args()
@@ -105,15 +107,41 @@ async def test_previews_scheduled_after_show(monkeypatch):
     )
 
     assert result is None  # пауза
-    assert "show" in call_log and "schedule" in call_log
-    # Карточка показывается ПЕРВОЙ; аудио планируется уже после — не блокирует UI.
-    assert call_log.index("show") < call_log.index("schedule")
+    assert "previews" in call_log and "show" in call_log
+    # Фрагменты уходят ПЕРВЫМИ; карточка — последнее сообщение, кнопки внизу чата.
+    assert call_log.index("previews") < call_log.index("show")
 
 
 @pytest.mark.asyncio
-async def test_schedule_failure_does_not_block_pause(monkeypatch):
-    call_log = []
-    _patch_common(monkeypatch, call_log, schedule_raises=True)
+async def test_delivered_set_reaches_card_and_session(monkeypatch):
+    call_log, saved_sessions, show_kwargs = [], [], []
+    _patch_common(monkeypatch, call_log, saved_sessions, show_kwargs,
+                  delivered={"SPEAKER_1"})
+
+    service = _make_service()
+    request, tr, pt, pm = _make_args()
+
+    await service._handle_speaker_mapping_confirmation(
+        request=request,
+        transcription_result=tr,
+        speaker_mapping={"SPEAKER_1": "Иван Иванов"},
+        meeting_type="general",
+        temp_file_path="temp/audio.wav",
+        processing_metrics=pm,
+        progress_tracker=pt,
+    )
+
+    # Карточка знает, кому цитата не нужна…
+    assert show_kwargs[0]["speakers_with_audio"] == {"SPEAKER_1"}
+    # …и сессия хранит то же множество для перерисовок из callbacks.
+    assert saved_sessions[0].speakers_with_audio == {"SPEAKER_1"}
+
+
+@pytest.mark.asyncio
+async def test_previews_failure_does_not_block_pause(monkeypatch):
+    call_log, saved_sessions, show_kwargs = [], [], []
+    _patch_common(monkeypatch, call_log, saved_sessions, show_kwargs,
+                  previews_raise=True)
 
     service = _make_service()
     request, tr, pt, pm = _make_args()
@@ -129,4 +157,6 @@ async def test_schedule_failure_does_not_block_pause(monkeypatch):
     )
 
     assert result is None  # пауза всё равно наступает
-    assert "show" in call_log  # карточка показана несмотря на ошибку планирования
+    assert "show" in call_log  # карточка показана несмотря на ошибку превью
+    # Ничего не доставлено — карточка со всеми цитатами.
+    assert show_kwargs[0]["speakers_with_audio"] == set()
