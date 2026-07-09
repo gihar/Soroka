@@ -2,7 +2,7 @@
 UI компоненты для подтверждения сопоставления спикеров с участниками
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -79,18 +79,21 @@ def format_mapping_message(
     diarization_data: Dict[str, Any],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
-    speakers_text: Optional[Dict[str, str]] = None
+    speakers_text: Optional[Dict[str, str]] = None,
+    speakers_with_audio: Optional[Set[str]] = None
 ) -> str:
     """
     Форматировать сообщение с информацией о сопоставлении спикеров
-    
+
     Args:
         speaker_mapping: Словарь {speaker_id: participant_name}
         diarization_data: Данные диаризации
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        
+        speakers_with_audio: Спикеры с доставленным фрагментом записи — их цитата
+            уже в подписи фрагмента, в карточке не дублируется
+
     Returns:
         Отформатированный текст сообщения в MarkdownV2
     """
@@ -113,39 +116,32 @@ def format_mapping_message(
     
     # Импортируем сервис для преобразования имен
     from src.services.participants_service import participants_service
-    
+
     for speaker_id in all_speakers:
         participant_name = speaker_mapping.get(speaker_id)
-        
+
         # Экранируем speaker_id для MarkdownV2
         escaped_speaker_id = escape_markdown_v2(speaker_id)
-        
+
         if participant_name:
             # Сопоставлен - преобразуем в короткую форму и экранируем имя участника для MarkdownV2
             short_name = participants_service.convert_full_name_to_short(participant_name)
             escaped_participant_name = escape_markdown_v2(short_name)
             lines.append(f"*{escaped_speaker_id}* → {escaped_participant_name} ✓")
-            
-            # Извлекаем цитату (первые 200 символов)
-            quote = extract_speaker_quotes(diarization_data, speaker_id, speakers_text=speakers_text)
-            if quote:
-                # Экранируем цитату для MarkdownV2
-                escaped_quote = escape_markdown_v2(quote)
-                # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
-                lines.append(f"  \\\"{escaped_quote}\\\"")
-            lines.append("")
         else:
             # Не сопоставлен - экранируем текст
             lines.append(f"*{escaped_speaker_id}* → {not_defined_text} ❓")
-            
-            # Извлекаем цитату для несопоставленного
+
+        # Цитата спикера показывается один раз: если фрагмент записи доставлен,
+        # она уже в его подписи — в карточке не дублируем.
+        if not (speakers_with_audio and speaker_id in speakers_with_audio):
             quote = extract_speaker_quotes(diarization_data, speaker_id, speakers_text=speakers_text)
             if quote:
                 # Экранируем цитату для MarkdownV2
                 escaped_quote = escape_markdown_v2(quote)
                 # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
                 lines.append(f"  \\\"{escaped_quote}\\\"")
-            lines.append("")
+        lines.append("")
     
     # Экранируем разделитель (дефисы нужно экранировать в MarkdownV2)
     separator = escape_markdown_v2("────────────────────────")
@@ -313,11 +309,12 @@ async def show_mapping_confirmation(
     diarization_data: Dict[str, Any],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
-    speakers_text: Optional[Dict[str, str]] = None
+    speakers_text: Optional[Dict[str, str]] = None,
+    speakers_with_audio: Optional[Set[str]] = None
 ) -> Optional[Message]:
     """
     Показать UI для подтверждения сопоставления спикеров
-    
+
     Args:
         bot: Экземпляр бота
         chat_id: ID чата
@@ -327,7 +324,8 @@ async def show_mapping_confirmation(
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        
+        speakers_with_audio: Спикеры с доставленным фрагментом записи (без цитат в карточке)
+
     Returns:
         Отправленное сообщение или None при ошибке
     """
@@ -338,7 +336,8 @@ async def show_mapping_confirmation(
             diarization_data,
             participants,
             unmapped_speakers,
-            speakers_text=speakers_text
+            speakers_text=speakers_text,
+            speakers_with_audio=speakers_with_audio
         )
         
         # Создаем клавиатуру
@@ -435,11 +434,12 @@ async def update_mapping_message(
     user_id: int,
     current_editing_speaker: Optional[str] = None,
     unmapped_speakers: Optional[List[str]] = None,
-    speakers_text: Optional[Dict[str, str]] = None
+    speakers_text: Optional[Dict[str, str]] = None,
+    speakers_with_audio: Optional[Set[str]] = None
 ) -> bool:
     """
     Обновить сообщение с сопоставлением
-    
+
     Args:
         message: Сообщение для обновления
         speaker_mapping: Обновленное сопоставление
@@ -449,19 +449,21 @@ async def update_mapping_message(
         current_editing_speaker: ID спикера, для которого показываем выбор
         unmapped_speakers: Список несопоставленных спикеров
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        
+        speakers_with_audio: Спикеры с доставленным фрагментом записи (без цитат в карточке)
+
     Returns:
         True если успешно, False при ошибке
     """
     try:
         from src.utils.telegram_safe import safe_edit_text
-        
+
         message_text = format_mapping_message(
             speaker_mapping,
             diarization_data,
             participants,
             unmapped_speakers,
-            speakers_text=speakers_text
+            speakers_text=speakers_text,
+            speakers_with_audio=speakers_with_audio
         )
         
         keyboard = create_mapping_keyboard(
