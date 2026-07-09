@@ -437,17 +437,6 @@ class ProcessingService(BaseProcessingService):
 
         from src.services.mapping_session import MappingSession, mapping_sessions
 
-        mapping_sessions.save(request.user_id, MappingSession(
-            request=request,
-            transcription_result=transcription_result,
-            speaker_mapping=speaker_mapping,
-            meeting_type=meeting_type,
-            temp_file_path=temp_file_path,
-            cache_key=cache_key,
-            task_id=task_id,
-            metrics=processing_metrics,
-        ))
-
         if progress_tracker:
             from src.ux.speaker_mapping_ui import show_mapping_confirmation
 
@@ -492,6 +481,39 @@ class ProcessingService(BaseProcessingService):
 
             speakers_text = transcription_result.speakers_text
 
+            # Фрагменты записи уходят ДО карточки: по факту доставки решаем,
+            # кому в карточке нужна текстовая цитата (цитата спикера показывается
+            # один раз). Карточка — последнее сообщение, кнопки внизу чата.
+            # Ошибка превью не мешает паузе: карточка выйдет со всеми цитатами.
+            speakers_with_audio = set()
+            try:
+                from src.ux.speaker_audio_preview import send_speaker_audio_previews
+                speakers_with_audio = await send_speaker_audio_previews(
+                    bot=progress_tracker.bot,
+                    chat_id=progress_tracker.chat_id,
+                    user_id=request.user_id,
+                    speakers=all_speakers,
+                    diarization_data=transcription_result.diarization,
+                    temp_file_path=temp_file_path,
+                    speakers_text=speakers_text,
+                )
+            except Exception as preview_error:
+                logger.warning(
+                    f"Не удалось отправить фрагменты записи спикеров: {preview_error}"
+                )
+
+            mapping_sessions.save(request.user_id, MappingSession(
+                request=request,
+                transcription_result=transcription_result,
+                speaker_mapping=speaker_mapping,
+                meeting_type=meeting_type,
+                temp_file_path=temp_file_path,
+                cache_key=cache_key,
+                task_id=task_id,
+                metrics=processing_metrics,
+                speakers_with_audio=speakers_with_audio,
+            ))
+
             confirmation_message = await show_mapping_confirmation(
                 bot=progress_tracker.bot,
                 chat_id=progress_tracker.chat_id,
@@ -501,6 +523,7 @@ class ProcessingService(BaseProcessingService):
                 participants=request.participants_list,
                 unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
                 speakers_text=speakers_text,
+                speakers_with_audio=speakers_with_audio,
             )
 
             if confirmation_message is None:
@@ -535,29 +558,6 @@ class ProcessingService(BaseProcessingService):
                 logger.info(
                     "Обработка приостановлена - ожидаю подтверждения от пользователя"
                 )
-
-                # Аудиопревью спикеров: запускаем ФОНОВОЙ задачей ПОСЛЕ показа
-                # карточки. Отправка голосовых/аудио (с ретраями и возможным
-                # VOICE_MESSAGES_FORBIDDEN) не должна блокировать, задерживать или
-                # менять порядок UI сопоставления.
-                try:
-                    from src.ux.speaker_audio_preview import (
-                        schedule_speaker_audio_previews,
-                    )
-                    schedule_speaker_audio_previews(
-                        bot=progress_tracker.bot,
-                        chat_id=progress_tracker.chat_id,
-                        user_id=request.user_id,
-                        speakers=all_speakers,
-                        diarization_data=transcription_result.diarization,
-                        temp_file_path=temp_file_path,
-                        speakers_text=speakers_text,
-                    )
-                except Exception as preview_error:
-                    logger.warning(
-                        f"Не удалось запланировать аудиопревью спикеров: {preview_error}"
-                    )
-
                 return None  # pause processing
 
         logger.warning(
