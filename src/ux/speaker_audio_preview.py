@@ -12,7 +12,7 @@
 
 import asyncio
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from loguru import logger
 
@@ -20,7 +20,8 @@ from src.config import settings
 from src.services.audio_fragment_service import cut_voice_fragment, select_fragment_window
 from src.utils.telegram_safe import safe_send_audio, safe_send_voice
 
-_MAX_CAPTION_SNIPPET = 120
+# Подпись фрагмента — единственная цитата спикера, тот же лимит, что был у карточной.
+_MAX_CAPTION_SNIPPET = 200
 
 # Удерживаем ссылки на фоновые задачи, чтобы их не собрал GC до завершения.
 _background_tasks: set = set()
@@ -106,18 +107,21 @@ async def send_speaker_audio_previews(
     diarization_data: Dict[str, Any],
     temp_file_path: Optional[str],
     speakers_text: Optional[Dict[str, str]] = None,
-) -> None:
+) -> Set[str]:
     """Прислать фрагменты речи каждого спикера.
 
+    Возвращает множество спикеров, чьи фрагменты реально доставлены, — по нему
+    карточка сопоставления решает, кому текстовая цитата больше не нужна.
     Никогда не пробрасывает исключения — фича вспомогательная и не должна мешать
-    сопоставлению. Обычно запускается через ``schedule_speaker_audio_previews``.
+    сопоставлению.
     """
+    delivered: Set[str] = set()
     try:
         if not settings.speaker_audio_preview_enabled:
-            return
+            return delivered
         if not temp_file_path or not os.path.exists(temp_file_path):
             logger.info("Аудиопревью: исходный файл недоступен, пропускаю превью")
-            return
+            return delivered
 
         # Нарезаем все клипы параллельно.
         clip_paths = await asyncio.gather(
@@ -136,7 +140,11 @@ async def send_speaker_audio_previews(
             if not clip:
                 continue
             try:
-                await _send_clip(bot, chat_id, clip, _build_caption(speaker_id, speakers_text))
+                message = await _send_clip(
+                    bot, chat_id, clip, _build_caption(speaker_id, speakers_text)
+                )
+                if message is not None:
+                    delivered.add(speaker_id)
             except Exception as send_error:
                 logger.warning(f"Аудиопревью: ошибка отправки {speaker_id}: {send_error}")
             finally:
@@ -148,6 +156,8 @@ async def send_speaker_audio_previews(
 
     except Exception as e:
         logger.error(f"Аудиопревью: непредвиденная ошибка, пропускаю превью: {e}", exc_info=True)
+
+    return delivered
 
 
 def schedule_speaker_audio_previews(
