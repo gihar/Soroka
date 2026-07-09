@@ -1,13 +1,15 @@
-"""Оркестратор аудиопревью спикеров.
+"""Оркестратор фрагментов записи спикеров.
 
-При показе UI сопоставления присылает по одному фрагменту речи на каждого спикера:
-окно выбирается из сегментов диаризации, фрагмент режется из оригинального файла
-через ffmpeg и отправляется голосовым сообщением. Если голосовые запрещены у
-получателя (VOICE_MESSAGES_FORBIDDEN) — фолбэк на обычный аудиофайл.
+Перед показом карточки сопоставления присылает по одному фрагменту речи на
+каждого спикера: окно выбирается из сегментов диаризации, фрагмент режется из
+оригинального файла через ffmpeg и отправляется голосовым сообщением. Если
+голосовые запрещены у получателя (VOICE_MESSAGES_FORBIDDEN) — фолбэк на
+обычный аудиофайл.
 
-Фича вспомогательная: запускается ФОНОВОЙ задачей (``schedule_speaker_audio_previews``)
-и не блокирует и не задерживает показ карточки сопоставления; любая ошибка
-логируется и проглатывается.
+Отправка awaitится ДО карточки: возвращаемое множество доставленных спикеров
+решает, кому в карточке не нужна текстовая цитата (цитата спикера показывается
+один раз). Любая ошибка логируется и проглатывается — фича вспомогательная и
+не должна мешать сопоставлению.
 """
 
 import asyncio
@@ -22,9 +24,6 @@ from src.utils.telegram_safe import safe_send_audio, safe_send_voice
 
 # Подпись фрагмента — единственная цитата спикера, тот же лимит, что был у карточной.
 _MAX_CAPTION_SNIPPET = 200
-
-# Удерживаем ссылки на фоновые задачи, чтобы их не собрал GC до завершения.
-_background_tasks: set = set()
 
 
 def _preview_dir() -> str:
@@ -158,41 +157,3 @@ async def send_speaker_audio_previews(
         logger.error(f"Аудиопревью: непредвиденная ошибка, пропускаю превью: {e}", exc_info=True)
 
     return delivered
-
-
-def schedule_speaker_audio_previews(
-    bot: Any,
-    chat_id: int,
-    user_id: int,
-    speakers: List[str],
-    diarization_data: Dict[str, Any],
-    temp_file_path: Optional[str],
-    speakers_text: Optional[Dict[str, str]] = None,
-) -> Optional[asyncio.Task]:
-    """Запланировать отправку аудиопревью ФОНОВОЙ задачей (fire-and-forget).
-
-    Возвращает управление немедленно — НЕ блокирует и не задерживает показ карточки
-    сопоставления (в этом и была причина прежней регрессии: встроенный ``await``
-    на падающих отправках голосовых стопорил UI). Ссылка на задачу удерживается,
-    чтобы её не собрал сборщик мусора до завершения.
-    """
-    try:
-        task = asyncio.create_task(
-            send_speaker_audio_previews(
-                bot=bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                speakers=speakers,
-                diarization_data=diarization_data,
-                temp_file_path=temp_file_path,
-                speakers_text=speakers_text,
-            )
-        )
-    except RuntimeError as e:
-        # Нет активного event loop — в боте не случается; на всякий случай не падаем.
-        logger.warning(f"Аудиопревью: не удалось запланировать фоновую задачу: {e}")
-        return None
-
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return task

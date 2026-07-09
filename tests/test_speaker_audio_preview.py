@@ -395,24 +395,3 @@ async def test_caption_snippet_up_to_200_chars(monkeypatch, tmp_path):
     assert "…" in captions[0]
 
 
-@pytest.mark.asyncio
-async def test_schedule_runs_previews_in_background(monkeypatch):
-    ran = []
-
-    async def fake_send(**kwargs):
-        ran.append(kwargs)
-
-    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_send)
-
-    task = preview.schedule_speaker_audio_previews(
-        bot=object(), chat_id=1, user_id=7,
-        speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
-        temp_file_path="x",
-        speakers_text={},
-    )
-
-    assert task is not None
-    await task  # в проде НЕ ждём; здесь ждём, чтобы проверить, что задача отработала
-    assert len(ran) == 1
-    assert ran[0]["chat_id"] == 1
