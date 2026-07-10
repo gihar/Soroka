@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 
+from src.models.diarization import Diarization, Segment
 from src.models.processing import ProcessingRequest, TranscriptionResult
 
 
@@ -20,9 +21,9 @@ def _session():
         user_id=42, file_name="встреча.mp3", template_id=2, llm_provider="openai",
     )
     transcription = TranscriptionResult(
-        transcription="текст", diarization={"speakers": ["SPEAKER_0"]},
-        speakers_text={"SPEAKER_0": "..."}, formatted_transcript="SPEAKER_0: текст",
-        speakers_summary="1 спикер", compression_info=None,
+        transcription="текст",
+        diarization=Diarization(segments=[Segment(speaker="SPEAKER_0", text="текст")]),
+        compression_info=None,
     )
     return MappingSession(
         request=request,

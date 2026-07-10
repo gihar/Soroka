@@ -1,13 +1,18 @@
-"""Характеризация извлечения списка спикеров в карточке сопоставления (#57).
+"""Порядок спикеров в карточке сопоставления — по появлению (#57 → #59).
 
-Паттерн «взять diarization_data['speakers'], иначе собрать из segments, затем
-числовая сортировка» повторяется в UI четырежды. Закрепляем его через две
-публичные функции — `create_mapping_keyboard` (порядок кнопок, без экранирования)
-и `format_mapping_message` (порядок в тексте) — чтобы типизация «Диаризации»
-(#58/#59) не сломала ни fallback, ни порядок.
+Раньше UI четырежды повторял «взять speakers, иначе собрать из segments, затем
+ЧИСЛОВАЯ сортировка SPEAKER_N». #59 заменил всё на `diarization.speakers` —
+единый порядок ПОЯВЛЕНИЯ спикеров в сегментах. Осознанные следствия смены
+(решение дизайн-сессии):
 
-Замеченный при разведке квирк закреплён как «текущее поведение»: числовая
-сортировка идёт in-place и МУТИРУЕТ переданный список speakers.
+- порядок теперь по появлению, а не по числовому суффиксу;
+- квирк «нечисловая метка уходит в конец (999)» исчез — родные метки
+  speechmatics (S1/S2) держат порядок появления;
+- сортировки in-place больше нет: `diarization.speakers` отдаёт свежий список,
+  вход не мутируется.
+
+Проверяем через две публичные функции — `create_mapping_keyboard` (порядок
+кнопок) и `format_mapping_message` (порядок в тексте).
 """
 
 import os
@@ -20,7 +25,15 @@ sys.path.insert(0, _root)
 # imported via src/ux/__init__.py.
 sys.path.insert(0, os.path.join(_root, "src"))
 
+from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.ux.speaker_mapping_ui import create_mapping_keyboard, format_mapping_message  # noqa: E402
+
+
+def _diar(*speakers):
+    """«Диаризация» из сегментов в заданном порядке появления спикеров."""
+    return Diarization(
+        segments=[Segment(speaker=s, text="реплика") for s in speakers]
+    )
 
 
 def _change_button_speakers(keyboard) -> list:
@@ -34,63 +47,49 @@ def _change_button_speakers(keyboard) -> list:
     return speakers
 
 
-def test_speakers_sorted_numerically_not_lexicographically():
-    """SPEAKER_10 идёт ПОСЛЕ SPEAKER_2 — сортировка по числу, не по строке."""
-    diarization = {"speakers": ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"], "segments": []}
+def test_speakers_follow_appearance_order_not_numeric():
+    """Порядок — по появлению: SPEAKER_2 раньше SPEAKER_1, если появился первым."""
+    diarization = _diar("SPEAKER_2", "SPEAKER_10", "SPEAKER_1")
 
     keyboard = create_mapping_keyboard({}, diarization, [], user_id=7)
 
-    assert _change_button_speakers(keyboard) == ["SPEAKER_1", "SPEAKER_2", "SPEAKER_10"]
+    assert _change_button_speakers(keyboard) == ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"]
 
 
-def test_speakers_derived_from_segments_when_list_absent():
-    """Нет ключа 'speakers' → спикеры собираются из segments (уникально, без None)."""
-    diarization = {
-        "segments": [
-            {"speaker": "SPEAKER_3", "text": "c"},
-            {"speaker": "SPEAKER_1", "text": "a"},
-            {"speaker": "SPEAKER_3", "text": "c-again"},
-            {"speaker": None, "text": "пропустить"},
-        ]
-    }
+def test_speakers_are_unique_in_appearance_order():
+    """Повторные реплики спикера схлопнуты; порядок — первого появления."""
+    diarization = _diar("SPEAKER_3", "SPEAKER_1", "SPEAKER_3", "SPEAKER_1")
 
     keyboard = create_mapping_keyboard({}, diarization, [], user_id=7)
 
-    # Дубликат SPEAKER_3 схлопнут, None отброшен, порядок — числовой.
-    assert _change_button_speakers(keyboard) == ["SPEAKER_1", "SPEAKER_3"]
+    assert _change_button_speakers(keyboard) == ["SPEAKER_3", "SPEAKER_1"]
 
 
-def test_non_numeric_speaker_suffix_sorts_last():
-    """Метка без числового суффикса (SPEAKER_UNKNOWN) уходит в конец (ключ 999)."""
-    diarization = {
-        "speakers": ["SPEAKER_2", "SPEAKER_UNKNOWN", "SPEAKER_1"],
-        "segments": [],
-    }
+def test_native_labels_keep_appearance_order():
+    """Родные метки speechmatics (S1/S2) держат порядок появления, не уходят в конец."""
+    diarization = _diar("S2", "S1")
 
     keyboard = create_mapping_keyboard({}, diarization, [], user_id=7)
 
-    assert _change_button_speakers(keyboard) == [
-        "SPEAKER_1", "SPEAKER_2", "SPEAKER_UNKNOWN",
-    ]
+    assert _change_button_speakers(keyboard) == ["S2", "S1"]
 
 
-def test_format_mapping_message_orders_speakers_numerically():
-    """Тот же числовой порядок виден и в тексте карточки сопоставления."""
-    diarization = {"speakers": ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"], "segments": []}
+def test_format_mapping_message_orders_speakers_by_appearance():
+    """Тот же порядок появления виден и в тексте карточки сопоставления."""
+    diarization = _diar("SPEAKER_2", "SPEAKER_10", "SPEAKER_1")
 
     text = format_mapping_message({}, diarization, [])
 
     # В MarkdownV2 подчёркивание экранировано: SPEAKER\_N.
     order = re.findall(r"SPEAKER\\_\d+", text)
-    assert order == ["SPEAKER\\_1", "SPEAKER\\_2", "SPEAKER\\_10"]
+    assert order == ["SPEAKER\\_2", "SPEAKER\\_10", "SPEAKER\\_1"]
 
 
-def test_speakers_list_is_sorted_in_place():
-    """характеризация: текущее поведение — сортировка мутирует переданный список."""
-    speakers = ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"]
-    diarization = {"speakers": speakers, "segments": []}
+def test_diarization_not_mutated_by_rendering():
+    """Отрисовка карточки не мутирует диаризацию: порядок сегментов сохраняется."""
+    diarization = _diar("SPEAKER_2", "SPEAKER_10", "SPEAKER_1")
 
     create_mapping_keyboard({}, diarization, [], user_id=7)
 
-    # Тот же объект списка отсортирован на месте — вход изменён вызовом.
-    assert speakers == ["SPEAKER_1", "SPEAKER_2", "SPEAKER_10"]
+    # Порядок спикеров (по сегментам) не переставлен сортировкой.
+    assert diarization.speakers == ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"]

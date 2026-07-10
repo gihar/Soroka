@@ -14,15 +14,13 @@ sys.path.insert(0, _root)
 # imported via src/ux/__init__.py.
 sys.path.insert(0, os.path.join(_root, "src"))
 
+from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.ux.speaker_mapping_ui import format_mapping_message  # noqa: E402
 
-_DIARIZATION = {
-    "speakers": ["SPEAKER_1", "SPEAKER_2"],
-    "segments": [
-        {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "цитата первого"},
-        {"start": 6.0, "end": 9.0, "speaker": "SPEAKER_2", "text": "цитата второго"},
-    ],
-}
+_DIARIZATION = Diarization(segments=[
+    Segment(start=0.0, end=5.0, speaker="SPEAKER_1", text="цитата первого"),
+    Segment(start=6.0, end=9.0, speaker="SPEAKER_2", text="цитата второго"),
+])
 
 _SPEAKERS_TEXT = {
     "SPEAKER_1": "цитата первого",

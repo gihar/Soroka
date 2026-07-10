@@ -156,18 +156,3 @@ def test_text_carrying_sources_fill_formatted_and_texts(source):
 
     assert diar.formatted_transcript
     assert any(diar.speakers_text.values())
-
-
-def test_to_dict_is_unified_five_key_shape(source):
-    """`to_dict()` у любого источника — единая форма с пятью ключами."""
-    diar, _, _ = source
-
-    payload = diar.to_dict()
-    assert set(payload.keys()) == {
-        "segments", "speakers", "total_speakers",
-        "formatted_transcript", "speakers_text",
-    }
-    assert payload["speakers"] == diar.speakers
-    assert payload["total_speakers"] == len(diar.speakers)
-    assert payload["formatted_transcript"] == diar.formatted_transcript
-    assert payload["speakers_text"] == diar.speakers_text

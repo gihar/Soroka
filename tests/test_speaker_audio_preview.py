@@ -12,16 +12,14 @@ sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
 import src.ux.speaker_audio_preview as preview  # noqa: E402
+from src.models.diarization import Diarization, Segment  # noqa: E402
 
 
 def _diarization():
-    return {
-        "speakers": ["SPEAKER_1", "SPEAKER_2"],
-        "segments": [
-            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "привет всем"},
-            {"start": 6.0, "end": 9.0, "speaker": "SPEAKER_2", "text": "да, начнём"},
-        ],
-    }
+    return Diarization(segments=[
+        Segment(start=0.0, end=5.0, speaker="SPEAKER_1", text="привет всем"),
+        Segment(start=6.0, end=9.0, speaker="SPEAKER_2", text="да, начнём"),
+    ])
 
 
 @pytest.mark.asyncio
@@ -37,7 +35,7 @@ async def test_no_temp_file_sends_nothing(monkeypatch):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1", "SPEAKER_2"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=None,
         speakers_text={},
     )
@@ -67,7 +65,7 @@ async def test_sends_one_voice_per_speaker_in_order(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1", "SPEAKER_2"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={"SPEAKER_1": "привет всем", "SPEAKER_2": "да, начнём"},
     )
@@ -102,7 +100,7 @@ async def test_one_speaker_cut_failure_does_not_block_others(monkeypatch, tmp_pa
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1", "SPEAKER_2"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -135,7 +133,7 @@ async def test_temp_clips_are_deleted(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -162,7 +160,7 @@ async def test_disabled_by_config_sends_nothing(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -197,7 +195,7 @@ async def test_falls_back_to_audio_when_voice_fails(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={"SPEAKER_1": "привет всем"},
     )
@@ -233,7 +231,7 @@ async def test_no_audio_fallback_when_voice_succeeds(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -264,7 +262,7 @@ async def test_returns_delivered_speakers(monkeypatch, tmp_path):
     delivered = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1", "SPEAKER_2"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -281,7 +279,7 @@ async def test_returns_empty_set_when_disabled_or_no_file(monkeypatch, tmp_path)
     delivered_disabled = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -290,7 +288,7 @@ async def test_returns_empty_set_when_disabled_or_no_file(monkeypatch, tmp_path)
     delivered_no_file = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=None,
         speakers_text={},
     )
@@ -323,7 +321,7 @@ async def test_audio_fallback_counts_as_delivered(monkeypatch, tmp_path):
     delivered = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -352,7 +350,7 @@ async def test_send_failure_means_not_delivered(monkeypatch, tmp_path):
     delivered = await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={},
     )
@@ -384,7 +382,7 @@ async def test_caption_snippet_up_to_200_chars(monkeypatch, tmp_path):
     await preview.send_speaker_audio_previews(
         bot=object(), chat_id=1, user_id=7,
         speakers=["SPEAKER_1"],
-        diarization_data=_diarization(),
+        diarization=_diarization(),
         temp_file_path=str(src),
         speakers_text={"SPEAKER_1": long_text},
     )

@@ -1,14 +1,20 @@
-"""Характеризация четырёх точек выбора «форматированная или сырая» (#57).
+"""Выбор «форматированная или сырая» после консолидации в best_transcript (#59).
 
-Каждый потребитель диаризации сам решает, какой текст скормить дальше:
-формат из диаризации или сырую транскрипцию. Правило у всех похоже, но живёт в
-четырёх местах на голых dict-ах — #59 будет их консолидировать. Закрепляем
-НАБЛЮДАЕМЫЙ выбор (какой текст реально уходит в промпт/препроцессор), а не
-внутренние детали.
+До #59 каждый потребитель диаризации сам решал, какой текст скормить дальше:
+формат из диаризации или сырую транскрипцию — правило жило в четырёх местах на
+голых dict-ах. #59 свёл выбор в единое свойство `TranscriptionResult.best_transcript`
+(его плечи проверяет test_best_transcript). Здесь остаётся закрепить, что
+потребители читают ГОТОВЫЙ текст:
 
-Все LLM/сеть замоканы через monkeypatch (автовосстановление глобалей — общий
-suite остаётся зелёным). Приватные точки выбора зовём напрямую: они временные,
-их поправит #59.
+- промпт сопоставления берёт форматированную транскрипцию из типизированной
+  диаризации, иначе — сырой текст (точка 1, поведение сохранено);
+- двухэтапная генерация больше не выбирает текст сама — ведёт ГОТОВЫЙ transcription
+  в промпт (точка 2, выбор вынесен в best_transcript);
+- LLM-генерация протокола ведёт в generate() именно best_transcript (точка 3);
+- предобработка чистит сырую транскрипцию; форматированного дубля больше нет,
+  round-trip убран вместе с полем (точка 4).
+
+Все LLM/сеть замоканы через monkeypatch. Приватные точки зовём напрямую.
 """
 
 import os
@@ -20,6 +26,7 @@ _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
+from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.models.processing import ProcessingRequest, TranscriptionResult  # noqa: E402
 
 
@@ -40,23 +47,21 @@ _PARTICIPANTS = [{"name": "Иван Иванов", "role": "PM"}]
 
 
 def test_mapping_prompt_uses_formatted_transcript_when_present():
-    """Есть formatted_transcript в диаризации → в промпт идёт он, не сырой текст."""
+    """Есть диаризация с форматом → в промпт идёт он, не сырой текст."""
     service = _mapping_service()
+    diarization = Diarization(segments=[Segment(speaker="SPEAKER_1", text="реплика")])
 
-    prompt = service._build_mapping_prompt(
-        [], _PARTICIPANTS, "СЫРОЙ_ТЕКСТ",
-        {"formatted_transcript": "ФОРМАТ_SPEAKER_1: реплика"},
-    )
+    prompt = service._build_mapping_prompt([], _PARTICIPANTS, "СЫРОЙ_ТЕКСТ", diarization)
 
-    assert "ФОРМАТ_SPEAKER_1: реплика" in prompt
+    assert "SPEAKER_1: реплика" in prompt
     assert "СЫРОЙ_ТЕКСТ" not in prompt
 
 
-def test_mapping_prompt_falls_back_to_raw_when_no_formatted():
-    """Нет formatted_transcript → в промпт идёт сырая транскрипция."""
+def test_mapping_prompt_falls_back_to_raw_when_no_diarization():
+    """Нет диаризации → в промпт идёт сырая транскрипция."""
     service = _mapping_service()
 
-    prompt = service._build_mapping_prompt([], _PARTICIPANTS, "СЫРОЙ_ТЕКСТ", {})
+    prompt = service._build_mapping_prompt([], _PARTICIPANTS, "СЫРОЙ_ТЕКСТ", None)
 
     assert "СЫРОЙ_ТЕКСТ" in prompt
 
@@ -64,28 +69,31 @@ def test_mapping_prompt_falls_back_to_raw_when_no_formatted():
 def test_mapping_prompt_previews_long_text_unless_full_matching():
     """Длинный текст режется в превью; при full_text_matching идёт целиком."""
     service = _mapping_service()
-    long_formatted = "СЛОВО " * 2000  # > 5000 символов → срабатывает превью
+    # Один спикер с длинной репликой → formatted_transcript > 5000 символов.
+    diarization = Diarization(
+        segments=[Segment(speaker="SPEAKER_1", text="СЛОВО " * 2000)]
+    )
 
     preview_prompt = service._build_mapping_prompt(
-        [], _PARTICIPANTS, "raw", {"formatted_transcript": long_formatted},
+        [], _PARTICIPANTS, "raw", diarization,
     )
     assert "=== СЕРЕДИНА ВСТРЕЧИ ===" in preview_prompt
 
     service.full_text_matching = True
     full_prompt = service._build_mapping_prompt(
-        [], _PARTICIPANTS, "raw", {"formatted_transcript": long_formatted},
+        [], _PARTICIPANTS, "raw", diarization,
     )
     assert "=== СЕРЕДИНА ВСТРЕЧИ ===" not in full_prompt
-    assert long_formatted.strip() in full_prompt
+    assert diarization.formatted_transcript in full_prompt
 
 
 # ==========================================================================
-# Точка 2: выбор текста анализа в двухэтапной генерации
-#          protocol_generator._generate_two_stage (analysis_transcription)
+# Точка 2: двухэтапная генерация ведёт ГОТОВЫЙ transcription в промпт
+#          protocol_generator._generate_two_stage
 # ==========================================================================
 
-async def _run_two_stage(monkeypatch, *, transcription, diarization_data):
-    """Гоняет _generate_two_stage с замоканным вызовом модели, вернёт промпт генерации."""
+async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch):
+    """_generate_two_stage не выбирает текст сам — ведёт свой transcription в промпт."""
     from src.llm import protocol_generator as generator
 
     calls = []
@@ -96,58 +104,23 @@ async def _run_two_stage(monkeypatch, *, transcription, diarization_data):
 
     monkeypatch.setattr(generator, "_call_openai", fake_call)
 
-    # Пропускаем ЭТАП 1, задав тип и маппинг: analysis_transcription всё равно
-    # уходит в промпт ЭТАПА 2 — по нему и характеризуем выбор.
     await generator._generate_two_stage(
         preset=None,
-        transcription=transcription,
+        transcription="ГОТОВЫЙ_ТЕКСТ",
         template_variables={},
-        diarization_data=diarization_data,
         meeting_type="technical",
         speaker_mapping={"SPEAKER_1": "Иван Иванов"},
     )
     generation = next(c for c in calls if c.get("step_name") == "Generation")
-    return generation["user_prompt"]
-
-
-async def test_analysis_uses_formatted_transcript_from_diarization(monkeypatch):
-    """diarization_data.formatted_transcript присутствует → он идёт в анализ/генерацию."""
-    prompt = await _run_two_stage(
-        monkeypatch,
-        transcription="СЫРОЙ_АНАЛИЗ",
-        diarization_data={"formatted_transcript": "ФОРМ_АНАЛИЗ SPEAKER_1"},
-    )
-
-    assert "ФОРМ_АНАЛИЗ SPEAKER_1" in prompt
-    assert "СЫРОЙ_АНАЛИЗ" not in prompt
-
-
-async def test_analysis_falls_back_to_raw_transcription(monkeypatch):
-    """Нет диаризации → в анализ/генерацию идёт сырая транскрипция."""
-    prompt = await _run_two_stage(
-        monkeypatch, transcription="СЫРОЙ_АНАЛИЗ", diarization_data=None,
-    )
-
-    assert "СЫРОЙ_АНАЛИЗ" in prompt
-
-
-async def test_analysis_falls_back_when_formatted_key_empty(monkeypatch):
-    """Ключ есть, но пустой → тоже откат на сырую транскрипцию."""
-    prompt = await _run_two_stage(
-        monkeypatch,
-        transcription="СЫРОЙ_АНАЛИЗ",
-        diarization_data={"formatted_transcript": ""},
-    )
-
-    assert "СЫРОЙ_АНАЛИЗ" in prompt
+    assert "ГОТОВЫЙ_ТЕКСТ" in generation["user_prompt"]
 
 
 # ==========================================================================
-# Точка 3: выбор текста в LLM-генерации протокола
+# Точка 3: LLM-генерация протокола ведёт в generate() именно best_transcript
 #          llm_generation.optimized_llm_generation
 # ==========================================================================
 
-async def _capture_generate_transcription(monkeypatch, *, diarization, formatted, raw):
+async def _capture_generate_transcription(monkeypatch, *, diarization, raw):
     """Гоняет optimized_llm_generation, вернёт transcription, ушедший в generate()."""
     import src.services.processing.llm_generation as llm_gen
     from src.llm import protocol_generator as generator
@@ -170,9 +143,7 @@ async def _capture_generate_transcription(monkeypatch, *, diarization, formatted
         user_service=None,
         template_service=types.SimpleNamespace(extract_template_variables=lambda c: []),
     )
-    result = TranscriptionResult(
-        transcription=raw, diarization=diarization, formatted_transcript=formatted,
-    )
+    result = TranscriptionResult(transcription=raw, diarization=diarization)
     request = ProcessingRequest(file_name="a.mp3", llm_provider="openai", user_id=1)
 
     await service.optimized_llm_generation(
@@ -182,27 +153,27 @@ async def _capture_generate_transcription(monkeypatch, *, diarization, formatted
 
 
 async def test_llm_generation_uses_formatted_when_diarization_present(monkeypatch):
-    """Диаризация есть и formatted_transcript непуст → в generate идёт форматированный."""
+    """Диаризация есть → в generate идёт её форматированный текст (best_transcript)."""
+    diarization = Diarization(segments=[Segment(speaker="SPEAKER_1", text="реплика")])
+
     transcription = await _capture_generate_transcription(
-        monkeypatch, diarization={"segments": [1]},
-        formatted="ФОРМ_ТРАНСКРИПТ", raw="СЫРОЙ",
+        monkeypatch, diarization=diarization, raw="СЫРОЙ",
     )
 
-    assert transcription == "ФОРМ_ТРАНСКРИПТ"
+    assert transcription == diarization.formatted_transcript
 
 
 async def test_llm_generation_uses_raw_when_no_diarization(monkeypatch):
-    """Диаризации нет → formatted игнорируется, в generate идёт сырой текст."""
+    """Диаризации нет → в generate идёт сырой текст (best_transcript)."""
     transcription = await _capture_generate_transcription(
-        monkeypatch, diarization=None,
-        formatted="ФОРМ_ТРАНСКРИПТ", raw="СЫРОЙ",
+        monkeypatch, diarization=None, raw="СЫРОЙ",
     )
 
     assert transcription == "СЫРОЙ"
 
 
 # ==========================================================================
-# Точка 4: предобработка текста читает formatted_transcript через getattr
+# Точка 4: предобработка чистит сырую транскрипцию (форматированного дубля нет)
 #          processing_service._optimized_transcription
 # ==========================================================================
 
@@ -224,12 +195,12 @@ async def _run_preprocessing(monkeypatch, result):
     captured = {}
 
     class _Preprocessor:
-        def preprocess(self, text, formatted_transcript):
+        def preprocess(self, text, formatted_transcript=None):
             captured["text"] = text
             captured["formatted_transcript"] = formatted_transcript
             return {
                 "cleaned_text": f"{text}_C",
-                "cleaned_formatted": f"{formatted_transcript}_F" if formatted_transcript else "",
+                "cleaned_formatted": "",
                 "statistics": {"reduction_percent": 0},
             }
 
@@ -244,27 +215,27 @@ async def _run_preprocessing(monkeypatch, result):
     return captured, out
 
 
-async def test_preprocessing_reads_formatted_transcript_from_result(monkeypatch):
-    """Препроцессор получает formatted_transcript из результата и сырой transcription."""
+async def test_preprocessing_reads_raw_transcription(monkeypatch):
+    """Препроцессор получает сырую transcription; форматированный текст ему не передаётся."""
     result = TranscriptionResult(
-        transcription="СЫРОЙ", diarization={"total_speakers": 2},
-        formatted_transcript="ФОРМ",
+        transcription="СЫРОЙ",
+        diarization=Diarization(segments=[Segment(speaker="SPEAKER_1", text="реплика")]),
     )
 
     captured, _ = await _run_preprocessing(monkeypatch, result)
 
     assert captured["text"] == "СЫРОЙ"
-    assert captured["formatted_transcript"] == "ФОРМ"
+    assert captured["formatted_transcript"] is None
 
 
 async def test_preprocessing_writes_cleaned_text_back(monkeypatch):
-    """Очищенные тексты кладутся обратно в transcription/formatted_transcript."""
+    """Очищенный текст кладётся обратно в transcription; отдельного formatted-поля нет."""
     result = TranscriptionResult(
-        transcription="СЫРОЙ", diarization={"total_speakers": 2},
-        formatted_transcript="ФОРМ",
+        transcription="СЫРОЙ",
+        diarization=Diarization(segments=[Segment(speaker="SPEAKER_1", text="реплика")]),
     )
 
     _, out = await _run_preprocessing(monkeypatch, result)
 
     assert out.transcription == "СЫРОЙ_C"
-    assert out.formatted_transcript == "ФОРМ_F"
+    assert not hasattr(out, "formatted_transcript")

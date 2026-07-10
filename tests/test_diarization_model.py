@@ -2,7 +2,7 @@
 
 Проверяют модель как единственный источник производных представлений
 диаризации: список спикеров в порядке появления, тексты по спикерам,
-форматированная транскрипция, сводка и единая сериализация.
+форматированная транскрипция и сводка.
 """
 
 from src.models.diarization import Diarization, Segment
@@ -82,31 +82,6 @@ def test_speakers_summary_counts_words_per_speaker():
     )
 
 
-def test_to_dict_is_single_unified_shape_with_five_keys():
-    """`to_dict()` — единая форма: segments, speakers, total_speakers, formatted, speakers_text."""
-    diar = Diarization(
-        segments=[
-            Segment(speaker="SPEAKER_1", text="привет", start=0.0, end=1.0),
-            Segment(speaker="SPEAKER_2", text="здравствуй", start=1.0, end=2.0),
-        ]
-    )
-
-    payload = diar.to_dict()
-
-    assert set(payload.keys()) == {
-        "segments", "speakers", "total_speakers",
-        "formatted_transcript", "speakers_text",
-    }
-    assert payload["speakers"] == ["SPEAKER_1", "SPEAKER_2"]
-    assert payload["total_speakers"] == 2
-    assert payload["segments"] == [
-        {"speaker": "SPEAKER_1", "text": "привет", "start": 0.0, "end": 1.0},
-        {"speaker": "SPEAKER_2", "text": "здравствуй", "start": 1.0, "end": 2.0},
-    ]
-    assert payload["formatted_transcript"] == diar.formatted_transcript
-    assert payload["speakers_text"] == diar.speakers_text
-
-
 def test_empty_segments_yield_empty_derivations():
     """Пустой список сегментов даёт пустые производные и нулевую сводку."""
     diar = Diarization(segments=[])
@@ -115,13 +90,6 @@ def test_empty_segments_yield_empty_derivations():
     assert diar.speakers_text == {}
     assert diar.formatted_transcript == ""
     assert diar.speakers_summary == "Общее количество говорящих: 0\n\n"
-    assert diar.to_dict() == {
-        "segments": [],
-        "speakers": [],
-        "total_speakers": 0,
-        "formatted_transcript": "",
-        "speakers_text": {},
-    }
 
 
 def test_single_speaker_stays_one_group():
@@ -157,6 +125,6 @@ def test_start_end_optional_default_to_none():
 
     assert diar.segments[0].start is None
     assert diar.segments[0].end is None
-    assert diar.to_dict()["segments"] == [
-        {"speaker": "SPEAKER_1", "text": "привет", "start": None, "end": None}
-    ]
+    assert diar.segments[0].model_dump() == {
+        "speaker": "SPEAKER_1", "text": "привет", "start": None, "end": None
+    }

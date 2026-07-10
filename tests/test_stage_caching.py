@@ -38,7 +38,7 @@ def _request():
 def _transcription():
     return SimpleNamespace(
         transcription="текст встречи", diarization=None,
-        formatted_transcript="", diarization_analysis=None,
+        best_transcript="текст встречи",
     )
 
 
@@ -76,3 +76,14 @@ def test_result_cache_key_includes_agenda_and_projects():
     assert key_base != key_agenda
     assert key_base != key_projects
     assert key_agenda != key_projects
+
+
+def test_result_cache_key_is_versioned():
+    """Ключ несёт версию формы результата: старые pickle-записи не поднимаются (#59)."""
+    from src.services.processing.processing_history import ProcessingHistoryService
+
+    key = ProcessingHistoryService.generate_result_cache_key(_request(), "abc123")
+
+    # Версионный префикс в ключе, а не старый «full_result:».
+    assert key.startswith("full_result_v2:")
+    assert not key.startswith("full_result:")
