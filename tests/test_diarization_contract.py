@@ -1,9 +1,9 @@
-"""Контракт «Диаризации» по источникам (#58).
+"""Контракт «Диаризации» по источникам (#58, #60).
 
-Все источники диаризации (локальный whisperx/pyannote, deepgram, picovoice)
-строят ОДИН value object `Diarization` с одинаковыми гарантиями. Тест
-параметризован по источникам: каждый берёт свою сырую форму, прогоняет её через
-свой адаптер-строитель и обязан дать `Diarization`, удовлетворяющую единому
+Все источники диаризации (локальный whisperx/pyannote, deepgram, picovoice,
+speechmatics) строят ОДИН value object `Diarization` с одинаковыми гарантиями.
+Тест параметризован по источникам: каждый берёт свою сырую форму, прогоняет её
+через свой адаптер-строитель и обязан дать `Diarization`, удовлетворяющую единому
 контракту.
 
 Сеть/модели не нужны: адаптеры-строители чистые (сегменты → Diarization),
@@ -60,10 +60,29 @@ def _picovoice_source():
     return service._parse_falcon_result(falcon_segments), ["SPEAKER_2", "SPEAKER_1"], False
 
 
+def _speechmatics_source():
+    """Speechmatics: пословные данные с родными метками; смена спикера рвёт сегмент.
+
+    Метки НЕ нормализуются в SPEAKER_N — остаются нативными (S1/S2), порядок
+    спикеров — по первому появлению.
+    """
+    from src.services.speechmatics_service import SpeechmaticsService
+
+    words_with_speakers = [
+        {"word": "привет", "speaker": "S2", "start_time": 0.0, "end_time": 1.0},
+        {"word": "как", "speaker": "S1", "start_time": 1.0, "end_time": 1.5},
+        {"word": "дела", "speaker": "S1", "start_time": 1.5, "end_time": 2.5},
+        {"word": "хорошо", "speaker": "S2", "start_time": 2.5, "end_time": 3.2},
+    ]
+    service = SpeechmaticsService.__new__(SpeechmaticsService)
+    return service._build_diarization(words_with_speakers), ["S2", "S1"], True
+
+
 _SOURCES = {
     "local": _local_source,
     "deepgram": _deepgram_source,
     "picovoice": _picovoice_source,
+    "speechmatics": _speechmatics_source,
 }
 
 
