@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from src.config import settings
+from src.models.diarization import Diarization, Segment
 
 # Импортируем OOM защиту
 try:
@@ -67,67 +68,23 @@ except ImportError:
 PICOVOICE_AVAILABLE = PICOVOICE_AVAILABLE and FALCON_AVAILABLE
 
 
-class DiarizationResult:
-    """Результат диаризации"""
-    
-    def __init__(self, segments: List[Dict[str, Any]], speakers: List[str]):
-        self.segments = segments  # Список сегментов с информацией о говорящих
-        self.speakers = speakers  # Список уникальных говорящих
-        
-    def to_dict(self) -> Dict[str, Any]:
-        """Преобразовать в словарь"""
-        return {
-            "segments": self.segments,
-            "speakers": self.speakers,
-            "total_speakers": len(self.speakers)
-        }
-    
-    def get_speakers_text(self) -> Dict[str, str]:
-        """Получить текст каждого говорящего отдельно"""
-        speakers_text = {}
-        
-        for segment in self.segments:
-            speaker = segment.get('speaker', 'SPEAKER_UNKNOWN')
-            text = segment.get('text', '').strip()
-            
-            if speaker not in speakers_text:
-                speakers_text[speaker] = []
-            
-            if text:
-                speakers_text[speaker].append(text)
-        
-        # Объединяем текст каждого говорящего
-        return {speaker: ' '.join(texts) for speaker, texts in speakers_text.items()}
-    
-    def get_formatted_transcript(self) -> str:
-        """Получить форматированную транскрипцию с говорящими"""
-        formatted_lines = []
-        current_speaker = None
-        current_text = []
-        
-        for segment in self.segments:
-            speaker = segment.get('speaker', 'SPEAKER_UNKNOWN')
-            text = segment.get('text', '').strip()
-            
-            if not text:
-                continue
-                
-            if speaker != current_speaker:
-                # Завершаем предыдущего говорящего
-                if current_speaker and current_text:
-                    formatted_lines.append(f"{current_speaker}: {' '.join(current_text)}")
-                
-                # Начинаем нового говорящего
-                current_speaker = speaker
-                current_text = [text]
-            else:
-                current_text.append(text)
-        
-        # Добавляем последнего говорящего
-        if current_speaker and current_text:
-            formatted_lines.append(f"{current_speaker}: {' '.join(current_text)}")
-        
-        return '\n\n'.join(formatted_lines)
+def build_diarization_from_segments(raw_segments: List[Dict[str, Any]]) -> Diarization:
+    """Построить «Диаризацию» из сырых сегментов (whisperx/pyannote).
+
+    Нормализует произвольный dict-сегмент в типизированный `Segment`, оставляя
+    только speaker/text/start/end; порядок сегментов и меток спикеров сохраняется.
+    Вход не мутируется — создаются новые объекты.
+    """
+    segments = [
+        Segment(
+            speaker=segment.get("speaker") or "SPEAKER_UNKNOWN",
+            text=segment.get("text") or "",
+            start=segment.get("start"),
+            end=segment.get("end"),
+        )
+        for segment in raw_segments
+    ]
+    return Diarization(segments=segments)
 
 
 class DiarizationService:
@@ -302,7 +259,7 @@ class DiarizationService:
             self.pyannote_pipeline = None
             raise
     
-    def diarize_with_whisperx(self, file_path: str, language: str = "ru") -> DiarizationResult:
+    def diarize_with_whisperx(self, file_path: str, language: str = "ru") -> Diarization:
         """Транскрипция с WhisperX + диаризация с pyannote.audio"""
         try:
             # Загружаем модели WhisperX (только для транскрипции)
@@ -396,8 +353,8 @@ class DiarizationService:
             # Очищаем временный конвертированный файл если он был создан
             if 'actual_file_path' in locals() and actual_file_path != file_path:
                 self._cleanup_converted_file(actual_file_path, file_path)
-            
-            return DiarizationResult(result.get("segments", []), speakers_list)
+
+            return build_diarization_from_segments(result.get("segments", []))
             
         except Exception as e:
             logger.error(f"Ошибка при диаризации с WhisperX + pyannote: {e}")
@@ -406,7 +363,7 @@ class DiarizationService:
                 self._cleanup_converted_file(actual_file_path, file_path)
             raise
     
-    def diarize_with_pyannote(self, file_path: str) -> DiarizationResult:
+    def diarize_with_pyannote(self, file_path: str) -> Diarization:
         """Диаризация с помощью pyannote.audio (резервный вариант)"""
         try:
             self._load_pyannote_pipeline()
@@ -450,8 +407,8 @@ class DiarizationService:
             # Очищаем временный конвертированный файл если он был создан
             if actual_file_path != file_path:
                 self._cleanup_converted_file(actual_file_path, file_path)
-            
-            return DiarizationResult(segments, speakers_list)
+
+            return build_diarization_from_segments(segments)
             
         except Exception as e:
             logger.error(f"Ошибка при диаризации с pyannote.audio: {e}")
@@ -460,34 +417,26 @@ class DiarizationService:
                 self._cleanup_converted_file(actual_file_path, file_path)
             raise
     
-    async def diarize_with_picovoice(self, file_path: str) -> DiarizationResult:
+    async def diarize_with_picovoice(self, file_path: str) -> Diarization:
         """Диаризация с помощью Picovoice API"""
         try:
             if not PICOVOICE_AVAILABLE:
                 raise RuntimeError("Picovoice сервис недоступен")
-            
+
             logger.info(f"Выполнение диаризации с Picovoice: {file_path}")
-            
-            # Выполняем диаризацию через Picovoice
-            diarization_data = await picovoice_service.diarize_file(file_path)
-            
-            if diarization_data is None:
+
+            # Picovoice-сервис уже строит «Диаризацию»
+            diarization = await picovoice_service.diarize_file(file_path)
+
+            if diarization is None:
                 raise RuntimeError("Picovoice диаризация вернула None")
-            
-            # Преобразуем DiarizationData в DiarizationResult
-            segments = []
-            for segment in diarization_data.segments:
-                segments.append({
-                    "start": segment.get("start", 0),
-                    "end": segment.get("end", 0),
-                    "speaker": segment.get("speaker", "SPEAKER_UNKNOWN"),
-                    "text": segment.get("text", "")
-                })
-            
-            logger.info(f"Диаризация Picovoice завершена. Найдено говорящих: {diarization_data.total_speakers}")
-            
-            return DiarizationResult(segments, diarization_data.speakers)
-            
+
+            logger.info(
+                f"Диаризация Picovoice завершена. Найдено говорящих: {len(diarization.speakers)}"
+            )
+
+            return diarization
+
         except Exception as e:
             logger.error(f"Ошибка при диаризации с Picovoice: {e}")
             raise
@@ -549,7 +498,7 @@ class DiarizationService:
         unsupported_formats = ['.m4a', '.mp4', '.aac', '.m4p']
         return file_ext in unsupported_formats
 
-    async def diarize_file(self, file_path: str, language: str = "ru") -> Optional[DiarizationResult]:
+    async def diarize_file(self, file_path: str, language: str = "ru") -> Optional[Diarization]:
         """Основной метод диаризации файла"""
         if not settings.enable_diarization:
             logger.info("Диаризация отключена в настройках")
@@ -636,24 +585,6 @@ class DiarizationService:
             # Очищаем временный конвертированный файл
             if converted_file and converted_file != original_path:
                 self._cleanup_converted_file(converted_file, original_path)
-    
-    def get_speakers_summary(self, result: DiarizationResult) -> str:
-        """Получить краткую сводку о говорящих"""
-        if not result or not result.speakers:
-            return "Говорящие не определены"
-        
-        speakers_text = result.get_speakers_text()
-        summary_lines = []
-        
-        summary_lines.append(f"Общее количество говорящих: {len(result.speakers)}")
-        summary_lines.append("")
-        
-        for speaker in result.speakers:
-            text = speakers_text.get(speaker, "")
-            word_count = len(text.split()) if text else 0
-            summary_lines.append(f"{speaker}: {word_count} слов")
-        
-        return "\n".join(summary_lines)
 
 
 # Глобальный экземпляр сервиса

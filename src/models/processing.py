@@ -41,14 +41,6 @@ class TranscriptionResult(BaseModel):
     compression_info: Optional[Dict[str, Any]] = Field(None, description="Информация о сжатии файла")
 
 
-class DiarizationData(BaseModel):
-    """Данные диаризации"""
-    segments: List[Dict[str, Any]] = Field(default_factory=list, description="Сегменты диаризации")
-    speakers: List[str] = Field(default_factory=list, description="Список говорящих")
-    total_speakers: int = Field(0, description="Общее количество говорящих")
-    formatted_transcript: Optional[str] = Field(None, description="Форматированная транскрипция")
-
-
 class ProcessingResult(BaseModel):
     """Результат обработки"""
     transcription_result: TranscriptionResult
