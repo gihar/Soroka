@@ -135,14 +135,15 @@ async def test_local_diarization_applied_once_when_backend_lacks_it(service, aud
     whisper = FakeBackend("whisper", result=_partial("текст без спикеров"))
     _wire(service, "local", {"local": whisper}, monkeypatch, diarization_enabled=True)
 
+    # #58: «Диаризация» отдаёт производные через свойства, а не методы сервиса.
     d = MagicMock()
     d.to_dict.return_value = {"segments": [1]}
-    d.get_speakers_text.return_value = {"SPEAKER_0": "..."}
-    d.get_formatted_transcript.return_value = "SPEAKER_0: текст без спикеров"
+    d.speakers_text = {"SPEAKER_0": "..."}
+    d.formatted_transcript = "SPEAKER_0: текст без спикеров"
+    d.speakers_summary = "1 спикер"
     d.speakers = ["SPEAKER_0"]
     stub = MagicMock()
     stub.diarize_file = AsyncMock(return_value=d)
-    stub.get_speakers_summary.return_value = "1 спикер"
     monkeypatch.setattr(ts_module, "diarization_service", stub)
     monkeypatch.setattr(ts_module, "DIARIZATION_AVAILABLE", True)
 

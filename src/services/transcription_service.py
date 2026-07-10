@@ -329,9 +329,9 @@ class TranscriptionService:
             diarization_result = await diarization_service.diarize_file(file_path, language)
             if diarization_result:
                 result.diarization = diarization_result.to_dict()
-                result.speakers_text = diarization_result.get_speakers_text()
-                result.formatted_transcript = diarization_result.get_formatted_transcript()
-                result.speakers_summary = diarization_service.get_speakers_summary(diarization_result)
+                result.speakers_text = diarization_result.speakers_text
+                result.formatted_transcript = diarization_result.formatted_transcript
+                result.speakers_summary = diarization_result.speakers_summary
                 logger.info(f"Диаризация применена. Найдено говорящих: {len(diarization_result.speakers)}")
         except Exception as e:
             logger.warning(f"Ошибка при применении диаризации: {e}")

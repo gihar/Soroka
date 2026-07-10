@@ -1,72 +1,66 @@
-"""Характеризация форм payload диаризации по бэкендам транскрипции (#57).
+"""Формы payload диаризации по бэкендам транскрипции (обновлено для #58).
 
-Страховка перед типизацией «Диаризации» (#58): фиксирует, ЧТО именно кладёт
-каждый бэкенд в dict диаризации и в top-level поля TranscriptionResult, пока
-это всё живёт на голых словарях. Прод-код не меняется.
+Изначально (#57) фиксировало ЧТО кладёт каждый бэкенд, пока диаризация жила на
+голых словарях. #58 ввёл единый value object «Диаризация»: локальный путь и
+deepgram теперь дают ОДИН и тот же `to_dict()` с пятью ключами. Speechmatics —
+НЕ трогали, поэтому его характеризация оставлена как есть.
 
 Мок не нужен — обрабатывающие методы (`to_dict`, `_process_transcript_result`)
-чистые: не ходят в сеть и не читают self. Инстансы создаём через `__new__`,
-минуя тяжёлую инициализацию клиентов.
+чистые: не ходят в сеть и не читают тяжёлый self. Инстансы сервисов создаём
+через `__new__`.
 
-Разведанные асимметрии, закреплённые здесь как «текущее поведение»:
-- локальный путь кладёт в dict ТОЛЬКО segments/speakers/total_speakers;
-- deepgram дополнительно кладёт formatted_transcript/speakers_text и нормализует
-  метки в SPEAKER_N по порядку появления;
-- speechmatics всегда отдаёт diarization=None, тексты — только в top-level,
+Формы, закреплённые здесь:
+- локальный путь строит «Диаризацию» и кладёт её единый to_dict (пять ключей);
+- deepgram строит ту же «Диаризацию»; нормализация меток в SPEAKER_N по порядку
+  появления осталась на уровне адаптера, форма dict совпадает с локальной;
+- speechmatics по-прежнему отдаёт diarization=None, тексты — только в top-level,
   метки спикеров РОДНЫЕ (S1/S2, не SPEAKER_N), порядок спикеров недетерминирован
   (собирается из set()).
 """
 
 from src.services.deepgram_service import DeepgramService
-from src.services.diarization_service import DiarizationResult
+from src.services.diarization_service import build_diarization_from_segments
 from src.services.speechmatics_service import SpeechmaticsService
 
 
 # --------------------------------------------------------------------------
-# Локальный путь: whisperx+pyannote → DiarizationResult.to_dict()
+# Локальный путь: whisperx/pyannote → build_diarization_from_segments → to_dict()
 # --------------------------------------------------------------------------
 
-def _local_result() -> DiarizationResult:
-    return DiarizationResult(
-        segments=[
-            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_1", "text": "привет"},
-            {"start": 2.0, "end": 4.0, "speaker": "SPEAKER_2", "text": "здравствуй"},
-            {"start": 4.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "как дела"},
-        ],
-        speakers=["SPEAKER_1", "SPEAKER_2"],
-    )
+def _local_diarization():
+    return build_diarization_from_segments([
+        {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_1", "text": "привет"},
+        {"start": 2.0, "end": 4.0, "speaker": "SPEAKER_2", "text": "здравствуй"},
+        {"start": 4.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "как дела"},
+    ])
 
 
-def test_local_to_dict_carries_only_three_keys():
-    """Локальный dict диаризации — ровно {segments, speakers, total_speakers}."""
-    payload = _local_result().to_dict()
+def test_local_to_dict_is_unified_five_key_shape():
+    """#58: локальный dict диаризации — единая форма с пятью ключами."""
+    payload = _local_diarization().to_dict()
 
-    assert set(payload.keys()) == {"segments", "speakers", "total_speakers"}
+    assert set(payload.keys()) == {
+        "segments", "speakers", "total_speakers",
+        "formatted_transcript", "speakers_text",
+    }
     assert payload["speakers"] == ["SPEAKER_1", "SPEAKER_2"]
     assert payload["total_speakers"] == 2
 
 
-def test_local_to_dict_omits_formatted_and_speakers_text():
-    """Характеризация: formatted_transcript/speakers_text В dict НЕ кладутся.
+def test_local_to_dict_now_carries_formatted_and_speakers_text():
+    """#58: локальный путь СНОВА кладёт formatted_transcript/speakers_text В dict.
 
-    В отличие от deepgram, локальный путь держит их отдельно — top-level поля
-    TranscriptionResult заполняет `_ensure_diarization`, вызывая отдельные методы.
+    До #58 их держали отдельно; теперь единый to_dict несёт их наравне с deepgram,
+    поэтому dict-читатели (например промпт сопоставления) получают форматированный
+    текст и на локальном пути.
     """
-    payload = _local_result().to_dict()
+    payload = _local_diarization().to_dict()
 
-    assert "formatted_transcript" not in payload
-    assert "speakers_text" not in payload
-
-
-def test_local_formatted_and_speakers_text_come_from_separate_methods():
-    """Форматированный транскрипт и тексты спикеров — отдельные методы, не dict."""
-    result = _local_result()
-
-    assert result.get_formatted_transcript() == (
+    assert payload["formatted_transcript"] == (
         "SPEAKER_1: привет\n\nSPEAKER_2: здравствуй\n\nSPEAKER_1: как дела"
     )
     # Текст спикера склеивается по всем его сегментам в порядке появления.
-    assert result.get_speakers_text() == {
+    assert payload["speakers_text"] == {
         "SPEAKER_1": "привет как дела",
         "SPEAKER_2": "здравствуй",
     }

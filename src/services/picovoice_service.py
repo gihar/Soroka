@@ -9,7 +9,7 @@ from typing import Optional
 from loguru import logger
 
 from src.config import settings
-from src.models.processing import DiarizationData
+from src.models.diarization import Diarization, Segment
 
 try:
     import pvfalcon
@@ -91,7 +91,7 @@ class PicovoiceService:
     
 
     
-    async def diarize_file(self, file_path: str) -> Optional[DiarizationData]:
+    async def diarize_file(self, file_path: str) -> Optional[Diarization]:
         """Выполнить диаризацию файла через Picovoice Falcon"""
         if not self.access_key:
             logger.error("Picovoice Access Key не настроен")
@@ -117,44 +117,33 @@ class PicovoiceService:
             logger.info("Запуск диаризации с Picovoice Falcon...")
             segments = falcon.process_file(converted_path)
             
-            # Преобразуем результат в наш формат
-            diarization_data = self._parse_falcon_result(segments)
-            
-            logger.info(f"Диаризация Picovoice Falcon успешна. Найдено говорящих: {diarization_data.total_speakers}")
-            return diarization_data
-            
+            # Преобразуем результат в «Диаризацию»
+            diarization = self._parse_falcon_result(segments)
+
+            logger.info(f"Диаризация Picovoice Falcon успешна. Найдено говорящих: {len(diarization.speakers)}")
+            return diarization
+
         except Exception as e:
             logger.error(f"Ошибка при диаризации через Picovoice Falcon: {e}")
             return None
-    
-    def _parse_falcon_result(self, segments) -> DiarizationData:
-        """Парсить результат Falcon в стандартный формат"""
+
+    def _parse_falcon_result(self, segments) -> Diarization:
+        """Построить «Диаризацию» из результата Falcon (текст добавляется отдельно)."""
         try:
-            diarization_segments = []
-            speakers = set()
-            
-            for segment in segments:
-                speaker = f"SPEAKER_{segment.speaker_tag}"
-                speakers.add(speaker)
-                
-                diarization_segments.append({
-                    "start": segment.start_sec,
-                    "end": segment.end_sec,
-                    "speaker": speaker,
-                    "text": ""  # Текст будет добавлен отдельно
-                })
-            
-            speakers_list = sorted(list(speakers))
-            
-            return DiarizationData(
-                segments=diarization_segments,
-                speakers=speakers_list,
-                total_speakers=len(speakers_list)
-            )
-            
+            diarization_segments = [
+                Segment(
+                    speaker=f"SPEAKER_{segment.speaker_tag}",
+                    text="",  # Текст будет добавлен отдельно
+                    start=segment.start_sec,
+                    end=segment.end_sec,
+                )
+                for segment in segments
+            ]
+            return Diarization(segments=diarization_segments)
+
         except Exception as e:
             logger.error(f"Ошибка при парсинге результата Falcon: {e}")
-            return DiarizationData(segments=[], speakers=[], total_speakers=0)
+            return Diarization(segments=[])
     
     def cleanup(self):
         """Очистка ресурсов"""

@@ -13,8 +13,8 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions.processing import CloudTranscriptionError, DeepgramAPIError
+from src.models.diarization import Diarization, Segment
 from src.models.processing import TranscriptionResult
-from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
 # Используем прямой HTTP API вместо SDK для избежания проблем с Pydantic валидацией
 DEEPGRAM_AVAILABLE = True
@@ -164,29 +164,43 @@ class DeepgramService:
                 logger.warning(f"Получено исключение с пустым сообщением: {type(e)}")
             raise CloudTranscriptionError(str(e), file_path, "deepgram")
     
+    def _build_diarization(self, utterances: list) -> Diarization:
+        """Построить «Диаризацию» из utterances deepgram.
+
+        Нормализует сырые id спикеров в стабильные метки SPEAKER_N по порядку
+        появления; всё производное (тексты, форматирование, сводка) выводит модель.
+
+        ВАЖНО: последовательность реплик сохраняется — формирование
+        formatted_transcript живёт в модели и группирует только подряд идущие
+        реплики одного спикера, чтобы LLM понимал чередование участников.
+        """
+        speaker_labels: Dict[Any, str] = {}
+        segments = []
+
+        for utterance in utterances:
+            raw_speaker = utterance.get("speaker")
+            if raw_speaker not in speaker_labels:
+                speaker_labels[raw_speaker] = f"SPEAKER_{len(speaker_labels) + 1}"
+
+            segments.append(Segment(
+                speaker=speaker_labels[raw_speaker],
+                text=(utterance.get("transcript") or "").strip(),
+                start=utterance.get("start"),
+                end=utterance.get("end"),
+            ))
+
+        return Diarization(segments=segments)
+
     def _process_transcript_result(self, response_data: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
-        """
-        Обработать результат транскрипции от Deepgram (работа с сырым JSON)
-        
-        ВАЖНО: При создании formatted_transcript сохраняется последовательность реплик.
-        Группируются только последовательные utterances одного спикера, чтобы LLM
-        мог понять динамику диалога и чередование участников.
-        
-        Формат: SPEAKER_1: текст\n\nSPEAKER_2: текст\n\nSPEAKER_1: текст
-        (не: SPEAKER_1: весь текст\n\nSPEAKER_2: весь текст)
-        """
-        
-        # Извлекаем основной текст
+        """Обработать результат транскрипции от Deepgram (работа с сырым JSON)."""
+
         transcription_text = ""
-        speakers_text = {}
-        formatted_transcript = ""
-        speakers_summary = ""
-        diarization_data: Optional[Dict[str, Any]] = None
-        
+        diarization: Optional[Diarization] = None
+
         try:
             # Получаем результаты
             results = response_data.get("results", {})
-            
+
             # Извлекаем транскрипцию из первого канала
             channels = results.get("channels", [])
             if channels and len(channels) > 0:
@@ -194,76 +208,38 @@ class DeepgramService:
                 alternatives = channel.get("alternatives", [])
                 if alternatives and len(alternatives) > 0:
                     transcription_text = alternatives[0].get("transcript", "")
-            
-            # Если включена диаризация, обрабатываем utterances (высказывания)
+
+            # Если включена диаризация, строим «Диаризацию» из utterances
             utterances = results.get("utterances", [])
             if enable_diarization and utterances:
-                speaker_labels: Dict[Any, str] = {}
-                segments = []
-                
-                for utterance in utterances:
-                    raw_speaker = utterance.get("speaker")
-                    # Присваиваем стабильный label вида SPEAKER_N, порядок соответствует появлению
-                    if raw_speaker not in speaker_labels:
-                        speaker_labels[raw_speaker] = f"SPEAKER_{len(speaker_labels) + 1}"
-                    speaker_id = speaker_labels[raw_speaker]
-                    
-                    utterance_text = (utterance.get("transcript") or "").strip()
-                    start_time = utterance.get("start")
-                    end_time = utterance.get("end")
-                    
-                    if speaker_id not in speakers_text:
-                        speakers_text[speaker_id] = utterance_text
-                    elif utterance_text:
-                        speakers_text[speaker_id] = f"{speakers_text[speaker_id]} {utterance_text}".strip()
-                    
-                    segments.append({
-                        "speaker": speaker_id,
-                        "start": start_time,
-                        "end": end_time,
-                        "text": utterance_text,
-                    })
-                
-                speakers_list = list(speaker_labels.values())
-                
-                # Создаем форматированную транскрипцию с сохранением последовательности реплик
-                # Используем утилиту, которая группирует только последовательные реплики одного спикера
-                formatted_transcript = format_transcript_with_speaker_sequence(segments)
-                
-                # Создаем сводку о говорящих
-                speakers_summary = f"Общее количество говорящих: {len(speakers_list)}\n\n"
-                for speaker in speakers_list:
-                    word_count = len(speakers_text.get(speaker, "").split())
-                    speakers_summary += f"{speaker}: {word_count} слов\n"
-                
-                diarization_data = {
-                    "segments": segments,
-                    "speakers": speakers_list,
-                    "total_speakers": len(speakers_list),
-                    "formatted_transcript": formatted_transcript,
-                    "speakers_text": speakers_text,
-                }
-            else:
-                formatted_transcript = transcription_text
-        
+                diarization = self._build_diarization(utterances)
+
         except Exception as e:
             logger.error(f"Ошибка при обработке результата Deepgram: {e}")
             # Если не удалось обработать результат, возвращаем пустую транскрипцию
             if not transcription_text:
                 transcription_text = ""
-            formatted_transcript = transcription_text
-        
-        # Создаем объект результата
-        result = TranscriptionResult(
+            diarization = None
+
+        if diarization is not None:
+            return TranscriptionResult(
+                transcription=transcription_text,
+                diarization=diarization.to_dict(),
+                speakers_text=diarization.speakers_text,
+                formatted_transcript=diarization.formatted_transcript,
+                speakers_summary=diarization.speakers_summary,
+                compression_info=None,  # Информация о сжатии будет добавлена в transcription_service
+            )
+
+        # Без диаризации: форматированный транскрипт — сырой текст
+        return TranscriptionResult(
             transcription=transcription_text,
-            diarization=diarization_data,
-            speakers_text=speakers_text,
-            formatted_transcript=formatted_transcript,
-            speakers_summary=speakers_summary,
-            compression_info=None  # Информация о сжатии будет добавлена в transcription_service
+            diarization=None,
+            speakers_text={},
+            formatted_transcript=transcription_text,
+            speakers_summary="",
+            compression_info=None,  # Информация о сжатии будет добавлена в transcription_service
         )
-        
-        return result
     
     async def transcribe_with_diarization(self, file_path: str, language: str = None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией через Deepgram"""
