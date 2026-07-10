@@ -8,6 +8,7 @@ from loguru import logger
 
 from src.config import settings
 from src.llm import protocol_generator
+from src.models.diarization import Diarization, Segment
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
 
@@ -29,16 +30,16 @@ class SpeakerMappingService:
     
     async def map_speakers_to_participants(
         self,
-        diarization_data: Dict[str, Any],
+        diarization_data: Optional[Diarization],
         participants: List[Dict[str, str]],
         transcription_text: str,
         llm_provider: str = "openai"
     ) -> tuple[Dict[str, str], str]:
         """
         Автоматическое сопоставление спикеров с участниками и определение типа встречи
-        
+
         Args:
-            diarization_data: Данные диаризации со спикерами
+            diarization_data: Диаризация со спикерами
             participants: Список участников с именами и ролями
             transcription_text: Полный текст транскрипции
             llm_provider: LLM провайдер для сопоставления
@@ -107,35 +108,35 @@ class SpeakerMappingService:
             return {}, "general"
     
     def _extract_speakers_info(
-        self, 
-        diarization_data: Dict[str, Any],
+        self,
+        diarization: Optional[Diarization],
         extract_samples: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Извлечение информации о спикерах из данных диаризации
-        
+        Извлечение информации о спикерах из диаризации
+
         Args:
-            diarization_data: Данные диаризации со спикерами
+            diarization: Диаризация со спикерами
             extract_samples: Извлекать ли текстовые фрагменты речи (False при full_text_matching)
-        
+
         Returns:
             Список информации о спикерах
         """
         speakers_info = []
-        
-        # Получаем список спикеров
-        speakers = diarization_data.get('speakers', [])
 
-        # Получаем сегменты
-        segments = diarization_data.get('segments', [])
-        
+        if not diarization:
+            return speakers_info
+
+        speakers = diarization.speakers
+        segments = diarization.segments
+
         for speaker in speakers:
             # Извлекаем фрагменты речи этого спикера
             speaker_segments = [
-                seg for seg in segments 
-                if seg.get('speaker') == speaker
+                seg for seg in segments
+                if seg.speaker == speaker
             ]
-            
+
             # Извлекаем фрагменты только если требуется
             # При full_text_matching=True полная транскрипция уже содержит всю информацию,
             # поэтому извлечение фрагментов избыточно и только расходует токены LLM
@@ -143,13 +144,13 @@ class SpeakerMappingService:
                 text_samples = self._get_distributed_samples(speaker_segments, max_samples=5)
             else:
                 text_samples = []
-            
+
             # Подсчет времени говорения
             total_time = sum(
-                seg.get('end', 0) - seg.get('start', 0)
+                (seg.end or 0) - (seg.start or 0)
                 for seg in speaker_segments
             )
-            
+
             speakers_info.append({
                 'speaker_id': speaker,
                 'segments_count': len(speaker_segments),
@@ -162,24 +163,24 @@ class SpeakerMappingService:
         
         return speakers_info
     
-    def _get_distributed_samples(self, segments: List[Dict[str, Any]], max_samples: int = 5) -> List[str]:
+    def _get_distributed_samples(self, segments: List[Segment], max_samples: int = 5) -> List[str]:
         """
         Извлекает фрагменты речи, распределенные по всей транскрипции
-        
+
         Args:
             segments: Список сегментов спикера
             max_samples: Максимальное количество фрагментов
-            
+
         Returns:
             Список текстовых фрагментов
         """
         if not segments:
             return []
-        
+
         total = len(segments)
         if total <= max_samples:
             # Если сегментов мало, берем все
-            return [seg.get('text', '').strip() for seg in segments if seg.get('text')]
+            return [seg.text.strip() for seg in segments if seg.text]
         
         # Распределяем индексы по всей длине
         indices = []
@@ -209,10 +210,10 @@ class SpeakerMappingService:
         samples = []
         for idx in indices:
             if idx < total:
-                text = segments[idx].get('text', '').strip()
+                text = segments[idx].text.strip()
                 if text:
                     samples.append(text)
-        
+
         return samples
     
     def _get_transcript_preview(self, transcript: str) -> str:
@@ -301,7 +302,7 @@ class SpeakerMappingService:
         speakers_info: List[Dict[str, Any]],
         participants: List[Dict[str, str]],
         transcription_text: str,
-        diarization_data: Dict[str, Any]
+        diarization: Optional[Diarization]
     ) -> str:
         """Формирование промпта для LLM"""
         
@@ -342,7 +343,7 @@ class SpeakerMappingService:
             speakers_str = "\n".join(speakers_list)
         
         # Получаем контекст транскрипции (полный или превью)
-        formatted_transcript = diarization_data.get('formatted_transcript', '')
+        formatted_transcript = diarization.formatted_transcript if diarization else ''
         if formatted_transcript:
             if self.full_text_matching:
                 transcript_preview = formatted_transcript

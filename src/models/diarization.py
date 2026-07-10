@@ -3,10 +3,10 @@
 
 Хранит ТОЛЬКО последовательность сегментов; список спикеров, тексты по спикерам,
 форматированную транскрипцию и сводку модель выводит из сегментов как свойства.
-Единая сериализация `to_dict()` — надмножество прежних per-backend форм.
+Потребители читают эти свойства напрямую — промежуточной dict-формы нет.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -64,13 +64,3 @@ class Diarization(BaseModel):
             word_count = len(speakers_text.get(speaker, "").split())
             summary += f"{speaker}: {word_count} слов\n"
         return summary
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Единая сериализация — надмножество прежних per-backend форм диаризации."""
-        return {
-            "segments": [segment.model_dump() for segment in self.segments],
-            "speakers": self.speakers,
-            "total_speakers": len(self.speakers),
-            "formatted_transcript": self.formatted_transcript,
-            "speakers_text": self.speakers_text,
-        }

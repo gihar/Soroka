@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from src.models.diarization import Diarization
 from src.models.validation import ValidationResult
 
 
@@ -181,76 +182,32 @@ class ProtocolValidator:
     def check_diarization_usage(
         self,
         protocol: Dict[str, Any],
-        diarization_data: Optional[Dict[str, Any]]
+        diarization_data: Optional[Diarization]
     ) -> tuple[float, List[str]]:
         """
         Проверить, насколько хорошо использованы данные диаризации
-        
+
         Args:
             protocol: Сгенерированный протокол
-            diarization_data: Данные диаризации
-            
+            diarization_data: Диаризация
+
         Returns:
             (оценка использования диаризации, список рекомендаций)
+
+        Сигнатура мигрирована на типизированную «Диаризацию», но семантика
+        остаётся мёртвой: проверка искала метки вида SPEAKER_N в тексте
+        протокола, тогда как сопоставленный протокол несёт реальные имена
+        участников — старая логика штрафовала бы корректные протоколы. Оживление
+        (правильная семантика поверх типизированной диаризации) — issue #61.
         """
-        if not diarization_data or not diarization_data.get('speakers_text'):
-            # Нет данных диаризации - оценка не применима
-            return 1.0, []
-        
-        suggestions = []
-        usage_scores = []
-        
-        # Проверяем упоминание спикеров в протоколе
-        speakers = list(diarization_data.get('speakers_text', {}).keys())
-        protocol_text = ' '.join(str(v) for v in protocol.values())
-        
-        # Подсчитываем, сколько спикеров упомянуто
-        mentioned_speakers = 0
-        for speaker in speakers:
-            if speaker.lower() in protocol_text.lower():
-                mentioned_speakers += 1
-        
-        speaker_mention_ratio = mentioned_speakers / len(speakers) if speakers else 1.0
-        usage_scores.append(speaker_mention_ratio)
-        
-        if speaker_mention_ratio < 0.5:
-            suggestions.append(
-                f"Использованы данные только о {mentioned_speakers} из {len(speakers)} спикеров"
-            )
-        
-        # Проверяем, есть ли информация об ответственных в задачах
-        action_fields = [
-            'action_items', 'tasks', 'поручения', 'задачи'
-        ]
-        
-        has_responsible_info = False
-        for field in action_fields:
-            if field in protocol and isinstance(protocol[field], str):
-                value = protocol[field]
-                # Ищем паттерны указания ответственных
-                if re.search(r'ответственный|responsible|assignee|спикер \d+|speaker \d+', value, re.IGNORECASE):
-                    has_responsible_info = True
-                    break
-        
-        if not has_responsible_info and speakers:
-            suggestions.append(
-                "Не указаны ответственные за задачи из числа спикеров"
-            )
-            usage_scores.append(0.5)
-        else:
-            usage_scores.append(1.0)
-        
-        # Вычисляем итоговую оценку использования диаризации
-        diarization_usage = sum(usage_scores) / len(usage_scores) if usage_scores else 0.8
-        
-        return diarization_usage, suggestions
+        return 1.0, []
     
     def calculate_quality_score(
         self,
         protocol: Dict[str, Any],
         transcription: str,
         template_variables: Dict[str, str],
-        diarization_data: Optional[Dict[str, Any]] = None
+        diarization_data: Optional[Diarization] = None
     ) -> ValidationResult:
         """
         Вычислить общую оценку качества протокола

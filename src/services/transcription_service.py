@@ -284,8 +284,6 @@ class TranscriptionService:
             result = await self._run_with_fallback(backend, file_path, language)
             result = await self._ensure_diarization(result, file_path, language)
 
-            if not result.formatted_transcript:  # Если диаризация не сработала
-                result.formatted_transcript = result.transcription  # Без разделения говорящих
             if result.compression_info is None:
                 result.compression_info = compression_info
 
@@ -328,10 +326,7 @@ class TranscriptionService:
             logger.info("Применение локальной диаризации к транскрипции...")
             diarization_result = await diarization_service.diarize_file(file_path, language)
             if diarization_result:
-                result.diarization = diarization_result.to_dict()
-                result.speakers_text = diarization_result.speakers_text
-                result.formatted_transcript = diarization_result.formatted_transcript
-                result.speakers_summary = diarization_result.speakers_summary
+                result.diarization = diarization_result
                 logger.info(f"Диаризация применена. Найдено говорящих: {len(diarization_result.speakers)}")
         except Exception as e:
             logger.warning(f"Ошибка при применении диаризации: {e}")

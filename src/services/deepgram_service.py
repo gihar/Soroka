@@ -224,20 +224,14 @@ class DeepgramService:
         if diarization is not None:
             return TranscriptionResult(
                 transcription=transcription_text,
-                diarization=diarization.to_dict(),
-                speakers_text=diarization.speakers_text,
-                formatted_transcript=diarization.formatted_transcript,
-                speakers_summary=diarization.speakers_summary,
+                diarization=diarization,
                 compression_info=None,  # Информация о сжатии будет добавлена в transcription_service
             )
 
-        # Без диаризации: форматированный транскрипт — сырой текст
+        # Без диаризации: диаризации нет, форматированный текст выводится из сырого
         return TranscriptionResult(
             transcription=transcription_text,
             diarization=None,
-            speakers_text={},
-            formatted_transcript=transcription_text,
-            speakers_summary="",
             compression_info=None,  # Информация о сжатии будет добавлена в transcription_service
         )
     

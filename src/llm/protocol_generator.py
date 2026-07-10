@@ -153,9 +153,13 @@ class ProtocolGenerator:
 
     async def generate(self, *, preset: Optional[Dict[str, Any]],
                        transcription: str, template_variables: Dict[str, str],
-                       diarization_data: Optional[Dict[str, Any]] = None,
                        **context) -> Dict[str, Any]:
-        """Сгенерировать протокол по транскрипции (двухэтапно, с надёжностью)."""
+        """Сгенерировать протокол по транскрипции (двухэтапно, с надёжностью).
+
+        ``transcription`` — уже готовый текст: вызывающий передаёт
+        ``best_transcript`` (формат из диаризации либо сырой), генератору знать о
+        диаризации не нужно.
+        """
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
         return await self._protected(
@@ -163,7 +167,6 @@ class ProtocolGenerator:
             preset=preset,
             transcription=transcription,
             template_variables=template_variables,
-            diarization_data=diarization_data,
             **context,
         )
 
@@ -189,7 +192,6 @@ class ProtocolGenerator:
 
     async def _generate_two_stage(self, *, preset: Optional[Dict[str, Any]],
                                   transcription: str, template_variables: Dict[str, str],
-                                  diarization_data: Optional[Dict[str, Any]] = None,
                                   **kwargs) -> Dict[str, Any]:
         """Two-stage generation: analysis (тип встречи + спикеры) → protocol."""
         participants = kwargs.get('participants')
@@ -199,9 +201,9 @@ class ProtocolGenerator:
             'meeting_time': kwargs.get('meeting_time', '')
         }
 
+        # transcription — уже готовый текст (best_transcript вызывающего): анализ и
+        # генерация идут по нему, отдельного выбора «формат или сырой» здесь нет.
         analysis_transcription = transcription
-        if diarization_data and diarization_data.get("formatted_transcript"):
-            analysis_transcription = diarization_data["formatted_transcript"]
 
         participants_list_str = "Не предоставлен"
         if participants:

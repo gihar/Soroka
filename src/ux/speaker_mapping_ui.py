@@ -2,29 +2,35 @@
 UI компоненты для подтверждения сопоставления спикеров с участниками
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
+from src.models.diarization import Diarization
 from src.utils.message_utils import escape_markdown_v2
 from src.utils.telegram_safe import safe_send_message
 
 
+def _speaker_order(diarization: Optional[Diarization]) -> List[str]:
+    """Спикеры в порядке их появления в сегментах (единый источник для карточки)."""
+    return list(diarization.speakers) if diarization else []
+
+
 def extract_speaker_quotes(
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     speaker_id: str,
     speakers_text: Optional[Dict[str, str]] = None
 ) -> Optional[str]:
     """
     Извлечь первые 200 символов предобработанного текста спикера
-    
+
     Args:
-        diarization_data: Данные диаризации с сегментами (fallback если нет speakers_text)
+        diarization: Диаризация с сегментами (fallback если нет speakers_text)
         speaker_id: ID спикера (например, "SPEAKER_1")
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        
+
     Returns:
         Строка с первыми 200 символами или None если текст не найден
     """
@@ -36,20 +42,20 @@ def extract_speaker_quotes(
                 return text[:200] + '...'
             return text
         return None
-    
+
     # Fallback: собираем из сегментов если speakers_text недоступен
-    segments = diarization_data.get('segments', [])
-    speaker_segments = [s for s in segments if s.get('speaker') == speaker_id]
-    
+    segments = diarization.segments if diarization else []
+    speaker_segments = [s for s in segments if s.speaker == speaker_id]
+
     if not speaker_segments:
         return None
-    
+
     # Собираем текст последовательно из первых сегментов до 200 символов
     collected_text = []
     total_length = 0
-    
+
     for seg in speaker_segments:
-        text = seg.get('text', '').strip()
+        text = seg.text.strip()
         if not text:
             continue
         
@@ -76,7 +82,7 @@ def extract_speaker_quotes(
 
 def format_mapping_message(
     speaker_mapping: Dict[str, str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
@@ -87,7 +93,7 @@ def format_mapping_message(
 
     Args:
         speaker_mapping: Словарь {speaker_id: participant_name}
-        diarization_data: Данные диаризации
+        diarization: Диаризация
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
@@ -100,17 +106,10 @@ def format_mapping_message(
     # Экранируем статический текст для MarkdownV2
     header_text = escape_markdown_v2("Проверьте сопоставление спикеров")
     lines = [f"🎭 *{header_text}*\n"]
-    
-    # Получаем всех спикеров из диаризации
-    all_speakers = diarization_data.get('speakers', [])
-    if not all_speakers:
-        # Если speakers нет, извлекаем из segments
-        segments = diarization_data.get('segments', [])
-        all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
-    
-    # Сортируем спикеров по порядку (SPEAKER_1, SPEAKER_2, ...)
-    all_speakers.sort(key=lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else 999)
-    
+
+    # Спикеры — в порядке их появления в диаризации
+    all_speakers = _speaker_order(diarization)
+
     # Экранируем статический текст
     not_defined_text = escape_markdown_v2("Не определен")
     
@@ -135,7 +134,7 @@ def format_mapping_message(
         # Цитата спикера показывается один раз: если фрагмент записи доставлен,
         # она уже в его подписи — в карточке не дублируем.
         if not (speakers_with_audio and speaker_id in speakers_with_audio):
-            quote = extract_speaker_quotes(diarization_data, speaker_id, speakers_text=speakers_text)
+            quote = extract_speaker_quotes(diarization, speaker_id, speakers_text=speakers_text)
             if quote:
                 # Экранируем цитату для MarkdownV2
                 escaped_quote = escape_markdown_v2(quote)
@@ -152,31 +151,25 @@ def format_mapping_message(
 
 def _format_simple_mapping_message(
     speaker_mapping: Dict[str, str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     unmapped_speakers: Optional[List[str]] = None
 ) -> str:
     """
     Форматировать упрощенное сообщение без Markdown разметки (fallback)
-    
+
     Args:
         speaker_mapping: Словарь {speaker_id: participant_name}
-        diarization_data: Данные диаризации
+        diarization: Диаризация
         unmapped_speakers: Список несопоставленных спикеров
-        
+
     Returns:
         Простой текст без Markdown разметки
     """
     lines = ["🎭 Проверьте сопоставление спикеров\n"]
-    
-    # Получаем всех спикеров из диаризации
-    all_speakers = diarization_data.get('speakers', [])
-    if not all_speakers:
-        segments = diarization_data.get('segments', [])
-        all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
-    
-    # Сортируем спикеров по порядку
-    all_speakers.sort(key=lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else 999)
-    
+
+    # Спикеры — в порядке их появления в диаризации
+    all_speakers = _speaker_order(diarization)
+
     # Импортируем сервис для преобразования имен
     from src.services.participants_service import participants_service
     
@@ -198,34 +191,28 @@ def _format_simple_mapping_message(
 
 def create_mapping_keyboard(
     speaker_mapping: Dict[str, str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     user_id: int,
     current_editing_speaker: Optional[str] = None
 ) -> InlineKeyboardMarkup:
     """
     Создать inline-клавиатуру для подтверждения/изменения сопоставления
-    
+
     Args:
         speaker_mapping: Текущее сопоставление
-        diarization_data: Данные диаризации
+        diarization: Диаризация
         participants: Список участников
         user_id: ID пользователя
         current_editing_speaker: ID спикера, для которого показываем выбор участников
-        
+
     Returns:
         InlineKeyboardMarkup с кнопками
     """
     keyboard_buttons = []
-    
+
     # Если показываем выбор участников для конкретного спикера
     if current_editing_speaker:
-        # Получаем всех спикеров
-        all_speakers = diarization_data.get('speakers', [])
-        if not all_speakers:
-            segments = diarization_data.get('segments', [])
-            all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
-        
         # Создаем кнопки для выбора участника
         used_participants = set(speaker_mapping.values())
         
@@ -262,13 +249,8 @@ def create_mapping_keyboard(
         
     else:
         # Основной вид: кнопки для изменения каждого спикера и действия
-        all_speakers = diarization_data.get('speakers', [])
-        if not all_speakers:
-            segments = diarization_data.get('segments', [])
-            all_speakers = sorted(set(s.get('speaker') for s in segments if s.get('speaker')))
-        
-        all_speakers.sort(key=lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else 999)
-        
+        all_speakers = _speaker_order(diarization)
+
         # Каждая кнопка в отдельной строке (одна колонка)
         for speaker_id in all_speakers:
             participant_name = speaker_mapping.get(speaker_id)
@@ -306,7 +288,7 @@ async def show_mapping_confirmation(
     chat_id: int,
     user_id: int,
     speaker_mapping: Dict[str, str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
@@ -320,7 +302,7 @@ async def show_mapping_confirmation(
         chat_id: ID чата
         user_id: ID пользователя
         speaker_mapping: Текущее сопоставление
-        diarization_data: Данные диаризации
+        diarization: Диаризация
         participants: Список участников
         unmapped_speakers: Список несопоставленных спикеров
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
@@ -333,7 +315,7 @@ async def show_mapping_confirmation(
         # Формируем текст сообщения
         message_text = format_mapping_message(
             speaker_mapping,
-            diarization_data,
+            diarization,
             participants,
             unmapped_speakers,
             speakers_text=speakers_text,
@@ -343,7 +325,7 @@ async def show_mapping_confirmation(
         # Создаем клавиатуру
         keyboard = create_mapping_keyboard(
             speaker_mapping,
-            diarization_data,
+            diarization,
             participants,
             user_id
         )
@@ -364,7 +346,7 @@ async def show_mapping_confirmation(
             # Создаем упрощенную версию без Markdown разметки
             simple_text = _format_simple_mapping_message(
                 speaker_mapping,
-                diarization_data,
+                diarization,
                 unmapped_speakers
             )
             
@@ -398,13 +380,13 @@ async def show_mapping_confirmation(
         try:
             simple_text = _format_simple_mapping_message(
                 speaker_mapping,
-                diarization_data,
+                diarization,
                 unmapped_speakers
             )
             
             keyboard = create_mapping_keyboard(
                 speaker_mapping,
-                diarization_data,
+                diarization,
                 participants,
                 user_id
             )
@@ -429,7 +411,7 @@ async def show_mapping_confirmation(
 async def update_mapping_message(
     message: Message,
     speaker_mapping: Dict[str, str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     user_id: int,
     current_editing_speaker: Optional[str] = None,
@@ -443,7 +425,7 @@ async def update_mapping_message(
     Args:
         message: Сообщение для обновления
         speaker_mapping: Обновленное сопоставление
-        diarization_data: Данные диаризации
+        diarization: Диаризация
         participants: Список участников
         user_id: ID пользователя
         current_editing_speaker: ID спикера, для которого показываем выбор
@@ -459,7 +441,7 @@ async def update_mapping_message(
 
         message_text = format_mapping_message(
             speaker_mapping,
-            diarization_data,
+            diarization,
             participants,
             unmapped_speakers,
             speakers_text=speakers_text,
@@ -468,7 +450,7 @@ async def update_mapping_message(
         
         keyboard = create_mapping_keyboard(
             speaker_mapping,
-            diarization_data,
+            diarization,
             participants,
             user_id,
             current_editing_speaker

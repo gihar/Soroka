@@ -56,9 +56,6 @@ def _text_result(transcription: str, compression_info: dict) -> TranscriptionRes
     return TranscriptionResult(
         transcription=transcription,
         diarization=None,
-        speakers_text={},
-        formatted_transcript="",
-        speakers_summary="",
         compression_info=compression_info or dict(_EMPTY_COMPRESSION),
     )
 
