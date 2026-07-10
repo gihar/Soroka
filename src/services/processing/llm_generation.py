@@ -114,11 +114,19 @@ class LLMGenerationService:
             if settings.enable_protocol_validation:
                 logger.info("Запуск валидации протокола")
 
+                # Итоговое сопоставление, использованное генератором (включая
+                # выведенное на этапе анализа при пропуске подтверждения);
+                # при его отсутствии — сопоставление из запроса.
+                effective_speaker_mapping = (
+                    llm_result_data.get('_speaker_mapping') or request.speaker_mapping
+                )
+
                 validation_result = protocol_validator.calculate_quality_score(
                     protocol=llm_result_data,
                     transcription=transcription_result.transcription,
                     template_variables=template_variables,
                     diarization_data=transcription_result.diarization,
+                    speaker_mapping=effective_speaker_mapping,
                 )
 
                 logger.info(
