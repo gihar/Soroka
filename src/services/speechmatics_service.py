@@ -254,8 +254,8 @@ class SpeechmaticsService:
         """Обработать результат транскрипции от Speechmatics.
 
         При включённой диаризации строит «Диаризацию» из своих нативных
-        сегментов и кладёт её единый to_dict в поле, а top-level — из свойств
-        того же объекта (как deepgram). Без диаризации формат — сырой текст.
+        сегментов и кладёт сам объект в поле результата (как deepgram);
+        производные читаются из его свойств. Без диаризации — только сырой текст.
         """
 
         transcription_text = ""
@@ -281,20 +281,14 @@ class SpeechmaticsService:
             diarization = self._build_diarization(words_with_speakers)
             return TranscriptionResult(
                 transcription=transcription_text,
-                diarization=diarization.to_dict(),
-                speakers_text=diarization.speakers_text,
-                formatted_transcript=diarization.formatted_transcript,
-                speakers_summary=diarization.speakers_summary,
+                diarization=diarization,
                 compression_info=None,  # Speechmatics обрабатывает файлы как есть
             )
 
-        # Без диаризации: форматированный транскрипт — сырой текст
+        # Без диаризации: диаризации нет, форматированный текст выводится из сырого
         return TranscriptionResult(
             transcription=transcription_text,
             diarization=None,
-            speakers_text={},
-            formatted_transcript=transcription_text,
-            speakers_summary="",
             compression_info=None,  # Speechmatics обрабатывает файлы как есть
         )
     

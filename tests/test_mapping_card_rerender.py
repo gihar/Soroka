@@ -18,6 +18,7 @@ sys.path.insert(0, _root)
 # imported via handlers.
 sys.path.insert(0, os.path.join(_root, "src"))
 
+from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.models.processing import ProcessingRequest, TranscriptionResult  # noqa: E402
 from src.performance.metrics import ProcessingMetrics  # noqa: E402
 from src.services.mapping_session import MappingSession  # noqa: E402
@@ -30,15 +31,11 @@ def _session(speakers_with_audio):
     )
     transcription = TranscriptionResult(
         transcription="текст",
-        diarization={
-            "speakers": ["SPEAKER_1", "SPEAKER_2"],
-            "segments": [
-                {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "цитата первого"},
-                {"start": 6.0, "end": 9.0, "speaker": "SPEAKER_2", "text": "цитата второго"},
-            ],
-        },
-        speakers_text={"SPEAKER_1": "цитата первого", "SPEAKER_2": "цитата второго"},
-        formatted_transcript="...", speakers_summary="2 спикера", compression_info=None,
+        diarization=Diarization(segments=[
+            Segment(start=0.0, end=5.0, speaker="SPEAKER_1", text="цитата первого"),
+            Segment(start=6.0, end=9.0, speaker="SPEAKER_2", text="цитата второго"),
+        ]),
+        compression_info=None,
     )
     return MappingSession(
         request=request,

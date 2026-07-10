@@ -85,32 +85,17 @@ class LLMGenerationService:
                 'participants': participants_list or '',
             }
 
-            # Используем форматированную транскрипцию если доступна диаризация
-            transcription_text = transcription_result.transcription
-            if (
-                hasattr(transcription_result, 'formatted_transcript')
-                and transcription_result.formatted_transcript
-            ):
-                if transcription_result.diarization:
-                    transcription_text = transcription_result.formatted_transcript
-                    logger.info(
-                        "Используется форматированная транскрипция "
-                        "с метками SPEAKER_N для диаризации"
-                    )
-                else:
-                    logger.info(
-                        "Используется обычная транскрипция (диаризация недоступна)"
-                    )
+            # Единый фолбэк: форматированная транскрипция из диаризации либо сырая
+            transcription_text = transcription_result.best_transcript
+            if transcription_result.diarization:
+                logger.info("Используется форматированная транскрипция с метками спикеров")
             else:
-                logger.info(
-                    "Используется обычная транскрипция (formatted_transcript недоступен)"
-                )
+                logger.info("Используется обычная транскрипция (диаризация недоступна)")
 
             llm_result_data = await protocol_generator.generate(
                 preset=active_preset,
                 transcription=transcription_text,
                 template_variables=template_variables,
-                diarization_data=transcription_result.diarization,
                 participants_list=participants_list,
                 meeting_metadata=meeting_metadata,
                 speaker_mapping=request.speaker_mapping,
@@ -133,7 +118,7 @@ class LLMGenerationService:
                     protocol=llm_result_data,
                     transcription=transcription_result.transcription,
                     template_variables=template_variables,
-                    diarization_data=getattr(transcription_result, 'diarization', None),
+                    diarization_data=transcription_result.diarization,
                 )
 
                 logger.info(

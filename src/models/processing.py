@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from src.models.diarization import Diarization
+
 
 class ProcessingRequest(BaseModel):
     """Запрос на обработку файла"""
@@ -32,13 +34,29 @@ class ProcessingRequest(BaseModel):
 
 
 class TranscriptionResult(BaseModel):
-    """Результат транскрипции"""
+    """Результат транскрипции.
+
+    Диаризация — единственный владелец производных представлений (список
+    спикеров, тексты по спикерам, форматированная транскрипция, сводка): всё
+    выводится из её сегментов. Отдельных top-level дублей нет; текст для
+    LLM/сопоставления берётся через свойство ``best_transcript``.
+    """
     transcription: str = Field(..., description="Текст транскрипции")
-    diarization: Optional[Dict[str, Any]] = Field(None, description="Данные диаризации")
-    speakers_text: Dict[str, str] = Field(default_factory=dict, description="Текст по говорящим")
-    formatted_transcript: str = Field("", description="Форматированная транскрипция")
-    speakers_summary: str = Field("", description="Резюме говорящих")
+    diarization: Optional[Diarization] = Field(None, description="Диаризация записи")
     compression_info: Optional[Dict[str, Any]] = Field(None, description="Информация о сжатии файла")
+
+    @property
+    def best_transcript(self) -> str:
+        """Текст для LLM/сопоставления: формат из диаризации, иначе сырой.
+
+        Единственный на весь конвейер фолбэк «форматированная или сырая»: есть
+        диаризация с непустой форматированной транскрипцией — берём её; иначе
+        (диаризации нет либо формат пуст — сегменты без текста) — сырую
+        ``transcription``.
+        """
+        if self.diarization and self.diarization.formatted_transcript:
+            return self.diarization.formatted_transcript
+        return self.transcription
 
 
 class ProcessingResult(BaseModel):

@@ -78,6 +78,10 @@ class ProcessingHistoryService:
     def generate_result_cache_key(request, file_hash: str) -> str:
         """Генерировать ключ кэша для полного результата
 
+        Префикс несёт версию формы результата (``full_result_v2``): после
+        типизации диаризации (issue #59) старые pickle-записи хранятся под
+        ``full_result:...`` и в новую форму не регидрируются.
+
         Args:
             request: Запрос на обработку
             file_hash: SHA-256 хеш содержимого файла
@@ -98,4 +102,4 @@ class ProcessingHistoryService:
             "meeting_agenda": request.meeting_agenda,
             "project_list": request.project_list,
         }
-        return performance_cache._generate_key("full_result", key_data)
+        return performance_cache._generate_key("full_result_v2", key_data)

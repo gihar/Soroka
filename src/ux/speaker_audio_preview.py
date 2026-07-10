@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set
 from loguru import logger
 
 from src.config import settings
+from src.models.diarization import Diarization
 from src.services.audio_fragment_service import cut_voice_fragment, select_fragment_window
 from src.utils.telegram_safe import safe_send_audio, safe_send_voice
 
@@ -46,12 +47,14 @@ def _build_caption(speaker_id: str, speakers_text: Optional[Dict[str, str]]) -> 
 
 async def _prepare_clip(
     speaker_id: str,
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     temp_file_path: str,
     user_id: int,
 ) -> Optional[str]:
     """Выбрать окно и вырезать клип спикера. Возвращает путь к .ogg или None."""
-    segments = diarization_data.get("segments", [])
+    # Пробрасываем сегменты в чистый выборщик окна как dict-и — его контракт и
+    # его тесты (test_audio_fragment_service) остаются на голых сегментах.
+    segments = [s.model_dump() for s in diarization.segments] if diarization else []
     window = select_fragment_window(
         segments,
         speaker_id,
@@ -103,7 +106,7 @@ async def send_speaker_audio_previews(
     chat_id: int,
     user_id: int,
     speakers: List[str],
-    diarization_data: Dict[str, Any],
+    diarization: Optional[Diarization],
     temp_file_path: Optional[str],
     speakers_text: Optional[Dict[str, str]] = None,
 ) -> Set[str]:
@@ -125,7 +128,7 @@ async def send_speaker_audio_previews(
         # Нарезаем все клипы параллельно.
         clip_paths = await asyncio.gather(
             *[
-                _prepare_clip(speaker_id, diarization_data, temp_file_path, user_id)
+                _prepare_clip(speaker_id, diarization, temp_file_path, user_id)
                 for speaker_id in speakers
             ],
             return_exceptions=True,

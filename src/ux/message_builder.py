@@ -221,12 +221,12 @@ class MessageBuilder:
         elif result.get("transcription_result", {}).get("diarization"):
             # Если нет сопоставления, показываем информацию о количестве спикеров
             diarization = result["transcription_result"]["diarization"]
-            speakers_count = diarization.get("total_speakers", 0)
+            speakers_count = len(diarization.speakers)
             if speakers_count > 1:
                 message += f"\n👥 Участников: {speakers_count}\n"
-        
+
         message += "\n"
-        
+
         # Время обработки
         if result.get("processing_duration"):
             duration = result["processing_duration"]
@@ -275,7 +275,7 @@ class MessageBuilder:
                     message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
             elif result.get("transcription_result", {}).get("diarization"):
                 diarization = result["transcription_result"]["diarization"]
-                speakers_count = diarization.get("total_speakers", 0)
+                speakers_count = len(diarization.speakers)
                 if speakers_count > 1:
                     message += f"\n👥 Участников: {speakers_count}\n"
             

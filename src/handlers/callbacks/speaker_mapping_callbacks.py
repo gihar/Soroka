@@ -41,14 +41,15 @@ def _owner_id(callback: CallbackQuery, parts_index: int) -> Optional[int]:
 async def _show_main_view(callback: CallbackQuery, session: MappingSession,
                           user_id: int, editing_speaker: Optional[str] = None) -> None:
     """Перерисовать карточку сопоставления из типизированной сессии."""
+    diarization = session.transcription_result.diarization
     await update_mapping_message(
         callback.message,
         session.speaker_mapping,
-        session.transcription_result.diarization or {},
+        diarization,
         session.request.participants_list or [],
         user_id,
         current_editing_speaker=editing_speaker,
-        speakers_text=session.transcription_result.speakers_text,
+        speakers_text=diarization.speakers_text if diarization else None,
         speakers_with_audio=session.speakers_with_audio,
     )
 

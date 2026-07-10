@@ -1,74 +1,24 @@
-"""Формы payload диаризации по бэкендам транскрипции (обновлено для #60).
+"""Адаптеры бэкендов кладут в результат типизированную «Диаризацию» (#59).
 
-Изначально (#57) фиксировало ЧТО кладёт каждый бэкенд, пока диаризация жила на
-голых словарях. #58 ввёл единый value object «Диаризация»: локальный путь и
-deepgram стали давать ОДИН и тот же `to_dict()` с пятью ключами. #60 подключил к
-этому же контракту speechmatics: он строит «Диаризацию» из своих нативных
-сегментов, а не выбрасывает их.
+Изначально (#57/#58/#60) файл пинил переходную dict-форму диаризации на
+результате транскрипции. #59 убрал эту форму: `TranscriptionResult.diarization`
+несёт сам объект `Diarization`, top-level дублей нет. Внутренняя нормализация
+меток и вывод производных проверяются контрактом (test_diarization_contract) и
+моделью (test_diarization_model); здесь остаётся уникальное — СТЫК адаптера
+`_process_transcript_result` (сырой ответ бэкенда → TranscriptionResult):
+включённая диаризация даёт объект, выключенная — None и сырой текст.
 
-Мок не нужен — обрабатывающие методы (`to_dict`, `_process_transcript_result`)
-чистые: не ходят в сеть и не читают тяжёлый self. Инстансы сервисов создаём
-через `__new__`.
-
-Формы, закреплённые здесь:
-- локальный путь строит «Диаризацию» и кладёт её единый to_dict (пять ключей);
-- deepgram строит ту же «Диаризацию»; нормализация меток в SPEAKER_N по порядку
-  появления осталась на уровне адаптера, форма dict совпадает с локальной;
-- speechmatics (#60) строит ту же «Диаризацию» из пословных данных: dict пяти
-  ключей, метки спикеров РОДНЫЕ (S1/S2, НЕ нормализуются в SPEAKER_N), порядок
-  спикеров — по появлению, top-level поля зеркалят dict.
+Мок не нужен — методы чистые: не ходят в сеть и не читают тяжёлый self.
+Инстансы сервисов создаём через `__new__`.
 """
 
+from src.models.diarization import Diarization
 from src.services.deepgram_service import DeepgramService
-from src.services.diarization_service import build_diarization_from_segments
 from src.services.speechmatics_service import SpeechmaticsService
 
 
 # --------------------------------------------------------------------------
-# Локальный путь: whisperx/pyannote → build_diarization_from_segments → to_dict()
-# --------------------------------------------------------------------------
-
-def _local_diarization():
-    return build_diarization_from_segments([
-        {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_1", "text": "привет"},
-        {"start": 2.0, "end": 4.0, "speaker": "SPEAKER_2", "text": "здравствуй"},
-        {"start": 4.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "как дела"},
-    ])
-
-
-def test_local_to_dict_is_unified_five_key_shape():
-    """#58: локальный dict диаризации — единая форма с пятью ключами."""
-    payload = _local_diarization().to_dict()
-
-    assert set(payload.keys()) == {
-        "segments", "speakers", "total_speakers",
-        "formatted_transcript", "speakers_text",
-    }
-    assert payload["speakers"] == ["SPEAKER_1", "SPEAKER_2"]
-    assert payload["total_speakers"] == 2
-
-
-def test_local_to_dict_now_carries_formatted_and_speakers_text():
-    """#58: локальный путь СНОВА кладёт formatted_transcript/speakers_text В dict.
-
-    До #58 их держали отдельно; теперь единый to_dict несёт их наравне с deepgram,
-    поэтому dict-читатели (например промпт сопоставления) получают форматированный
-    текст и на локальном пути.
-    """
-    payload = _local_diarization().to_dict()
-
-    assert payload["formatted_transcript"] == (
-        "SPEAKER_1: привет\n\nSPEAKER_2: здравствуй\n\nSPEAKER_1: как дела"
-    )
-    # Текст спикера склеивается по всем его сегментам в порядке появления.
-    assert payload["speakers_text"] == {
-        "SPEAKER_1": "привет как дела",
-        "SPEAKER_2": "здравствуй",
-    }
-
-
-# --------------------------------------------------------------------------
-# Deepgram: _process_transcript_result → dict С formatted/speakers_text
+# Deepgram: _process_transcript_result → TranscriptionResult с объектом
 # --------------------------------------------------------------------------
 
 def _deepgram_response() -> dict:
@@ -92,64 +42,31 @@ def _process_deepgram(response, enable_diarization):
     return service._process_transcript_result(response, enable_diarization)
 
 
-def test_deepgram_dict_carries_formatted_and_speakers_text():
-    """Deepgram кладёт В dict пять ключей, включая formatted_transcript/speakers_text."""
+def test_deepgram_result_carries_diarization_object():
+    """При диаризации адаптер кладёт в поле сам `Diarization`, а не dict."""
     result = _process_deepgram(_deepgram_response(), enable_diarization=True)
 
-    assert set(result.diarization.keys()) == {
-        "segments", "speakers", "total_speakers",
-        "formatted_transcript", "speakers_text",
-    }
-
-
-def test_deepgram_labels_are_sequential_speaker_n_in_appearance_order():
-    """Сырые id спикеров (0,1) нормализуются в SPEAKER_N по порядку появления."""
-    result = _process_deepgram(_deepgram_response(), enable_diarization=True)
-    diar = result.diarization
-
-    assert diar["speakers"] == ["SPEAKER_1", "SPEAKER_2"]
-    assert diar["total_speakers"] == 2
-    # Каждый сегмент несёт speaker/start/end/text.
-    assert diar["segments"] == [
-        {"speaker": "SPEAKER_1", "start": 0.0, "end": 1.0, "text": "привет"},
-        {"speaker": "SPEAKER_2", "start": 1.0, "end": 2.5, "text": "как дела"},
-        {"speaker": "SPEAKER_1", "start": 2.5, "end": 3.2, "text": "всё хорошо"},
+    assert isinstance(result.diarization, Diarization)
+    # Сырые id (0,1) нормализованы в SPEAKER_N по порядку появления.
+    assert result.diarization.speakers == ["SPEAKER_1", "SPEAKER_2"]
+    assert [(s.speaker, s.text) for s in result.diarization.segments] == [
+        ("SPEAKER_1", "привет"),
+        ("SPEAKER_2", "как дела"),
+        ("SPEAKER_1", "всё хорошо"),
     ]
 
 
-def test_deepgram_speakers_text_accumulates_across_utterances():
-    """Реплики одного спикера склеиваются в speakers_text по порядку."""
-    result = _process_deepgram(_deepgram_response(), enable_diarization=True)
-
-    assert result.diarization["speakers_text"] == {
-        "SPEAKER_1": "привет всё хорошо",
-        "SPEAKER_2": "как дела",
-    }
-    # formatted_transcript сохраняет чередование реплик, а не «весь текст спикера».
-    assert result.diarization["formatted_transcript"] == (
-        "SPEAKER_1: привет\n\nSPEAKER_2: как дела\n\nSPEAKER_1: всё хорошо"
-    )
-
-
-def test_deepgram_top_level_mirrors_diarization_dict():
-    """top-level formatted/speakers_text заполнены теми же значениями, что в dict."""
-    result = _process_deepgram(_deepgram_response(), enable_diarization=True)
-
-    assert result.formatted_transcript == result.diarization["formatted_transcript"]
-    assert result.speakers_text == result.diarization["speakers_text"]
-
-
-def test_deepgram_without_diarization_yields_none_and_raw_formatted():
-    """Без диаризации diarization=None, formatted_transcript == сырой текст."""
+def test_deepgram_without_diarization_yields_none_and_raw_transcription():
+    """Без диаризации diarization=None; сырой текст — best_transcript."""
     result = _process_deepgram(_deepgram_response(), enable_diarization=False)
 
     assert result.diarization is None
-    assert result.formatted_transcript == "привет как дела всё хорошо"
-    assert result.speakers_text == {}
+    assert result.transcription == "привет как дела всё хорошо"
+    assert result.best_transcript == "привет как дела всё хорошо"
 
 
 # --------------------------------------------------------------------------
-# Speechmatics (#60): _process_transcript_result → dict С formatted/speakers_text
+# Speechmatics: _process_transcript_result → TranscriptionResult с объектом
 # --------------------------------------------------------------------------
 
 def _speechmatics_transcript() -> dict:
@@ -171,57 +88,22 @@ def _process_speechmatics(transcript, enable_diarization):
     return service._process_transcript_result(transcript, enable_diarization)
 
 
-def test_speechmatics_dict_carries_formatted_and_speakers_text():
-    """#60: speechmatics кладёт В dict пять ключей, а не выбрасывает диаризацию."""
+def test_speechmatics_result_carries_diarization_object_with_native_labels():
+    """Метки спикеров РОДНЫЕ (S1/S2, не SPEAKER_N), в поле — сам объект."""
     result = _process_speechmatics(_speechmatics_transcript(), enable_diarization=True)
 
-    assert set(result.diarization.keys()) == {
-        "segments", "speakers", "total_speakers",
-        "formatted_transcript", "speakers_text",
-    }
-
-
-def test_speechmatics_keeps_native_labels_and_appearance_order():
-    """Метки спикеров РОДНЫЕ (S1/S2, не SPEAKER_N), порядок — по появлению.
-
-    Смена спикера рвёт сегмент: конец предыдущего сегмента — начало слова,
-    вызвавшего смену; тайминги нативные speechmatics.
-    """
-    result = _process_speechmatics(_speechmatics_transcript(), enable_diarization=True)
-    diar = result.diarization
-
-    assert diar["speakers"] == ["S1", "S2"]
-    assert diar["total_speakers"] == 2
-    assert diar["segments"] == [
-        {"speaker": "S1", "start": 0.0, "end": 1.0, "text": "привет мир"},
-        {"speaker": "S2", "start": 1.0, "end": 1.6, "text": "ага"},
+    assert isinstance(result.diarization, Diarization)
+    assert result.diarization.speakers == ["S1", "S2"]
+    assert [(s.speaker, s.text) for s in result.diarization.segments] == [
+        ("S1", "привет мир"),
+        ("S2", "ага"),
     ]
 
 
-def test_speechmatics_speakers_text_and_formatted_from_segments():
-    """speakers_text и formatted выводятся моделью из тех же нативных сегментов."""
-    result = _process_speechmatics(_speechmatics_transcript(), enable_diarization=True)
-
-    assert result.diarization["speakers_text"] == {
-        "S1": "привет мир",
-        "S2": "ага",
-    }
-    assert result.diarization["formatted_transcript"] == "S1: привет мир\n\nS2: ага"
-
-
-def test_speechmatics_top_level_mirrors_diarization_dict():
-    """top-level formatted/speakers_text заполнены теми же значениями, что в dict."""
-    result = _process_speechmatics(_speechmatics_transcript(), enable_diarization=True)
-
-    assert result.transcription == "привет мир ага"
-    assert result.formatted_transcript == result.diarization["formatted_transcript"]
-    assert result.speakers_text == result.diarization["speakers_text"]
-
-
-def test_speechmatics_without_diarization_yields_none_and_raw_formatted():
-    """Без диаризации diarization=None, formatted == сырой текст, speakers_text пуст."""
+def test_speechmatics_without_diarization_yields_none_and_raw_transcription():
+    """Без диаризации diarization=None; сырой текст — best_transcript."""
     result = _process_speechmatics(_speechmatics_transcript(), enable_diarization=False)
 
     assert result.diarization is None
-    assert result.formatted_transcript == "привет мир ага"
-    assert result.speakers_text == {}
+    assert result.transcription == "привет мир ага"
+    assert result.best_transcript == "привет мир ага"

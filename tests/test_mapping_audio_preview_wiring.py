@@ -18,6 +18,8 @@ sys.path.insert(0, _root)
 # imported via src/ux/__init__.py.
 sys.path.insert(0, os.path.join(_root, "src"))
 
+from src.models.diarization import Diarization, Segment  # noqa: E402
+
 
 def _make_service():
     # Метод не использует self — создаём инстанс без __init__.
@@ -32,17 +34,11 @@ def _make_args():
         model_dump=lambda: {},
     )
     transcription_result = SimpleNamespace(
-        diarization={
-            "speakers": ["SPEAKER_1", "SPEAKER_2"],
-            "segments": [
-                {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_1", "text": "привет"},
-                {"start": 6.0, "end": 9.0, "speaker": "SPEAKER_2", "text": "да"},
-            ],
-        },
+        diarization=Diarization(segments=[
+            Segment(start=0.0, end=5.0, speaker="SPEAKER_1", text="привет"),
+            Segment(start=6.0, end=9.0, speaker="SPEAKER_2", text="да"),
+        ]),
         transcription="t",
-        formatted_transcript="f",
-        speakers_text={"SPEAKER_1": "привет", "SPEAKER_2": "да"},
-        speakers_summary="s",
     )
     progress_tracker = SimpleNamespace(
         update_task=None,

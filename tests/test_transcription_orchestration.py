@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.models.diarization import Diarization, Segment
 from src.models.processing import TranscriptionResult
 
 
@@ -14,11 +15,13 @@ def _partial(text="текст", diarization=None, compression=None):
     return TranscriptionResult(
         transcription=text,
         diarization=diarization,
-        speakers_text={},
-        formatted_transcript="",
-        speakers_summary="",
         compression_info=compression,
     )
+
+
+def _diar(text="реплика"):
+    """Минимальная непустая «Диаризация» — маркер «диаризация есть»."""
+    return Diarization(segments=[Segment(speaker="SPEAKER_1", text=text)])
 
 
 class FakeBackend:
@@ -77,7 +80,7 @@ async def test_mode_routes_to_its_backend(service, audio_file, monkeypatch):
     assert result.transcription == "из deepgram"
     assert deepgram.calls == 1
     assert whisper.calls == 0
-    assert result.formatted_transcript == "из deepgram"  # дефолт без диаризации
+    assert result.best_transcript == "из deepgram"  # без диаризации — сырой текст
     assert result.compression_info["compressed"] is False  # заполнен дефолтом
 
 
@@ -135,12 +138,9 @@ async def test_local_diarization_applied_once_when_backend_lacks_it(service, aud
     whisper = FakeBackend("whisper", result=_partial("текст без спикеров"))
     _wire(service, "local", {"local": whisper}, monkeypatch, diarization_enabled=True)
 
-    # #58: «Диаризация» отдаёт производные через свойства, а не методы сервиса.
+    # #59: локальная «Диаризация» кладётся в поле как есть (сам объект).
     d = MagicMock()
-    d.to_dict.return_value = {"segments": [1]}
-    d.speakers_text = {"SPEAKER_0": "..."}
     d.formatted_transcript = "SPEAKER_0: текст без спикеров"
-    d.speakers_summary = "1 спикер"
     d.speakers = ["SPEAKER_0"]
     stub = MagicMock()
     stub.diarize_file = AsyncMock(return_value=d)
@@ -149,8 +149,8 @@ async def test_local_diarization_applied_once_when_backend_lacks_it(service, aud
 
     result = await service.transcribe_with_diarization(audio_file, "ru")
 
-    assert result.diarization == {"segments": [1]}
-    assert result.formatted_transcript == "SPEAKER_0: текст без спикеров"
+    assert result.diarization is d                         # сам объект в поле
+    assert result.best_transcript == "SPEAKER_0: текст без спикеров"
     assert stub.diarize_file.await_count == 1  # ровно один раз
 
 
@@ -159,9 +159,8 @@ async def test_native_diarization_not_redone(service, audio_file, monkeypatch, b
     """У бэкенда со своей диаризацией (Deepgram/Speechmatics) локальная не гоняется."""
     import src.services.transcription_service as ts_module
 
-    backend = FakeBackend(backend_name, result=_partial(
-        "текст", diarization={"segments": [2]},
-    ))
+    native = _diar("текст")
+    backend = FakeBackend(backend_name, result=_partial("текст", diarization=native))
     _wire(service, backend_name, {backend_name: backend, "local": FakeBackend("whisper")},
           monkeypatch, diarization_enabled=True)
 
@@ -172,7 +171,7 @@ async def test_native_diarization_not_redone(service, audio_file, monkeypatch, b
 
     result = await service.transcribe_with_diarization(audio_file, "ru")
 
-    assert result.diarization == {"segments": [2]}
+    assert result.diarization is native  # родная не переоткрыта
     stub.diarize_file.assert_not_awaited()
 
 

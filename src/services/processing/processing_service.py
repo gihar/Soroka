@@ -469,17 +469,12 @@ class ProcessingService(BaseProcessingService):
                     f"Не удалось обновить сообщение progress_tracker: {e}"
                 )
 
-            # Получаем список несопоставленных спикеров
-            all_speakers = transcription_result.diarization.get('speakers', [])
-            if not all_speakers:
-                segments = transcription_result.diarization.get('segments', [])
-                all_speakers = sorted(
-                    set(s.get('speaker') for s in segments if s.get('speaker'))
-                )
+            # Получаем список несопоставленных спикеров (порядок — по появлению)
+            all_speakers = transcription_result.diarization.speakers
             mapped_speakers = set(speaker_mapping.keys())
             unmapped_speakers = [s for s in all_speakers if s not in mapped_speakers]
 
-            speakers_text = transcription_result.speakers_text
+            speakers_text = transcription_result.diarization.speakers_text
 
             # Фрагменты записи уходят ДО карточки: по факту доставки решаем,
             # кому в карточке нужна текстовая цитата (цитата спикера показывается
@@ -493,7 +488,7 @@ class ProcessingService(BaseProcessingService):
                     chat_id=progress_tracker.chat_id,
                     user_id=request.user_id,
                     speakers=all_speakers,
-                    diarization_data=transcription_result.diarization,
+                    diarization=transcription_result.diarization,
                     temp_file_path=temp_file_path,
                     speakers_text=speakers_text,
                 )
@@ -519,7 +514,7 @@ class ProcessingService(BaseProcessingService):
                 chat_id=progress_tracker.chat_id,
                 user_id=request.user_id,
                 speaker_mapping=speaker_mapping,
-                diarization_data=transcription_result.diarization,
+                diarization=transcription_result.diarization,
                 participants=request.participants_list,
                 unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
                 speakers_text=speakers_text,
@@ -902,12 +897,10 @@ class ProcessingService(BaseProcessingService):
                 hasattr(transcription_result, 'diarization')
                 and transcription_result.diarization
             ):
-                diarization_data = transcription_result.diarization
-                if isinstance(diarization_data, dict):
-                    processing_metrics.speakers_count = diarization_data.get(
-                        'total_speakers', 0
-                    )
-                    processing_metrics.diarization_duration = 5.0
+                processing_metrics.speakers_count = len(
+                    transcription_result.diarization.speakers
+                )
+                processing_metrics.diarization_duration = 5.0
 
         # Этап предобработки текста транскрипции
         if (
@@ -917,16 +910,15 @@ class ProcessingService(BaseProcessingService):
             logger.info("Применение предобработки текста")
             preprocessor = get_preprocessor(request.language)
 
+            # Предобрабатываем сырую транскрипцию. Форматированный текст —
+            # производное диаризации (выводится из сегментов), отдельно его не
+            # чистим: он и раньше не доходил до LLM (двухэтапная генерация брала
+            # формат из самой диаризации).
             preprocessed = preprocessor.preprocess(
                 text=transcription_result.transcription,
-                formatted_transcript=getattr(
-                    transcription_result, 'formatted_transcript', None
-                ),
             )
 
             transcription_result.transcription = preprocessed['cleaned_text']
-            if preprocessed['cleaned_formatted']:
-                transcription_result.formatted_transcript = preprocessed['cleaned_formatted']
 
             logger.info(
                 f"Предобработка завершена: сокращение на "

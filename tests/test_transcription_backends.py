@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.models.diarization import Diarization, Segment
 from src.models.processing import TranscriptionResult
 
 
@@ -90,10 +91,7 @@ async def test_leopard_backend_delegates_and_checks_key(service, monkeypatch):
 def _native_result(text="текст с диаризацией"):
     return TranscriptionResult(
         transcription=text,
-        diarization={"segments": [1]},
-        speakers_text={"SPEAKER_0": "..."},
-        formatted_transcript=f"SPEAKER_0: {text}",
-        speakers_summary="1 спикер",
+        diarization=Diarization(segments=[Segment(speaker="SPEAKER_0", text=text)]),
         compression_info=None,
     )
 
@@ -115,7 +113,8 @@ async def test_speechmatics_backend_returns_native_diarization(service, monkeypa
 
     result = await backend.transcribe("f.mp3", "ru")
 
-    assert result.diarization == {"segments": [1]}       # родная диаризация внутри
+    assert isinstance(result.diarization, Diarization)   # родная диаризация внутри
+    assert result.diarization.speakers == ["SPEAKER_0"]
     assert result.compression_info == compression        # compression протянут
     assert stub.transcribe_file.call_args.kwargs["enable_diarization"] is True
 
