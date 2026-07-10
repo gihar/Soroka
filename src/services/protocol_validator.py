@@ -182,42 +182,121 @@ class ProtocolValidator:
     def check_diarization_usage(
         self,
         protocol: Dict[str, Any],
-        diarization_data: Optional[Diarization]
+        diarization: Optional[Diarization],
+        speaker_mapping: Optional[Dict[str, str]] = None
     ) -> tuple[float, List[str]]:
         """
         Проверить, насколько хорошо использованы данные диаризации
 
         Args:
             protocol: Сгенерированный протокол
-            diarization_data: Диаризация
+            diarization: Диаризация
+            speaker_mapping: Сопоставление спикеров с участниками (метка → имя)
 
         Returns:
             (оценка использования диаризации, список рекомендаций)
 
-        Сигнатура мигрирована на типизированную «Диаризацию», но семантика
-        остаётся мёртвой: проверка искала метки вида SPEAKER_N в тексте
-        протокола, тогда как сопоставленный протокол несёт реальные имена
-        участников — старая логика штрафовала бы корректные протоколы. Оживление
-        (правильная семантика поверх типизированной диаризации) — issue #61.
+        Для сопоставленного спикера ищем в тексте протокола ИМЯ участника
+        (промпт генерации велит заменять метки именами), для несопоставленного —
+        саму метку спикера как есть (SPEAKER_N у local/deepgram, S1 у
+        speechmatics). Пустое сопоставление = все спикеры несопоставлены.
         """
-        return 1.0, []
+        if not diarization or not diarization.speakers_text:
+            # Нет данных диаризации — оценка не применима
+            return 1.0, []
+
+        mapping = speaker_mapping or {}
+        speakers = list(diarization.speakers_text.keys())
+        protocol_text = self._protocol_content_text(protocol).lower()
+
+        # Упоминание спикеров: имя для сопоставленных, метка — для остальных
+        suggestions: List[str] = []
+        usage_scores: List[float] = []
+
+        mentioned_speakers = 0
+        for speaker in speakers:
+            needle = mapping.get(speaker) or speaker
+            if needle.lower() in protocol_text:
+                mentioned_speakers += 1
+
+        speaker_mention_ratio = mentioned_speakers / len(speakers)
+        usage_scores.append(speaker_mention_ratio)
+
+        if speaker_mention_ratio < 0.5:
+            suggestions.append(
+                f"Использованы данные только о {mentioned_speakers} из {len(speakers)} спикеров"
+            )
+
+        # Ответственные в задачах: явный маркер/метка (fallback для
+        # несопоставленных) либо имя любого сопоставленного участника
+        if self._has_responsible_info(protocol, mapping):
+            usage_scores.append(1.0)
+        else:
+            suggestions.append(
+                "Не указаны ответственные за задачи из числа спикеров"
+            )
+            usage_scores.append(0.5)
+
+        diarization_usage = sum(usage_scores) / len(usage_scores)
+
+        return diarization_usage, suggestions
+
+    def _protocol_content_text(self, protocol: Dict[str, Any]) -> str:
+        """Склеить содержательные поля протокола, отбросив служебные (_meeting_type,
+        _speaker_mapping и пр.): их значения несут метки/имена и исказили бы проверку."""
+        return " ".join(
+            str(value)
+            for key, value in protocol.items()
+            if not key.startswith("_")
+        )
+
+    def _has_responsible_info(
+        self,
+        protocol: Dict[str, Any],
+        mapping: Dict[str, str]
+    ) -> bool:
+        """Есть ли в полях задач указание ответственного.
+
+        Свидетельство — явный маркер/метка спикера (жёсткий регекс, fallback для
+        несопоставленных) либо упоминание имени любого сопоставленного участника.
+        """
+        action_fields = ['action_items', 'tasks', 'поручения', 'задачи']
+        mapped_names = [name for name in mapping.values() if name]
+
+        for field in action_fields:
+            value = protocol.get(field)
+            if not isinstance(value, str):
+                continue
+            if re.search(
+                r'ответственный|responsible|assignee|спикер \d+|speaker \d+',
+                value,
+                re.IGNORECASE,
+            ):
+                return True
+            value_lower = value.lower()
+            if any(name.lower() in value_lower for name in mapped_names):
+                return True
+
+        return False
     
     def calculate_quality_score(
         self,
         protocol: Dict[str, Any],
         transcription: str,
         template_variables: Dict[str, str],
-        diarization_data: Optional[Diarization] = None
+        diarization_data: Optional[Diarization] = None,
+        speaker_mapping: Optional[Dict[str, str]] = None
     ) -> ValidationResult:
         """
         Вычислить общую оценку качества протокола
-        
+
         Args:
             protocol: Сгенерированный протокол
             transcription: Исходная транскрипция
             template_variables: Ожидаемые переменные шаблона
             diarization_data: Данные диаризации (опционально)
-            
+            speaker_mapping: Сопоставление спикеров с участниками (опционально)
+
         Returns:
             Результат валидации с оценками и рекомендациями
         """
@@ -233,7 +312,9 @@ class ProtocolValidator:
         factual_accuracy, fact_warnings = self.check_factual_accuracy(protocol, transcription)
         
         # 4. Проверка использования диаризации
-        diarization_usage, diar_suggestions = self.check_diarization_usage(protocol, diarization_data)
+        diarization_usage, diar_suggestions = self.check_diarization_usage(
+            protocol, diarization_data, speaker_mapping
+        )
         
         # Объединяем все предупреждения и рекомендации
         all_warnings = struct_warnings + fact_warnings
