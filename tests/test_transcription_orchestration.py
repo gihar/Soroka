@@ -154,14 +154,15 @@ async def test_local_diarization_applied_once_when_backend_lacks_it(service, aud
     assert stub.diarize_file.await_count == 1  # ровно один раз
 
 
-async def test_native_diarization_not_redone(service, audio_file, monkeypatch):
-    """Нормализация: у Deepgram/Speechmatics своя диаризация — локальная не гоняется."""
+@pytest.mark.parametrize("backend_name", ["deepgram", "speechmatics"])
+async def test_native_diarization_not_redone(service, audio_file, monkeypatch, backend_name):
+    """У бэкенда со своей диаризацией (Deepgram/Speechmatics) локальная не гоняется."""
     import src.services.transcription_service as ts_module
 
-    deepgram = FakeBackend("deepgram", result=_partial(
+    backend = FakeBackend(backend_name, result=_partial(
         "текст", diarization={"segments": [2]},
     ))
-    _wire(service, "deepgram", {"deepgram": deepgram, "local": FakeBackend("whisper")},
+    _wire(service, backend_name, {backend_name: backend, "local": FakeBackend("whisper")},
           monkeypatch, diarization_enabled=True)
 
     stub = MagicMock()

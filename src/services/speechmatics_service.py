@@ -11,8 +11,8 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions.processing import CloudTranscriptionError, SpeechmaticsAPIError
+from src.models.diarization import Diarization, Segment
 from src.models.processing import TranscriptionResult
-from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
 try:
     import ssl
@@ -208,109 +208,95 @@ class SpeechmaticsService:
             
             raise CloudTranscriptionError(str(e), file_path, "speechmatics")
     
+    def _build_diarization(self, words_with_speakers: list) -> Diarization:
+        """Построить «Диаризацию» из пословных данных speechmatics.
+
+        Смена спикера рвёт сегмент; тайминги — нативные speechmatics. Метки
+        спикеров РОДНЫЕ (S1, S2) и НЕ нормализуются в SPEAKER_N: они уже
+        стабильны и доходят до протоколов как есть. Всё производное (тексты,
+        форматирование, сводка) выводит модель.
+
+        ВАЖНО: последовательность реплик сохраняется — сегмент образуют только
+        подряд идущие слова одного спикера, чтобы LLM понимал чередование
+        участников.
+        """
+        segments: list[Segment] = []
+        current_speaker = None
+        current_words: list[str] = []
+        current_start = None
+
+        for item in words_with_speakers:
+            if item["speaker"] != current_speaker:
+                if current_speaker is not None and current_words:
+                    segments.append(Segment(
+                        speaker=current_speaker,
+                        text=" ".join(current_words),
+                        start=current_start,
+                        end=item["start_time"],
+                    ))
+                current_speaker = item["speaker"]
+                current_words = [item["word"]]
+                current_start = item["start_time"]
+            else:
+                current_words.append(item["word"])
+
+        if current_speaker is not None and current_words:
+            segments.append(Segment(
+                speaker=current_speaker,
+                text=" ".join(current_words),
+                start=current_start,
+                end=words_with_speakers[-1]["end_time"] if words_with_speakers else 0,
+            ))
+
+        return Diarization(segments=segments)
+
     def _process_transcript_result(self, transcript: Dict[str, Any], enable_diarization: bool = False) -> TranscriptionResult:
+        """Обработать результат транскрипции от Speechmatics.
+
+        При включённой диаризации строит «Диаризацию» из своих нативных
+        сегментов и кладёт её единый to_dict в поле, а top-level — из свойств
+        того же объекта (как deepgram). Без диаризации формат — сырой текст.
         """
-        Обработать результат транскрипции от Speechmatics
-        
-        ВАЖНО: При создании formatted_transcript сохраняется последовательность реплик.
-        Группируются только последовательные слова одного спикера, чтобы LLM
-        мог понять динамику диалога и чередование участников.
-        
-        Формат: speaker1: текст\n\nspeaker2: текст\n\nspeaker1: текст
-        (не: speaker1: весь текст\n\nspeaker2: весь текст)
-        """
-        
+
         transcription_text = ""
-        segments = []
-        speakers_text = {}
-        formatted_transcript = ""
-        speakers_summary = ""
-        
+        words_with_speakers = []
+
         if "results" in transcript:
-            # Шаг 1: Собираем слова с информацией о спикерах
-            words_with_speakers = []
-            
             for result in transcript["results"]:
                 if result.get("type") == "word" and "alternatives" in result:
                     word = result["alternatives"][0]["content"]
                     transcription_text += word + " "
-                    
+
                     if enable_diarization and "speaker" in result["alternatives"][0]:
-                        speaker = result["alternatives"][0]["speaker"]
-                        start_time = result.get("start_time", 0)
-                        end_time = result.get("end_time", 0)
                         words_with_speakers.append({
                             "word": word,
-                            "speaker": speaker,
-                            "start_time": start_time,
-                            "end_time": end_time
+                            "speaker": result["alternatives"][0]["speaker"],
+                            "start_time": result.get("start_time", 0),
+                            "end_time": result.get("end_time", 0),
                         })
-            
+
             transcription_text = transcription_text.strip()
-            
-            # Шаг 2: Создаем сегменты на основе смены спикера
-            if enable_diarization and words_with_speakers:
-                current_speaker = None
-                current_words = []
-                current_start = None
-                
-                for item in words_with_speakers:
-                    if item["speaker"] != current_speaker:
-                        # Сохраняем предыдущий сегмент
-                        if current_speaker and current_words:
-                            text = " ".join(current_words)
-                            segments.append({
-                                "speaker": current_speaker,
-                                "text": text,
-                                "start": current_start,
-                                "end": item["start_time"]
-                            })
-                        
-                        # Начинаем новый сегмент
-                        current_speaker = item["speaker"]
-                        current_words = [item["word"]]
-                        current_start = item["start_time"]
-                    else:
-                        current_words.append(item["word"])
-                
-                # Добавляем последний сегмент
-                if current_speaker and current_words:
-                    text = " ".join(current_words)
-                    segments.append({
-                        "speaker": current_speaker,
-                        "text": text,
-                        "start": current_start,
-                        "end": words_with_speakers[-1]["end_time"] if words_with_speakers else 0
-                    })
-                
-                # Шаг 3: Создаем форматированную транскрипцию с сохранением последовательности
-                formatted_transcript = format_transcript_with_speaker_sequence(segments)
-                
-                # Создаем speakers_text (весь текст каждого спикера)
-                speakers_list = list(set(s["speaker"] for s in segments))
-                for speaker in speakers_list:
-                    speaker_segments = [s["text"] for s in segments if s["speaker"] == speaker]
-                    speakers_text[speaker] = " ".join(speaker_segments)
-                
-                # Создаем сводку о говорящих
-                speakers_summary = f"Общее количество говорящих: {len(speakers_list)}\n\n"
-                for speaker in speakers_list:
-                    word_count = len(speakers_text[speaker].split())
-                    speakers_summary += f"{speaker}: {word_count} слов\n"
-            else:
-                formatted_transcript = transcription_text
-        
-        # Создаем объект результата
-        result = TranscriptionResult(
+
+        if enable_diarization and words_with_speakers:
+            diarization = self._build_diarization(words_with_speakers)
+            return TranscriptionResult(
+                transcription=transcription_text,
+                diarization=diarization.to_dict(),
+                speakers_text=diarization.speakers_text,
+                formatted_transcript=diarization.formatted_transcript,
+                speakers_summary=diarization.speakers_summary,
+                compression_info=None,  # Speechmatics обрабатывает файлы как есть
+            )
+
+        # Без диаризации: форматированный транскрипт — сырой текст
+        return TranscriptionResult(
             transcription=transcription_text,
-            diarization=None,  # Speechmatics не возвращает отдельные данные диаризации
-            speakers_text=speakers_text,
-            formatted_transcript=formatted_transcript,
-            speakers_summary=speakers_summary,
-            compression_info=None  # Speechmatics обрабатывает файлы как есть
+            diarization=None,
+            speakers_text={},
+            formatted_transcript=transcription_text,
+            speakers_summary="",
+            compression_info=None,  # Speechmatics обрабатывает файлы как есть
         )
-        
-        return result
     
     async def transcribe_with_diarization(self, file_path: str, language: str = None) -> TranscriptionResult:
         """Транскрибировать файл с диаризацией через Speechmatics"""
