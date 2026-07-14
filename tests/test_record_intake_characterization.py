@@ -11,7 +11,8 @@
 
 Точка 2: _process_url — ссылка Google Drive / Яндекс.Диск → проверка
     поддержки, показ имени и размера, скачивание, сохранение внешней
-    записи в состояние и показ меню участников (текущее поведение).
+    записи в состояние и показ меню действий с записью (после #71 — то же
+    меню «📎 Файл получен», что и для файла; раньше открывалось меню участников).
 """
 
 import os
@@ -260,14 +261,19 @@ def _patch_url_flow(monkeypatch, fake_service):
 
 
 @pytest.mark.asyncio
-async def test_supported_link_downloads_and_shows_participants_menu(monkeypatch):
-    """Поддерживаемая ссылка → скачивание, внешняя запись в состоянии, меню участников."""
+async def test_supported_link_downloads_and_shows_record_actions_menu(monkeypatch):
+    """Поддерживаемая ссылка → скачивание, внешняя запись в состоянии, меню действий с записью.
+
+    После #71 ссылка получает то же меню «📎 Файл получен», что и файл, вместо
+    прежнего немедленного меню участников — единая точка входа в обработку.
+    """
     fake = _FakeURLService()
     show_menu = _patch_url_flow(monkeypatch, fake)
 
     message = MagicMock()
     message.from_user = SimpleNamespace(id=111)
     message.chat = SimpleNamespace(id=222)
+    message.answer = AsyncMock()
     state = _fresh_state()
     url = "https://drive.google.com/file/d/abc123/view"
 
@@ -285,9 +291,15 @@ async def test_supported_link_downloads_and_shows_participants_menu(monkeypatch)
     assert data["file_url"] == url
     assert data["is_external_file"] is True
 
-    # Текущее поведение: показано меню участников (первым аргументом — само сообщение).
-    assert show_menu.await_count == 1
-    assert show_menu.call_args.args[0] is message
+    # Новое поведение: меню участников сразу НЕ открывается.
+    show_menu.assert_not_awaited()
+
+    # Показано меню действий с записью одним message.answer с двумя кнопками.
+    assert message.answer.await_count == 1
+    menu_text = message.answer.call_args.args[0]
+    assert "📎 **Файл получен**" in menu_text
+    keyboard = message.answer.call_args.kwargs["reply_markup"]
+    assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 
 
 @pytest.mark.asyncio

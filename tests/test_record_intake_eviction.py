@@ -124,6 +124,7 @@ async def _accept_link(monkeypatch, state, *, url=_DRIVE_URL,
     message = MagicMock()
     message.from_user = SimpleNamespace(id=111)
     message.chat = SimpleNamespace(id=222)
+    message.answer = AsyncMock()  # _process_url отправляет меню действий с записью (#71)
     await mh._process_url(message, url, state, MagicMock())
 
 

@@ -19,6 +19,7 @@ from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.handlers.record_state import register_new_record
 from src.exceptions.template import TemplateNotFoundError
 from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.ux.quick_actions import QuickActionsUI
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
@@ -85,25 +86,10 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             )
             
             logger.info(f"Файл сохранен в состояние: file_id={file_obj.file_id}, file_name={file_name}")
-            
-            # Show quick action menu: fast process or configure
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="🚀 Быстрая обработка",
-                    callback_data="quick_process_file"
-                )],
-                [InlineKeyboardButton(
-                    text="⚙️ Настроить",
-                    callback_data="configure_file_processing"
-                )]
-            ])
-            await message.answer(
-                "📎 **Файл получен**\n\n"
-                "🚀 **Быстрая обработка** — умный шаблон + сохранённые настройки\n"
-                "⚙️ **Настроить** — выбрать участников, шаблон, ИИ",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
+
+            # Меню действий с записью — единая точка правды для файла и ссылки
+            text, keyboard = QuickActionsUI.create_record_actions_menu()
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
@@ -635,12 +621,10 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     status_message,
                     f"✅ Файл успешно скачан: {original_filename}"
                 )
-                
-                # Показываем детальное меню добавления участников
-                from services import UserService
-                from src.handlers.participants_handlers import show_participants_menu
-                user_service = UserService()
-                await show_participants_menu(message, user_service)
+
+                # Меню действий с записью — то же, что и для файла (единая точка правды)
+                text, keyboard = QuickActionsUI.create_record_actions_menu()
+                await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
                 
             except FileSizeError:
                 from src.config import settings
