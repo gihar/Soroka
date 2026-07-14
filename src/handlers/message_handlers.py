@@ -16,6 +16,7 @@ from loguru import logger
 from services import FileService, ProcessingService, TemplateService
 from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
+from src.handlers.record_state import register_new_record
 from src.exceptions.template import TemplateNotFoundError
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 
@@ -75,10 +76,12 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 )
                 return
             
-            # Сохраняем информацию о файле в состоянии
-            await state.update_data(
+            # Сохраняем информацию о файле в состоянии, вытесняя прежнюю запись
+            await register_new_record(
+                state,
                 file_id=file_obj.file_id,
-                file_name=file_name
+                file_name=file_name,
+                is_external_file=False,
             )
             
             logger.info(f"Файл сохранен в состояние: file_id={file_obj.file_id}, file_name={file_name}")
@@ -619,12 +622,13 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 temp_path = await url_service.download_file(direct_url, filename)
                 original_filename = filename
                 
-                # Сохраняем информацию в состоянии
-                await state.update_data(
+                # Сохраняем информацию в состоянии, вытесняя прежнюю запись
+                await register_new_record(
+                    state,
                     file_path=temp_path,
                     file_name=original_filename,
                     file_url=url,  # Сохраняем оригинальный URL для кеширования
-                    is_external_file=True  # Флаг для отличия от Telegram файлов
+                    is_external_file=True,  # Флаг для отличия от Telegram файлов
                 )
                 
                 await safe_edit_text(
