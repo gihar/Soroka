@@ -9,10 +9,11 @@
     Telegram-файл (file_id) и внешняя запись (file_path + is_external_file).
 
 Точка 4: configure_file_processing_callback — «⚙️ Настроить» редактирует
-    сообщение и показывает меню участников. Известный баг (чинится позже):
-    меню строится по callback.message.from_user.id — это ID БОТА, поэтому
-    кнопка «Использовать сохранённый» не появляется, даже если у реального
-    пользователя сохранён список.
+    сообщение и показывает меню участников. Меню строится по владельцу
+    диалога (callback.from_user.id), поэтому кнопка «Использовать
+    сохранённый» появляется, если у реального пользователя сохранён список
+    (#69). Ранее меню ошибочно строилось по callback.message.from_user.id —
+    ID БОТА, и кнопка молча терялась.
 """
 
 import asyncio
@@ -244,15 +245,15 @@ async def test_configure_shows_participants_menu(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_configure_looks_up_bot_id_hides_saved_button(monkeypatch):
-    """Баг текущего кода: поиск идёт по ID бота, поэтому «Использовать сохранённый» не появляется."""
+async def test_configure_with_saved_list_shows_saved_button(monkeypatch):
+    """#69: «Настроить» ищет список по владельцу диалога, поэтому кнопка сохранённого видна."""
     monkeypatch.setattr(pc, "safe_edit_text", AsyncMock())
     real_user_id = 111
     bot_id = 999
     user_service = _MapUserService({
         # У реального пользователя список ЕСТЬ…
         real_user_id: SimpleNamespace(saved_participants='[{"name": "Иван Иванов"}]'),
-        # …но callback.message.from_user.id — это бот, у него ничего нет.
+        # …а callback.message.from_user.id — это бот, у него ничего нет.
         bot_id: SimpleNamespace(saved_participants=None),
     })
     router = pc.setup_processing_callbacks(user_service, MagicMock(), MagicMock())
@@ -261,10 +262,34 @@ async def test_configure_looks_up_bot_id_hides_saved_button(monkeypatch):
 
     await handler(callback)
 
-    # Поиск выполнен по ID бота, а не по реальному пользователю.
-    assert user_service.calls == [bot_id]
+    # Поиск выполнен по реальному пользователю, а не по ID бота.
+    assert user_service.calls == [real_user_id]
 
-    # Кнопка сохранённого списка отсутствует — виден только ввод и пропуск.
+    # Кнопка сохранённого списка присутствует рядом с вводом и пропуском.
+    keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
+    data = _callback_data_set(keyboard)
+    assert "use_saved_participants" in data
+    assert data == {"use_saved_participants", "input_new_participants", "skip_participants"}
+
+
+@pytest.mark.asyncio
+async def test_configure_without_saved_list_hides_saved_button(monkeypatch):
+    """#69: без сохранённого списка меню участников не показывает кнопку сохранённого."""
+    monkeypatch.setattr(pc, "safe_edit_text", AsyncMock())
+    real_user_id = 111
+    bot_id = 999
+    user_service = _MapUserService({
+        real_user_id: SimpleNamespace(saved_participants=None),
+        bot_id: SimpleNamespace(saved_participants=None),
+    })
+    router = pc.setup_processing_callbacks(user_service, MagicMock(), MagicMock())
+    handler = _find_callback(router, "configure_file_processing_callback")
+    callback = _make_callback(user_id=real_user_id, message_from_user_id=bot_id)
+
+    await handler(callback)
+
+    # Поиск по реальному пользователю; списка нет — кнопки нет.
+    assert user_service.calls == [real_user_id]
     keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
     data = _callback_data_set(keyboard)
     assert "use_saved_participants" not in data
