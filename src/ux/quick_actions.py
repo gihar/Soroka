@@ -55,6 +55,31 @@ class QuickActionsUI:
         )
     
     @staticmethod
+    def create_record_actions_menu() -> tuple[str, InlineKeyboardMarkup]:
+        """Меню действий с записью: единый текст и клавиатура.
+
+        Единая точка правды для обеих точек приёма записи — файла
+        (media_handler) и ссылки (_process_url). Возвращает текст «Файл
+        получен» и клавиатуру с кнопками быстрой обработки и настройки.
+        """
+        text = (
+            "📎 **Файл получен**\n\n"
+            "🚀 **Быстрая обработка** — умный шаблон + сохранённые настройки\n"
+            "⚙️ **Настроить** — выбрать участников, шаблон, ИИ"
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🚀 Быстрая обработка",
+                callback_data="quick_process_file"
+            )],
+            [InlineKeyboardButton(
+                text="⚙️ Настроить",
+                callback_data="configure_file_processing"
+            )]
+        ])
+        return text, keyboard
+
+    @staticmethod
     def create_file_actions_menu() -> InlineKeyboardMarkup:
         """Меню действий с файлом"""
         buttons = [

@@ -17,11 +17,17 @@ from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 
 
-async def show_participants_menu(message: Message, user_service: UserService):
-    """Helper-функция для показа детального меню добавления участников"""
+async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
+    """Helper-функция для показа детального меню добавления участников.
+
+    Кнопка сохранённого списка строится по владельцу диалога. При вызове из
+    колбэка message принадлежит боту, поэтому реальный ID пользователя нужно
+    передать явно через user_id (ср. real_user_id в _show_template_selection_step2).
+    """
     try:
-        # Проверяем, есть ли сохраненный список у пользователя
-        user = await user_service.get_user_by_telegram_id(message.from_user.id)
+        # Проверяем, есть ли сохраненный список у владельца диалога
+        owner_id = user_id if user_id is not None else message.from_user.id
+        user = await user_service.get_user_by_telegram_id(owner_id)
         
         keyboard_buttons = []
 
@@ -672,7 +678,8 @@ def setup_participants_handlers() -> Router:
             # Return to participants menu, keep file data intact
             await state.set_state(None)
 
-            await show_participants_menu(callback.message, user_service)
+            # callback.message принадлежит боту — передаём реального пользователя явно
+            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при завершении ввода доп. информации: {e}")
@@ -683,7 +690,8 @@ def setup_participants_handlers() -> Router:
         try:
             await callback.answer()
             await state.set_state(None)  # keep file data intact
-            await show_participants_menu(callback.message, user_service)
+            # callback.message принадлежит боту — передаём реального пользователя явно
+            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
 
         except Exception as e:
             logger.error(f"Ошибка при пропуске доп. информации: {e}")

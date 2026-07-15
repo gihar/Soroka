@@ -271,7 +271,8 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             from src.handlers.participants_handlers import show_participants_menu
             # Remove original keyboard to prevent re-triggering quick_process
             await safe_edit_text(callback.message, "⚙️ Настройка обработки...")
-            await show_participants_menu(callback.message, user_service)
+            # callback.message принадлежит боту — передаём реального пользователя явно
+            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в configure_file_processing_callback: {e}")
