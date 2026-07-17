@@ -101,9 +101,7 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
 
     try:
         input_file = FSInputFile(temp_path, filename=f"{safe_name}{suffix}")
-        await safe_send_document(
-            bot, chat_id, document=input_file, caption="📄 Протокол готов!"
-        )
+        await safe_send_document(bot, chat_id, document=input_file)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -156,7 +154,13 @@ async def send_result_to_user(
 
         if not result.protocol_text:
             logger.warning("protocol_text пустой или None")
-            await safe_send_message(bot, chat_id, text="❌ Протокол не был сгенерирован")
+            await safe_send_message(
+                bot, chat_id,
+                text=(
+                    "❌ Протокол не получился: модель не вернула текст.\n"
+                    "Отправьте запись ещё раз — обычно повторная попытка помогает."
+                ),
+            )
             return False
 
         if output_mode in ("file", "pdf"):
@@ -179,7 +183,11 @@ async def send_result_to_user(
                 logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
         try:
             await safe_send_message(
-                bot, chat_id, text=f"❌ Ошибка при отправке результата: {str(e)}"
+                bot, chat_id,
+                text=(
+                    "❌ Не удалось отправить протокол.\n"
+                    "Попробуйте ещё раз или выберите другой формат вывода в /settings."
+                ),
             )
         except Exception as send_error:
             logger.error(f"Не удалось отправить сообщение об ошибке: {send_error}")

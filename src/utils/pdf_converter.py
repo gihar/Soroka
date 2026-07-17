@@ -154,10 +154,7 @@ def _make_header_footer(font, font_bold):
 
         canvas.setFont(font, 7)
         canvas.setFillColor(COLOR_MUTED)
-        canvas.drawString(
-            2 * cm, y_footer - 3 * mm,
-            f'Сгенерировано: Soroka Bot  |  {today}'
-        )
+        canvas.drawString(2 * cm, y_footer - 3 * mm, today)
 
         canvas.restoreState()
 
