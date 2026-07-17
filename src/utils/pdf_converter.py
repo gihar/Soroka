@@ -186,6 +186,11 @@ def _section_rule():
     )
 
 
+def _is_horizontal_rule(stripped_line: str) -> bool:
+    """Строка-линейка Markdown (---): в PDF это линия, а не текст «---»."""
+    return bool(re.match(r'^-{3,}$', stripped_line))
+
+
 _HEADING_EMOJI_RE = re.compile(
     r"^(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+"
 )
@@ -273,6 +278,10 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
             text = strip_heading_emoji(stripped[2:].strip())
             story.append(Paragraph(_format_inline(text), styles['DocTitle']))
             first_heading_seen = True
+
+        # Horizontal rule (---) → section line, not literal dashes
+        elif _is_horizontal_rule(stripped):
+            story.append(_section_rule())
 
         # Bullet list
         elif stripped.startswith('- ') or stripped.startswith('* '):

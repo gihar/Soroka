@@ -390,7 +390,7 @@ class ProtocolFormatter:
         protocol_parts = []
         used_sections = []
 
-        title = llm_result.get('meeting_title', 'Протокол встречи').strip()
+        title = llm_result.get('meeting_title', '').strip() or 'Протокол встречи'
         protocol_parts.append(f"# {title}")
 
         date = llm_result.get('meeting_date', llm_result.get('date', '')).strip()
