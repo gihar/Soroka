@@ -2,7 +2,8 @@
 
 Covers the small, pure units introduced/extracted during the refactor:
 - ProcessingMetrics.to_dict()/from_dict() round-trip (P4)
-- result_sender pure helpers: _split_protocol_text / _build_result_dict (P2)
+- result_sender pure helpers: _build_result_dict (P2); сплит протокола по секциям
+  тестируется в test_protocol_split_sections.py
 - MappingStateCache save/load round-trip incl. task_id (P3)
 - LLMGenerationService model-name resolution (P6a)
 """
@@ -75,25 +76,6 @@ def test_processing_metrics_from_dict_empty_uses_defaults():
 # ---------------------------------------------------------------------------
 # result_sender pure helpers (P2)
 # ---------------------------------------------------------------------------
-
-def test_split_protocol_text_short_returns_single_part():
-    from src.services.result_sender import _split_protocol_text
-
-    text = "line1\nline2"
-    assert _split_protocol_text(text, max_length=100) == [text]
-
-
-def test_split_protocol_text_long_splits_and_preserves_lines():
-    from src.services.result_sender import _split_protocol_text
-
-    text = "\n".join(f"line{i}" for i in range(100))
-    parts = _split_protocol_text(text, max_length=30)
-
-    assert len(parts) > 1
-    assert all(len(p) <= 30 for p in parts)
-    assert "line0" in parts[0]
-    assert "line99" in parts[-1]
-
 
 def test_build_result_dict_prefers_model_used():
     from src.models.processing import ProcessingRequest, ProcessingResult, TranscriptionResult

@@ -175,6 +175,24 @@ def _section_rule():
     )
 
 
+_HEADING_EMOJI_RE = re.compile(
+    r"^(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+"
+)
+
+
+def strip_heading_emoji(heading: str) -> str:
+    """Снять ведущие эмодзи-метки секции: PDF-шрифты не содержат их глифов."""
+    return _HEADING_EMOJI_RE.sub("", heading, count=1).strip()
+
+
+_LABEL_EMOJI_RE = re.compile(r"^(\*\*)\s*(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+")
+
+
+def strip_label_emoji(line: str) -> str:
+    """Снять эмодзи-метку из жирной метки шапки («**👥 Участники:**»)."""
+    return _LABEL_EMOJI_RE.sub(r"\1", line, count=1)
+
+
 def _format_inline(text):
     """Escape XML special chars, then convert markdown bold/italic to ReportLab tags."""
     from xml.sax.saxutils import escape
@@ -230,18 +248,18 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Headings: check most-specific first (### before ## before #)
         if stripped.startswith('### '):
-            text = stripped[4:].strip()
+            text = strip_heading_emoji(stripped[4:].strip())
             story.append(Paragraph(_format_inline(text), styles['SubSection']))
 
         elif stripped.startswith('## '):
-            text = stripped[3:].strip()
+            text = strip_heading_emoji(stripped[3:].strip())
             if first_heading_seen:
                 story.append(_section_rule())
             story.append(Paragraph(_format_inline(text), styles['Section']))
             first_heading_seen = True
 
         elif stripped.startswith('# '):
-            text = stripped[2:].strip()
+            text = strip_heading_emoji(stripped[2:].strip())
             story.append(Paragraph(_format_inline(text), styles['DocTitle']))
             first_heading_seen = True
 
@@ -259,7 +277,7 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Regular text
         else:
-            story.append(Paragraph(_format_inline(stripped), styles['Body']))
+            story.append(Paragraph(_format_inline(strip_label_emoji(stripped)), styles['Body']))
 
     doc.build(story)
 

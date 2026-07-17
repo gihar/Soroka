@@ -16,6 +16,7 @@ from aiogram.types import FSInputFile
 from loguru import logger
 
 from src.models.processing import ProcessingRequest, ProcessingResult
+from src.services.protocol_render import render_protocol_messages
 from src.utils.telegram_safe import safe_send_document, safe_send_message
 
 MAX_MESSAGE_LENGTH = 4000
@@ -48,20 +49,6 @@ def _build_result_dict(request: ProcessingRequest, result: ProcessingResult) -> 
     }
 
 
-def _split_protocol_text(protocol_text: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:
-    """Split a long protocol into message-sized parts on line boundaries."""
-    parts: list[str] = []
-    current_part = ""
-    for line in protocol_text.split("\n"):
-        if len(current_part) + len(line) + 1 <= max_length:
-            current_part += line + "\n"
-        else:
-            if current_part:
-                parts.append(current_part.strip())
-            current_part = line + "\n"
-    if current_part:
-        parts.append(current_part.strip())
-    return parts
 
 
 async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
@@ -123,15 +110,14 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
 
 
 async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> None:
-    """Send the protocol inline, splitting into parts when it exceeds the limit."""
-    if len(protocol_text) <= MAX_MESSAGE_LENGTH:
-        await safe_send_message(bot, chat_id, text=protocol_text, parse_mode="Markdown")
-        return
+    """Send the protocol inline as Telegram HTML, split on section boundaries.
 
-    parts = _split_protocol_text(protocol_text)
-    for i, part in enumerate(parts):
-        header = f"📄 **Протокол встречи** (часть {i + 1}/{len(parts)})\n\n"
-        await safe_send_message(bot, chat_id, text=header + part, parse_mode="Markdown")
+    The canonical protocol text is Markdown; legacy parse_mode="Markdown" would
+    show literal ##/** markers, so the chat channel renders it to HTML.
+    """
+    parts = render_protocol_messages(protocol_text, max_length=MAX_MESSAGE_LENGTH)
+    for part in parts:
+        await safe_send_message(bot, chat_id, text=part, parse_mode="HTML")
 
 
 async def send_result_to_user(
