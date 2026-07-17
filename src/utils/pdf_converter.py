@@ -31,10 +31,8 @@ COLOR_RULE = colors.HexColor('#bdc3c7')        # light grey for lines
 COLOR_BODY = colors.HexColor('#2d2d2d')        # soft black for body
 
 
-def _register_fonts():
-    """Register system Cyrillic fonts. Returns (regular, bold) font names."""
-    from loguru import logger
-
+def _font_candidates():
+    """Пути к кириллическим шрифтам: системные + переносимый DejaVu из venv."""
     candidates = [
         '/System/Library/Fonts/Helvetica.ttc',
         '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
@@ -42,8 +40,21 @@ def _register_fonts():
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
     ]
+    try:
+        import matplotlib
+        candidates.append(
+            os.path.join(matplotlib.get_data_path(), 'fonts', 'ttf', 'DejaVuSans.ttf')
+        )
+    except Exception:
+        pass
+    return candidates
 
-    for path in candidates:
+
+def _register_fonts():
+    """Register system Cyrillic fonts. Returns (regular, bold) font names."""
+    from loguru import logger
+
+    for path in _font_candidates():
         if not os.path.exists(path):
             continue
         try:
@@ -58,7 +69,10 @@ def _register_fonts():
             logger.warning(f"Could not register font from {path}: {exc}")
             continue
 
-    logger.info("No Cyrillic font found; falling back to Helvetica (Cyrillic may not render)")
+    logger.error(
+        "Кириллический шрифт не найден — PDF будет с битой кириллицей (Helvetica). "
+        "Установите dejavu/liberation шрифты на сервере."
+    )
     return 'Helvetica', 'Helvetica-Bold'
 
 

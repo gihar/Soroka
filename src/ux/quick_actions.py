@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 from loguru import logger
 
-from services import TemplateService
+from src.services import TemplateService
 from src.config import settings
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import sort_templates_by_name

@@ -59,6 +59,17 @@ def test_pdf_has_no_generator_signature():
     assert "Сгенерировано" not in inspect.getsource(pdf_converter)
 
 
+def test_progress_final_does_not_duplicate_summary_promise():
+    """«Протокол отправляется ниже» обещает только сводка, не прогресс-трекер."""
+    from unittest.mock import MagicMock
+
+    from src.ux.progress_tracker import ProgressTracker
+
+    tracker = ProgressTracker(MagicMock(), 1, MagicMock())
+    final_text = tracker._format_progress_text(final=True)
+    assert "ниже" not in final_text
+
+
 # ---------------------------------------------------------------------------
 # Доставка: ошибки без сырых исключений, файл без дублирующего статуса
 # ---------------------------------------------------------------------------

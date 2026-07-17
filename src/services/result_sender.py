@@ -75,8 +75,11 @@ async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
 
 
 async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
-                                 protocol_text: str, output_mode: str) -> None:
-    """Render and send the protocol as a downloadable ``.md``/``.pdf`` document."""
+                                 protocol_text: str, output_mode: str) -> bool:
+    """Render and send the protocol as a downloadable ``.md``/``.pdf`` document.
+
+    Returns ``True`` only when the document was actually delivered.
+    """
     suffix = ".pdf" if output_mode == "pdf" else ".md"
     safe_name = os.path.splitext(os.path.basename(request.file_name))[0][:40] or "protocol"
 
@@ -101,21 +104,33 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
 
     try:
         input_file = FSInputFile(temp_path, filename=f"{safe_name}{suffix}")
-        await safe_send_document(bot, chat_id, document=input_file)
+        sent = await safe_send_document(bot, chat_id, document=input_file)
+        if not sent:
+            logger.warning("Документ протокола не был доставлен (flood control?)")
+            return False
+        return True
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 
-async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> None:
+async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> bool:
     """Send the protocol inline as Telegram HTML, split on section boundaries.
 
     The canonical protocol text is Markdown; legacy parse_mode="Markdown" would
     show literal ##/** markers, so the chat channel renders it to HTML.
+    Returns ``True`` only when every part was delivered.
     """
     parts = render_protocol_messages(protocol_text, max_length=MAX_MESSAGE_LENGTH)
-    for part in parts:
-        await safe_send_message(bot, chat_id, text=part, parse_mode="HTML")
+    delivered = True
+    for index, part in enumerate(parts, start=1):
+        sent = await safe_send_message(bot, chat_id, text=part, parse_mode="HTML")
+        if not sent:
+            logger.warning(
+                f"Часть протокола {index}/{len(parts)} не доставлена (flood control?)"
+            )
+            delivered = False
+    return delivered
 
 
 async def send_result_to_user(
@@ -164,13 +179,23 @@ async def send_result_to_user(
             return False
 
         if output_mode in ("file", "pdf"):
-            await _send_protocol_as_file(
+            delivered = await _send_protocol_as_file(
                 bot, chat_id, request, result.protocol_text, output_mode
             )
         else:
-            await _send_protocol_as_messages(bot, chat_id, result.protocol_text)
+            delivered = await _send_protocol_as_messages(
+                bot, chat_id, result.protocol_text
+            )
 
-        return True
+        if not delivered:
+            await safe_send_message(
+                bot, chat_id,
+                text=(
+                    "⚠️ Протокол доставлен не полностью.\n"
+                    "Отправьте запись ещё раз или выберите формат файла в /settings."
+                ),
+            )
+        return delivered
 
     except Exception as e:
         logger.error(f"Ошибка отправки результата: {e}")
