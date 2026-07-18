@@ -57,20 +57,20 @@ async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
     """Send the summary message, degrading gracefully to a plain notification."""
     try:
         sent_message = await safe_send_message(
-            bot, chat_id, text=result_message, parse_mode="Markdown"
+            bot, chat_id, text=result_message, parse_mode="HTML"
         )
         if not sent_message:
             logger.warning("Не удалось отправить результат (возможен flood control)")
             await safe_send_message(
                 bot, chat_id,
-                text="✅ Протокол успешно создан! Файл отправляется ниже...",
+                text="✅ Протокол готов",
             )
     except Exception as e:
         logger.error(f"Ошибка при отправке результата: {e}")
         try:
             await safe_send_message(
                 bot, chat_id,
-                text="✅ Протокол успешно создан! Файл отправляется ниже...",
+                text="✅ Протокол готов",
             )
         except Exception:
             pass
