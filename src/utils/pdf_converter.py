@@ -31,10 +31,8 @@ COLOR_RULE = colors.HexColor('#bdc3c7')        # light grey for lines
 COLOR_BODY = colors.HexColor('#2d2d2d')        # soft black for body
 
 
-def _register_fonts():
-    """Register system Cyrillic fonts. Returns (regular, bold) font names."""
-    from loguru import logger
-
+def _font_candidates():
+    """Пути к кириллическим шрифтам: системные + переносимый DejaVu из venv."""
     candidates = [
         '/System/Library/Fonts/Helvetica.ttc',
         '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
@@ -42,8 +40,21 @@ def _register_fonts():
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
     ]
+    try:
+        import matplotlib
+        candidates.append(
+            os.path.join(matplotlib.get_data_path(), 'fonts', 'ttf', 'DejaVuSans.ttf')
+        )
+    except Exception:
+        pass
+    return candidates
 
-    for path in candidates:
+
+def _register_fonts():
+    """Register system Cyrillic fonts. Returns (regular, bold) font names."""
+    from loguru import logger
+
+    for path in _font_candidates():
         if not os.path.exists(path):
             continue
         try:
@@ -58,7 +69,10 @@ def _register_fonts():
             logger.warning(f"Could not register font from {path}: {exc}")
             continue
 
-    logger.info("No Cyrillic font found; falling back to Helvetica (Cyrillic may not render)")
+    logger.error(
+        "Кириллический шрифт не найден — PDF будет с битой кириллицей (Helvetica). "
+        "Установите dejavu/liberation шрифты на сервере."
+    )
     return 'Helvetica', 'Helvetica-Bold'
 
 
@@ -154,10 +168,7 @@ def _make_header_footer(font, font_bold):
 
         canvas.setFont(font, 7)
         canvas.setFillColor(COLOR_MUTED)
-        canvas.drawString(
-            2 * cm, y_footer - 3 * mm,
-            f'Сгенерировано: Soroka Bot  |  {today}'
-        )
+        canvas.drawString(2 * cm, y_footer - 3 * mm, today)
 
         canvas.restoreState()
 
@@ -173,6 +184,29 @@ def _section_rule():
         spaceBefore=10,
         spaceAfter=4,
     )
+
+
+def _is_horizontal_rule(stripped_line: str) -> bool:
+    """Строка-линейка Markdown (---): в PDF это линия, а не текст «---»."""
+    return bool(re.match(r'^-{3,}$', stripped_line))
+
+
+_HEADING_EMOJI_RE = re.compile(
+    r"^(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+"
+)
+
+
+def strip_heading_emoji(heading: str) -> str:
+    """Снять ведущие эмодзи-метки секции: PDF-шрифты не содержат их глифов."""
+    return _HEADING_EMOJI_RE.sub("", heading, count=1).strip()
+
+
+_LABEL_EMOJI_RE = re.compile(r"^(\*\*)\s*(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+")
+
+
+def strip_label_emoji(line: str) -> str:
+    """Снять эмодзи-метку из жирной метки шапки («**👥 Участники:**»)."""
+    return _LABEL_EMOJI_RE.sub(r"\1", line, count=1)
 
 
 def _format_inline(text):
@@ -230,20 +264,24 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Headings: check most-specific first (### before ## before #)
         if stripped.startswith('### '):
-            text = stripped[4:].strip()
+            text = strip_heading_emoji(stripped[4:].strip())
             story.append(Paragraph(_format_inline(text), styles['SubSection']))
 
         elif stripped.startswith('## '):
-            text = stripped[3:].strip()
+            text = strip_heading_emoji(stripped[3:].strip())
             if first_heading_seen:
                 story.append(_section_rule())
             story.append(Paragraph(_format_inline(text), styles['Section']))
             first_heading_seen = True
 
         elif stripped.startswith('# '):
-            text = stripped[2:].strip()
+            text = strip_heading_emoji(stripped[2:].strip())
             story.append(Paragraph(_format_inline(text), styles['DocTitle']))
             first_heading_seen = True
+
+        # Horizontal rule (---) → section line, not literal dashes
+        elif _is_horizontal_rule(stripped):
+            story.append(_section_rule())
 
         # Bullet list
         elif stripped.startswith('- ') or stripped.startswith('* '):
@@ -259,7 +297,7 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Regular text
         else:
-            story.append(Paragraph(_format_inline(stripped), styles['Body']))
+            story.append(Paragraph(_format_inline(strip_label_emoji(stripped)), styles['Body']))
 
     doc.build(story)
 

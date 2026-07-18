@@ -16,7 +16,6 @@ from src.models.diarization import Diarization
 from src.services.deepgram_service import DeepgramService
 from src.services.speechmatics_service import SpeechmaticsService
 
-
 # --------------------------------------------------------------------------
 # Deepgram: _process_transcript_result → TranscriptionResult с объектом
 # --------------------------------------------------------------------------

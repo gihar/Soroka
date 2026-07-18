@@ -283,8 +283,7 @@ class ProgressTracker:
             total_time = datetime.now() - self.start_time
             return (
                 "✅ **Обработка завершена!**\n\n"
-                f"⏱️ Время: {total_time.total_seconds():.0f}с\n"
-                "📄 Протокол готов и будет отправлен ниже."
+                f"⏱️ Время: {total_time.total_seconds():.0f}с"
             )
         
         text = "🔄 **Обработка файла**\n\n"

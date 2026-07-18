@@ -10,6 +10,21 @@ from typing import Any, Dict
 
 from loguru import logger
 
+# Заглушки, которые LLM может вернуть вместо пустого значения. Рендерятся они
+# как содержимое секции, поэтому до рендеринга приводятся к пустой строке —
+# пустая секция не показывается вовсе (принцип «ничего пустого», PRODUCT.md).
+_FILLER_RE = re.compile(
+    r"^\s*(не\s+указано|нет\s+данных|отсутствует|n/?a|none|[—–-])\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_filler(value: Any) -> Any:
+    """Заменить значение-заглушку («Не указано», «—», «N/A») пустой строкой."""
+    if isinstance(value, str) and _FILLER_RE.match(value):
+        return ""
+    return value
+
 
 class ProtocolFormatter:
     """Formats LLM results into readable protocol text using templates."""
@@ -77,6 +92,9 @@ class ProtocolFormatter:
 
         # Если есть маппинг — используем Jinja2 для подстановки
         if isinstance(llm_result, dict):
+            llm_result = {
+                key: _normalize_filler(value) for key, value in llm_result.items()
+            }
             logger.info("[DEBUG] Форматирование протокола с шаблоном")
             logger.info(f"[DEBUG] Тип шаблона: {type(template)}")
             logger.info(f"[DEBUG] Длина содержимого шаблона: {len(template_content)}")
@@ -228,7 +246,7 @@ class ProtocolFormatter:
                         else:
                             meeting_texts.append(f"- {m}")
                     parts.append("Встречи:\n" + "\n".join(meeting_texts))
-            return "\n\n".join(parts) if parts else "Не указано"
+            return "\n\n".join(parts)
 
         # Структура участника с name и role
         if 'name' in data and 'role' in data:
@@ -247,14 +265,17 @@ class ProtocolFormatter:
                 return f"- {decision} (решение принял: {decision_maker})"
             return f"- {decision}"
 
-        # Структура задачи с item
+        # Структура задачи с item; неизвестные части опускаются, не заполняются заглушкой
         if 'item' in data or 'task' in data:
             item = data.get('item', data.get('task', ''))
-            assignee = data.get('assignee', 'Не указано')
-            due = data.get('due', '')
+            assignee = _normalize_filler(data.get('assignee', ''))
+            due = _normalize_filler(data.get('due', ''))
+            text = f"- {item}"
+            if assignee:
+                text += f" — Ответственный: {assignee}"
             if due:
-                return f"- {item} — Ответственный: {assignee}, срок: {due}"
-            return f"- {item} — Ответственный: {assignee}"
+                text += f", срок: {due}" if assignee else f" — срок: {due}"
+            return text
 
         # Общий случай - key: value пары
         lines = []
@@ -264,12 +285,12 @@ class ProtocolFormatter:
                 lines.append(f"**{k}:** {v_str}")
             else:
                 lines.append(f"**{k}:** {v}")
-        return "\n".join(lines) if lines else "Не указано"
+        return "\n".join(lines)
 
     def format_list_to_text(self, data: list) -> str:
         """Форматировать список в читаемый текст"""
         if not data:
-            return "Не указано"
+            return ""
 
         first = data[0]
 
@@ -297,16 +318,25 @@ class ProtocolFormatter:
                 if isinstance(json_obj, dict):
                     if 'decision' in json_obj:
                         decision = json_obj.get('decision', '')
-                        decision_maker = json_obj.get('decision_maker', 'Не указано')
-                        return f"\u2022 {decision} (решение принял: {decision_maker})"
+                        decision_maker = _normalize_filler(json_obj.get('decision_maker', ''))
+                        if decision_maker:
+                            return f"\u2022 {decision} (решение принял: {decision_maker})"
+                        return f"\u2022 {decision}"
                     elif 'item' in json_obj:
                         item = json_obj.get('item', '')
-                        assignee = json_obj.get('assignee', 'Не указано')
-                        due = json_obj.get('due', 'Не указано')
-                        return f"\u2022 {item} - {assignee}, до {due}"
+                        assignee = _normalize_filler(json_obj.get('assignee', ''))
+                        due = _normalize_filler(json_obj.get('due', ''))
+                        item_text = f"\u2022 {item}"
+                        if assignee:
+                            item_text += f" - {assignee}"
+                        if due:
+                            item_text += f", до {due}"
+                        return item_text
                     else:
-                        values = [str(v) for v in json_obj.values() if v != 'Не указано']
-                        return ' - '.join(values) if values else 'Не указано'
+                        values = [
+                            str(v) for v in json_obj.values() if _normalize_filler(v)
+                        ]
+                        return ' - '.join(values)
 
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -360,7 +390,7 @@ class ProtocolFormatter:
         protocol_parts = []
         used_sections = []
 
-        title = llm_result.get('meeting_title', 'Протокол встречи').strip()
+        title = llm_result.get('meeting_title', '').strip() or 'Протокол встречи'
         protocol_parts.append(f"# {title}")
 
         date = llm_result.get('meeting_date', llm_result.get('date', '')).strip()
