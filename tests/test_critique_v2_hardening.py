@@ -96,6 +96,20 @@ def _transcription() -> TranscriptionResult:
     return TranscriptionResult(transcription="полный текст расшифровки встречи")
 
 
+def _request() -> ProcessingRequest:
+    return ProcessingRequest(file_name="meeting.mp3", llm_provider="openai", user_id=1)
+
+
+def _result() -> ProcessingResult:
+    return ProcessingResult(
+        transcription_result=_transcription(),
+        protocol_text="# Протокол\n\n## ✅ Решения\n- ок",
+        template_used={"name": "Дейли"},
+        llm_provider_used="openai",
+        llm_model_used=None,
+    )
+
+
 def test_empty_llm_result_fallback_warns_user():
     formatter = ProtocolFormatter()
     out = formatter.format_protocol({"content": "# {{ meeting_title }}"}, "", _transcription())
@@ -211,6 +225,53 @@ async def test_pdf_mode_delivers_document(monkeypatch):
 
     assert ok is True
     assert len(documents) == 1
+
+
+def _fake_user_service(monkeypatch, mode: str) -> None:
+    import src.services.user_service as user_service_module
+
+    class FakeUserService:
+        async def get_user_by_telegram_id(self, _uid):
+            class User:
+                protocol_output_mode = mode
+
+            return User()
+
+    monkeypatch.setattr(user_service_module, "UserService", FakeUserService)
+
+
+@pytest.mark.asyncio
+async def test_pdf_failure_with_vanished_temp_still_falls_back_to_md(monkeypatch):
+    """Конвертер упал и не оставил файла — фолбэк на .md обязан выжить."""
+    import os
+
+    documents = []
+
+    async def fake_send_message(bot, chat_id, **kwargs):
+        return object()
+
+    async def fake_send_document(bot, chat_id, **kwargs):
+        documents.append(kwargs)
+        return object()
+
+    async def exploding_convert(markdown_text, output_path):
+        os.remove(output_path)  # конвертер прибрал за собой перед падением
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(result_sender, "safe_send_message", fake_send_message)
+    monkeypatch.setattr(result_sender, "safe_send_document", fake_send_document)
+    monkeypatch.setattr(
+        "src.utils.pdf_converter.convert_markdown_to_pdf_async", exploding_convert
+    )
+    _fake_user_service(monkeypatch, "pdf")
+
+    ok = await result_sender.send_result_to_user(
+        AsyncMock(), 1, 1, _request(), _result()
+    )
+
+    assert ok is True
+    assert len(documents) == 1
+    assert documents[0]["document"].filename.endswith(".md")
 
 
 def test_no_deprecated_mktemp_in_result_sender():

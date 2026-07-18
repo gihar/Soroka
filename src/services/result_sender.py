@@ -9,6 +9,7 @@ The single entry point is :func:`send_result_to_user`. It is intentionally
 stateless: everything it needs is passed in explicitly.
 """
 
+import contextlib
 import os
 import re
 import tempfile
@@ -116,8 +117,10 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
             await convert_markdown_to_pdf_async(protocol_text, temp_path)
         except Exception as e:
             logger.error(f"Ошибка конвертации в PDF: {e}")
-            # Fall back to a markdown file when PDF conversion fails.
-            os.remove(temp_path)
+            # Fall back to a markdown file when PDF conversion fails. The temp
+            # file may already be gone — cleanup must not kill the fallback.
+            with contextlib.suppress(OSError):
+                os.remove(temp_path)
             suffix = ".md"
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=suffix, delete=False, encoding="utf-8"
