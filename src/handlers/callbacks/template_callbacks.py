@@ -27,7 +27,7 @@ async def _build_flat_template_keyboard(template_service: TemplateService,
 
     keyboard_buttons = [
         [InlineKeyboardButton(
-            text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+            text=t.name,
             callback_data=f"{callback_prefix}{t.id}"
         )] for t in templates
     ]
@@ -201,7 +201,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    text=t.name,
                     callback_data=f"select_template_{t.id}"
                 )]
                 for t in templates
@@ -278,7 +278,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             # Плоский список шаблонов
             for t in templates:
                 keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                    text=t.name,
                     callback_data=f"select_template_{t.id}"
                 )])
 

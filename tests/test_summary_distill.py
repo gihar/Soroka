@@ -53,7 +53,7 @@ def test_summary_core_facts_present():
     assert "Протокол готов" in message
     assert "Дейли" in message
     assert "2" in message  # сопоставлено участников
-    assert "128" in message  # время
+    assert "2 мин 8 с" in message  # время в читаемом формате
 
 
 def test_summary_is_valid_telegram_html():

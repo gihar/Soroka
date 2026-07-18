@@ -168,9 +168,20 @@ class MessageBuilder:
 
         duration = result.get("processing_duration")
         if duration:
-            lines.append(f"\u23F1 Время: {duration:.0f} с")
+            lines.append(f"\u23F1 Время: {cls._format_duration(duration)}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        """«5 мин 12 с» читается легче, чем «312 с»."""
+        total = int(round(seconds))
+        minutes, secs = divmod(total, 60)
+        if minutes and secs:
+            return f"{minutes} мин {secs} с"
+        if minutes:
+            return f"{minutes} мин"
+        return f"{secs} с"
 
     @staticmethod
     def _participants_line(result: Dict[str, Any]) -> str:

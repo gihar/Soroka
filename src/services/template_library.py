@@ -236,7 +236,7 @@ class TemplateLibrary:
 {{ discussion }}
 {% endif %}
 {% if next_steps %}
-## 📅 Следующая встреча
+## 📅 Следующие шаги
 {{ next_steps }}
 {% endif %}""",
         }
@@ -346,7 +346,7 @@ class TemplateLibrary:
 {{ additional_materials }}
 {% endif %}
 {% if next_steps %}
-## 📅 Следующая лекция
+## 📅 Следующие шаги
 {{ next_steps }}
 {% endif %}""",
         }

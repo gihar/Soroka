@@ -146,7 +146,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 templates = await template_service.get_all_templates()
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
-                        text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                        text=t.name,
                         callback_data=f"view_template_{t.id}"
                     )] for t in templates
                 ] + [[InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_template")]])
@@ -279,9 +279,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
                 row = []
                 for template in sorted_templates:
-                    star = "⭐ " if template.is_default else ""
                     row.append(InlineKeyboardButton(
-                        text=f"{star}{template.name}",
+                        text=template.name,
                         callback_data=f"set_default_template_{template.id}"
                     ))
                     if len(row) == 2:

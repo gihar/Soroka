@@ -267,8 +267,11 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
             story.append(Spacer(1, 2 * mm))
             continue
 
-        # Headings: check most-specific first (### before ## before #)
-        if stripped.startswith('### '):
+        # Headings: check most-specific first (#### before ### before ## before #)
+        if stripped.startswith('#### '):
+            story.append(Paragraph(_format_inline(stripped[5:].strip()), styles['SubSection']))
+
+        elif stripped.startswith('### '):
             story.append(Paragraph(_format_inline(stripped[4:].strip()), styles['SubSection']))
 
         elif stripped.startswith('## '):
