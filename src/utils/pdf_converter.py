@@ -191,30 +191,29 @@ def _is_horizontal_rule(stripped_line: str) -> bool:
     return bool(re.match(r'^-{3,}$', stripped_line))
 
 
-_HEADING_EMOJI_RE = re.compile(
-    r"^(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+"
-)
+_EMOJI_RUN = r"[☀-➿\U0001F000-\U0001FAFF️]+"
+# Эмодзи после начала строки, пробела или ** снимается вместе с хвостовым
+# пробелом, чтобы не оставлять дыр («**👥 Участники:**» → «**Участники:**»).
+_EMOJI_AT_BOUNDARY_RE = re.compile(rf"(^|\s|\*\*){_EMOJI_RUN}\s?")
+_EMOJI_ANYWHERE_RE = re.compile(_EMOJI_RUN)
 
 
-def strip_heading_emoji(heading: str) -> str:
-    """Снять ведущие эмодзи-метки секции: PDF-шрифты не содержат их глифов."""
-    return _HEADING_EMOJI_RE.sub("", heading, count=1).strip()
-
-
-_LABEL_EMOJI_RE = re.compile(r"^(\*\*)\s*(?:[☀-➿\U0001F000-\U0001FAFF️]+\s*)+")
-
-
-def strip_label_emoji(line: str) -> str:
-    """Снять эмодзи-метку из жирной метки шапки («**👥 Участники:**»)."""
-    return _LABEL_EMOJI_RE.sub(r"\1", line, count=1)
+def strip_emoji(text: str) -> str:
+    """Снять эмодзи из текста PDF: глифов в TTF-шрифтах нет, вместо них — тофу."""
+    without_boundary = _EMOJI_AT_BOUNDARY_RE.sub(r"\1", text)
+    return _EMOJI_ANYWHERE_RE.sub("", without_boundary).strip()
 
 
 def _format_inline(text):
-    """Escape XML special chars, then convert markdown bold/italic to ReportLab tags."""
+    """Escape XML special chars, then convert markdown inline markup to ReportLab tags.
+
+    Согласовано с чат-рендером (protocol_render.telegram_html): **жирный** и
+    `код`; одиночные звёздочки остаются буквальным текстом.
+    """
     from xml.sax.saxutils import escape
-    safe = escape(text)  # & → &amp;  < → &lt;  > → &gt;
-    safe = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', safe)
-    safe = re.sub(r'\*(.*?)\*', r'<i>\1</i>', safe)
+    safe = escape(strip_emoji(text))  # & → &amp;  < → &lt;  > → &gt;
+    safe = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe)
+    safe = re.sub(r'`([^`]+)`', r'<font face="Courier">\1</font>', safe)
     return safe
 
 
@@ -264,19 +263,16 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Headings: check most-specific first (### before ## before #)
         if stripped.startswith('### '):
-            text = strip_heading_emoji(stripped[4:].strip())
-            story.append(Paragraph(_format_inline(text), styles['SubSection']))
+            story.append(Paragraph(_format_inline(stripped[4:].strip()), styles['SubSection']))
 
         elif stripped.startswith('## '):
-            text = strip_heading_emoji(stripped[3:].strip())
             if first_heading_seen:
                 story.append(_section_rule())
-            story.append(Paragraph(_format_inline(text), styles['Section']))
+            story.append(Paragraph(_format_inline(stripped[3:].strip()), styles['Section']))
             first_heading_seen = True
 
         elif stripped.startswith('# '):
-            text = strip_heading_emoji(stripped[2:].strip())
-            story.append(Paragraph(_format_inline(text), styles['DocTitle']))
+            story.append(Paragraph(_format_inline(stripped[2:].strip()), styles['DocTitle']))
             first_heading_seen = True
 
         # Horizontal rule (---) → section line, not literal dashes
@@ -297,7 +293,7 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Regular text
         else:
-            story.append(Paragraph(_format_inline(strip_label_emoji(stripped)), styles['Body']))
+            story.append(Paragraph(_format_inline(stripped), styles['Body']))
 
     doc.build(story)
 

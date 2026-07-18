@@ -14,7 +14,8 @@ from loguru import logger
 # как содержимое секции, поэтому до рендеринга приводятся к пустой строке —
 # пустая секция не показывается вовсе (принцип «ничего пустого», PRODUCT.md).
 _FILLER_RE = re.compile(
-    r"^\s*(не\s+указано|нет\s+данных|отсутствует|n/?a|none|[—–-])\s*\.?\s*$",
+    r"^\s*(не\s+указано|нет\s+данных|не\s+определено|неизвестно"
+    r"|отсутству(?:ет|ют)|нет|n/?a|none|[—–-])\s*\.?\s*$",
     re.IGNORECASE,
 )
 
@@ -26,41 +27,22 @@ def _normalize_filler(value: Any) -> Any:
     return value
 
 
+
+_TRANSCRIPT_FALLBACK_NOTICE = (
+    "⚠️ Не удалось структурировать протокол — ниже полная расшифровка встречи."
+)
+
+
+def _transcript_fallback(transcription_result) -> str:
+    """Честная деградация: расшифровка не маскируется под протокол."""
+    return (
+        f"{_TRANSCRIPT_FALLBACK_NOTICE}\n\n"
+        f"# Расшифровка встречи\n\n{transcription_result.transcription}"
+    )
+
+
 class ProtocolFormatter:
     """Formats LLM results into readable protocol text using templates."""
-
-    def format_speaker_mapping_message(
-        self,
-        speaker_mapping: Dict[str, str],
-        total_participants: int,
-    ) -> str:
-        """
-        Форматирует сообщение о результатах сопоставления спикеров
-
-        Args:
-            speaker_mapping: Словарь сопоставления {speaker_id: participant_name}
-            total_participants: Общее количество участников
-
-        Returns:
-            Отформатированное сообщение для отправки пользователю
-        """
-        if not speaker_mapping:
-            return (
-                "ℹ️ *Автоматическое сопоставление участников не выполнено*\n\n"
-                "Протокол будет сформирован без привязки спикеров к именам участников."
-            )
-
-        mapped_count = len(speaker_mapping)
-        message = "✅ *Сопоставление участников завершено*\n\n"
-        message += f"Сопоставлено {mapped_count} из {total_participants} участников:\n\n"
-
-        # Сортируем по speaker_id для предсказуемого порядка
-        sorted_mapping = sorted(speaker_mapping.items())
-
-        for speaker_id, participant_name in sorted_mapping:
-            message += f"• {speaker_id} -> {participant_name}\n"
-
-        return message.rstrip()
 
     def format_protocol(
         self,
@@ -80,7 +62,7 @@ class ProtocolFormatter:
                 return text
             # Пустая строка — падаем на простой формат
             logger.warning("LLM вернул пустую строку, используем fallback")
-            return f"# Протокол\n\n{transcription_result.transcription}"
+            return _transcript_fallback(transcription_result)
 
         # Получаем содержимое шаблона
         if hasattr(template, 'content'):
@@ -197,7 +179,7 @@ class ProtocolFormatter:
 
         # Последний fallback: базовый текст транскрипции
         logger.error("Используем последний fallback - базовую транскрипцию")
-        return f"# Протокол\n\n{transcription_result.transcription}"
+        return _transcript_fallback(transcription_result)
 
     def convert_complex_to_markdown(self, value: Any) -> str:
         """Преобразовать сложные типы (dict, list) в читаемый Markdown-текст"""
@@ -431,4 +413,4 @@ class ProtocolFormatter:
             )
 
         logger.error("Используем последний fallback - базовую транскрипцию")
-        return f"# Протокол\n\n{transcription_result.transcription}"
+        return _transcript_fallback(transcription_result)

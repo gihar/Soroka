@@ -13,8 +13,6 @@
 Поле is_default — исторически «системный шаблон»: виден всем пользователям
 (запрос created_by = ? OR is_default = 1) и защищён от удаления. Это НЕ
 «шаблон по умолчанию» пользователя (тот хранится в users.default_template_id).
-У «Протокола ОД» is_default=False намеренно: спец-формат не показывается в
-общем списке выбора.
 """
 
 from typing import Any, Dict, List
@@ -64,10 +62,6 @@ class TemplateLibrary:
 {% if action_items %}
 ## 📌 Задачи и сроки
 {{ action_items }}
-{% endif %}
-{% if deadlines %}
-## Сроки
-{{ deadlines }}
 {% endif %}
 {% if risks_and_blockers %}
 ## ⚠️ Блокеры и риски
@@ -181,7 +175,7 @@ class TemplateLibrary:
             "description": "Специальный формат для протокола поручений руководителей (OD)",
             "tags": ["поручения", "од", "руководители", "протокол"],
             "keywords": ["од", "поручение", "задача", "срок", "ответственный"],
-            "is_default": False,
+            "is_default": True,
             "content": """# {{ meeting_title or 'Протокол поручений' }}
 
 """
@@ -190,6 +184,8 @@ class TemplateLibrary:
 {% if tasks_od %}
 ## 📌 Поручения
 {{ tasks_od }}
+{% else %}
+Поручений в записи не зафиксировано.
 {% endif %}
 {% if additional_notes %}
 ## Дополнительные заметки

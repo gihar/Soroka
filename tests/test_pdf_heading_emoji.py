@@ -1,36 +1,39 @@
-"""PDF-рендер: эмодзи-метки секций снимаются с заголовков.
+"""PDF: эмодзи снимаются единым проходом в _format_inline.
 
-Кириллические TTF-шрифты PDF не содержат эмодзи-глифов; навигационные метки
-из чата в PDF превращались бы в «тофу» (□). В PDF иерархию несут стили.
+В TTF-шрифтах PDF нет эмодзи-глифов. Снятие происходит в одном месте —
+strip_emoji внутри _format_inline; точечных стрипперов для заголовков и
+меток шапки больше нет (они дублировали общий проход).
 """
 
-from src.utils.pdf_converter import strip_heading_emoji, strip_label_emoji
+from src.utils import pdf_converter
+from src.utils.pdf_converter import _format_inline, strip_emoji
 
 
-def test_section_emoji_removed():
-    assert strip_heading_emoji("✅ Решения") == "Решения"
+def test_heading_emoji_stripped():
+    assert _format_inline("✅ Решения") == "Решения"
 
 
-def test_emoji_with_variation_selector_removed():
-    assert strip_heading_emoji("⚠️ Блокеры и риски") == "Блокеры и риски"
+def test_heading_emoji_with_variation_selector_stripped():
+    assert _format_inline("⚠️ Блокеры и риски") == "Блокеры и риски"
 
 
-def test_plain_heading_untouched():
-    assert strip_heading_emoji("Обсуждение") == "Обсуждение"
+def test_bold_label_emoji_stripped_without_inner_space():
+    assert _format_inline("**👥 Участники:**") == "<b>Участники:</b>"
 
 
-def test_emoji_in_middle_kept():
-    # снимаем только ведущую метку — контент не трогаем
-    assert strip_heading_emoji("Итоги ✅ спринта") == "Итоги ✅ спринта"
+def test_emoji_between_words_leaves_single_space():
+    assert strip_emoji("Решили ✅ запускать") == "Решили запускать"
 
 
-def test_bold_label_emoji_removed():
-    assert strip_label_emoji("**👥 Участники:**") == "**Участники:**"
+def test_emoji_glued_to_word_removed():
+    assert strip_emoji("итоги✅") == "итоги"
 
 
-def test_plain_label_untouched():
-    assert strip_label_emoji("**Дата:** 17 июля") == "**Дата:** 17 июля"
+def test_plain_text_untouched():
+    text = "Обычный текст с дефисом - и числом 15"
+    assert _format_inline(text) == text
 
 
-def test_label_emoji_only_at_line_start():
-    assert strip_label_emoji("Метка **👥 внутри** строки") == "Метка **👥 внутри** строки"
+def test_no_redundant_point_strippers():
+    assert not hasattr(pdf_converter, "strip_heading_emoji")
+    assert not hasattr(pdf_converter, "strip_label_emoji")

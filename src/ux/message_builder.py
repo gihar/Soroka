@@ -5,8 +5,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from src.utils.message_utils import escape_markdown
-
 
 @dataclass
 class MessageStyle:
@@ -172,123 +170,59 @@ class MessageBuilder:
     
     @classmethod
     def processing_complete_message(cls, result: Dict[str, Any]) -> str:
-        """Сообщение о завершении обработки"""
-        message = "🎉 **Протокол успешно создан!**\n\n"
-        
-        # Основная информация
-        message += "📋 **Результат обработки:**\n"
-        
-        if result.get("template_used"):
-            template_name = result["template_used"].get("name", "Неизвестный")
-            template_name = escape_markdown(template_name)
-            message += f"📝 Шаблон: {template_name}\n"
-        
-        # Показываем человекочитаемое имя модели, если доступно
-        if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
-            ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
-            ai_name = escape_markdown(ai_name)
-            message += f"🤖 ИИ: {ai_name}\n"
-        
-        # Информация о транскрипции (с ограничением длины)
-        if result.get("transcription_result"):
-            transcription = result["transcription_result"]
-            if transcription.get("transcription"):
-                char_count = len(transcription["transcription"])
-                word_count = len(transcription["transcription"].split())
-                message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
-            
-            # Информация о сжатии файла (показывается только если не было показано ранее)
-            if transcription.get("compression_info"):
-                compression = transcription["compression_info"]
-                if compression.get("compressed", False) and not compression.get("shown_during_processing", False):
-                    original_mb = compression.get("original_size_mb", 0)
-                    compressed_mb = compression.get("compressed_size_mb", 0)
-                    ratio = compression.get("compression_ratio", 0)
-                    saved_mb = compression.get("compression_saved_mb", 0)
-                    
-                    message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB (экономия {ratio:.1f}%, -{saved_mb:.1f}MB)\n"
-        
-        # Информация о сопоставлении участников
-        speaker_mapping = result.get("speaker_mapping", {})
+        """Короткая сводка над протоколом (Telegram HTML, 3-4 строки).
+
+        Сводка пересылается вместе с протоколом, поэтому несёт только то,
+        что нужно читателю: статус, шаблон, участники, время. Технические
+        детали (модель, объём текста, сжатие) уходят в логи.
+        """
+        import html as _html
+
+
+        cls._log_processing_details(result)
+
+        lines = ["\u2705 <b>Протокол готов</b>"]
+
+        template_name = (result.get("template_used") or {}).get("name")
+        if template_name:
+            lines.append(f"\U0001F4DD Шаблон: {_html.escape(template_name)}")
+
+        participants_line = cls._participants_line(result)
+        if participants_line:
+            lines.append(participants_line)
+
+        duration = result.get("processing_duration")
+        if duration:
+            lines.append(f"\u23F1 Время: {duration:.0f} с")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _participants_line(result: Dict[str, Any]) -> str:
+        """Строка об участниках: сопоставление или количество голосов."""
+        speaker_mapping = result.get("speaker_mapping") or {}
         if speaker_mapping:
-            message += "\n👥 **Участники:**\n"
-            # Сортируем по speaker_id для предсказуемого порядка
-            sorted_mapping = sorted(speaker_mapping.items())
-            for speaker_id, participant_name in sorted_mapping:
-                speaker_id_escaped = escape_markdown(speaker_id)
-                participant_name_escaped = escape_markdown(participant_name)
-                message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
-        elif result.get("transcription_result", {}).get("diarization"):
-            # Если нет сопоставления, показываем информацию о количестве спикеров
-            diarization = result["transcription_result"]["diarization"]
-            speakers_count = len(diarization.speakers)
-            if speakers_count > 1:
-                message += f"\n👥 Участников: {speakers_count}\n"
+            return f"\U0001F465 Участников сопоставлено: {len(speaker_mapping)}"
+        diarization = (result.get("transcription_result") or {}).get("diarization")
+        if diarization and len(getattr(diarization, "speakers", [])) > 1:
+            return f"\U0001F465 Участников: {len(diarization.speakers)}"
+        return ""
 
-        message += "\n"
+    @staticmethod
+    def _log_processing_details(result: Dict[str, Any]) -> None:
+        """Технические детали обработки — в логи, не в чат."""
+        from loguru import logger
 
-        # Время обработки
-        if result.get("processing_duration"):
-            duration = result["processing_duration"]
-            message += f"⏱️ Время обработки: {duration:.1f} сек\n"
-        
-        message += "\n📄 **Протокол отправляется ниже...**"
-        
-        # Проверяем, что сообщение не превышает лимит Telegram
-        if len(message) > 4000:  # Оставляем запас для безопасности
-            # Создаем сокращенную версию
-            message = "🎉 **Протокол успешно создан!**\n\n"
-            message += "📋 **Результат обработки:**\n"
-            
-            if result.get("template_used"):
-                template_name = result["template_used"].get("name", "Неизвестный")
-                template_name = escape_markdown(template_name)
-                message += f"📝 Шаблон: {template_name}\n"
-            
-            if result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used"):
-                ai_name = result.get("llm_model_name") or result.get("llm_model_used") or result.get("llm_provider_used")
-                ai_name = escape_markdown(ai_name)
-                message += f"🤖 ИИ: {ai_name}\n"
-            
-            if result.get("transcription_result", {}).get("transcription"):
-                char_count = len(result["transcription_result"]["transcription"])
-                word_count = len(result["transcription_result"]["transcription"].split())
-                message += f"📄 Текст: {char_count} символов, ~{word_count} слов\n"
-            
-            # Информация о сжатии файла (сокращенная версия)
-            if result.get("transcription_result", {}).get("compression_info"):
-                compression = result["transcription_result"]["compression_info"]
-                if compression.get("compressed", False):
-                    original_mb = compression.get("original_size_mb", 0)
-                    compressed_mb = compression.get("compressed_size_mb", 0)
-                    ratio = compression.get("compression_ratio", 0)
-                    message += f"🗜️ Сжатие: {original_mb:.1f}MB → {compressed_mb:.1f}MB ({ratio:.1f}%)\n"
-            
-            # Информация о сопоставлении участников (сокращенная версия)
-            speaker_mapping = result.get("speaker_mapping", {})
-            if speaker_mapping:
-                message += "\n👥 **Участники:**\n"
-                sorted_mapping = sorted(speaker_mapping.items())
-                for speaker_id, participant_name in sorted_mapping:
-                    speaker_id_escaped = escape_markdown(speaker_id)
-                    participant_name_escaped = escape_markdown(participant_name)
-                    message += f"• {speaker_id_escaped} → {participant_name_escaped}\n"
-            elif result.get("transcription_result", {}).get("diarization"):
-                diarization = result["transcription_result"]["diarization"]
-                speakers_count = len(diarization.speakers)
-                if speakers_count > 1:
-                    message += f"\n👥 Участников: {speakers_count}\n"
-            
-            message += "\n"
-            
-            if result.get("processing_duration"):
-                duration = result["processing_duration"]
-                message += f"⏱️ Время обработки: {duration:.1f} сек\n"
-            
-            message += "\n📄 **Протокол отправляется ниже...**"
-        
-        return message
-    
+        transcription = (result.get("transcription_result") or {}).get("transcription") or ""
+        compression = (result.get("transcription_result") or {}).get("compression_info") or {}
+        logger.info(
+            "Обработка завершена: шаблон={}, модель={}, текст={} символов, сжатие={}",
+            (result.get("template_used") or {}).get("name"),
+            result.get("llm_model_name") or result.get("llm_provider_used"),
+            len(transcription),
+            compression.get("compression_ratio"),
+        )
+
     @classmethod
     def file_validation_error(cls, error_details: Dict[str, Any]) -> str:
         """Сообщение об ошибке валидации файла"""
@@ -340,38 +274,33 @@ class MessageBuilder:
             "Шаблоны определяют структуру и содержание итогового протокола. "
             "Вы можете использовать готовые шаблоны или создать собственные.\n\n"
             
-            "✨ **Доступные переменные:**\n"
+            "✨ **Основные переменные:**\n"
+            "• `{{ meeting_title }}` - название встречи\n"
+            "• `{{ date }}` / `{{ time }}` - дата и время\n"
             "• `{{ participants }}` - список участников\n"
-            "• `{{ agenda }}` - повестка дня\n"
-            "• `{{ discussion }}` - основное обсуждение\n"
             "• `{{ decisions }}` - принятые решения\n"
-            "• `{{ tasks }}` - задачи и ответственные\n"
-            "• `{{ date }}` - дата встречи\n"
-            "• `{{ time }}` - время встречи\n"
-            "• `{{ speakers_summary }}` - анализ участников\n"
-            "• `{{ speaker_contributions }}` - вклад каждого участника\n\n"
-            
-            "🔧 **Создание шаблона:**\n"
-            "1. Нажмите \"➕ Добавить шаблон\"\n"
-            "2. Введите название и описание\n"
-            "3. Создайте содержимое с переменными\n"
-            "4. Просмотрите результат\n"
-            "5. Сохраните шаблон\n\n"
-            
-            "📋 **Пример простого шаблона:**\n"
+            "• `{{ action_items }}` - задачи и сроки\n"
+            "• `{{ risks_and_blockers }}` - блокеры и риски\n"
+            "• `{{ discussion }}` - ход обсуждения\n"
+            "• `{{ next_steps }}` - следующие шаги\n\n"
+
+            "🔀 **Условные секции:**\n"
+            "Оборачивайте секцию в `{% if переменная %}` ... `{% endif %}` - "
+            "если данных нет, секция не попадёт в протокол (ни заголовка, ни пустого места).\n\n"
+
+            "📋 **Пример шаблона:**\n"
             "```\n"
-            "# Протокол встречи\n"
+            "# {{ meeting_title or 'Протокол встречи' }}\n"
             "Дата: {{ date }}\n"
             "Участники: {{ participants }}\n\n"
-            "## Обсуждение\n"
-            "{{ discussion }}\n\n"
+            "{% if decisions %}\n"
             "## Решения\n"
             "{{ decisions }}\n"
+            "{% endif %}\n"
             "```\n\n"
-            
+
             "💡 **Советы:**\n"
-            "• Используйте Markdown для форматирования\n"
-            "• Добавляйте эмодзи для наглядности\n"
+            "• Используйте Markdown: `#` заголовки, `-` списки, `**жирный**`\n"
             "• Тестируйте шаблоны с предпросмотром\n"
             "• Создавайте специализированные шаблоны для разных типов встреч"
         )

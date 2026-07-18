@@ -16,6 +16,9 @@ from src.services.protocol_render.telegram_html import (
 
 _CONTINUATION_MARK = " (продолжение)"
 _SECTION_HEADING_RE = re.compile(r"^##\s+")
+_TAG_RE = re.compile(r"</?(b|i|code)>")
+# Запас на закрывающие/открывающие теги при балансировке частей.
+_BALANCE_RESERVE = 16
 
 
 @dataclass(frozen=True)
@@ -111,11 +114,36 @@ def _split_oversized_block(block: _Block, max_length: int) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
+def _balance_tags(parts: list[str]) -> list[str]:
+    """Закрыть парные теги на границе части и переоткрыть их в следующей.
+
+    Жёсткий перенос строки длиннее лимита может оставить <b> в одной части,
+    а </b> — в следующей; обе стали бы невалидным HTML для Telegram.
+    """
+    balanced: list[str] = []
+    carry: list[str] = []
+    for part in parts:
+        text = "".join(f"<{tag}>" for tag in carry) + part
+        stack: list[str] = []
+        for match in _TAG_RE.finditer(text):
+            tag = match.group(1)
+            if match.group(0).startswith("</"):
+                if stack and stack[-1] == tag:
+                    stack.pop()
+            else:
+                stack.append(tag)
+        balanced.append(text + "".join(f"</{tag}>" for tag in reversed(stack)))
+        carry = stack
+    return balanced
+
+
 def render_protocol_messages(markdown_text: str, max_length: int = 4000) -> list[str]:
     """Отрендерить протокол в Telegram HTML и разбить на сообщения по секциям."""
     html_text = markdown_to_telegram_html(markdown_text)
     if len(html_text) <= max_length:
         return [html_text] if html_text else []
+
+    max_length = max(max_length - _BALANCE_RESERVE, 1)
 
     parts: list[str] = []
     current = ""
@@ -144,4 +172,4 @@ def render_protocol_messages(markdown_text: str, max_length: int = 4000) -> list
         for chunk in _split_oversized_block(block, max_length):
             parts.append(chunk)
     flush()
-    return parts
+    return _balance_tags(parts)
