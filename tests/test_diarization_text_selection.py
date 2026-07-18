@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.join(_root, "src"))
 from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.models.processing import ProcessingRequest, TranscriptionResult  # noqa: E402
 
-
 # ==========================================================================
 # Точка 1: источник транскрипта для промпта сопоставления спикеров
 #          speaker_mapping_service._build_mapping_prompt

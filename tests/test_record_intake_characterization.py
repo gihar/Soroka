@@ -30,7 +30,6 @@ sys.path.insert(0, os.path.join(_root, "src"))
 import src.handlers.message_handlers as mh  # noqa: E402
 from src.exceptions.file import FileSizeError, FileTypeError  # noqa: E402
 
-
 # --- Реальный формат ответа FileService.get_supported_formats() ---
 _SUPPORTED_FORMATS = {
     "audio": ["MP3", "WAV", "M4A", "OGG"],

@@ -17,7 +17,6 @@ import pytest
 from src.models.diarization import Diarization
 from src.utils.transcript_formatter import format_transcript_with_speaker_sequence
 
-
 # --------------------------------------------------------------------------
 # Источники: каждая функция даёт (Diarization, ожидаемые_спикеры, есть_ли_текст)
 # --------------------------------------------------------------------------

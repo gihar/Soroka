@@ -4,7 +4,6 @@ from src.models.processing import TranscriptionResult
 from src.services.processing.protocol_formatter import ProtocolFormatter
 from src.utils.pdf_converter import _is_horizontal_rule
 
-
 # ---------------------------------------------------------------------------
 # PDF: markdown-линейка не должна печататься текстом «---»
 # ---------------------------------------------------------------------------
