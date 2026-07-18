@@ -16,12 +16,14 @@ import sys
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_root, "src"))
 
-from src.prompts.prompts import (
+from src.prompts.prompts import (  # noqa: E402
     FIELD_SPECIFIC_RULES,
     _get_type_specific_instructions,
     build_analysis_prompt,
 )
-from src.services.protocol_render.telegram_html import markdown_to_telegram_html
+from src.services.protocol_render.telegram_html import (  # noqa: E402
+    markdown_to_telegram_html,
+)
 
 # ---------------------------------------------------------------------------
 # Таксономия: management — полноправный тип встречи
