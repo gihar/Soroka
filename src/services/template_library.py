@@ -63,10 +63,6 @@ class TemplateLibrary:
 ## 📌 Задачи и сроки
 {{ action_items }}
 {% endif %}
-{% if deadlines %}
-## Сроки
-{{ deadlines }}
-{% endif %}
 {% if risks_and_blockers %}
 ## ⚠️ Блокеры и риски
 {{ risks_and_blockers }}

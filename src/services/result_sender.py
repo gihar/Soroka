@@ -10,6 +10,7 @@ stateless: everything it needs is passed in explicitly.
 """
 
 import os
+import re
 import tempfile
 
 from aiogram.types import FSInputFile
@@ -76,6 +77,28 @@ async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
             pass
 
 
+def _protocol_file_name(protocol_text: str, source_file_name: str) -> str:
+    """Имя файла протокола: название встречи из первого заголовка.
+
+    Файл пересылают дальше — «Дейли команды.pdf» читается, «voice_message_123.pdf»
+    выдаёт происхождение. Фолбэк — имя исходного файла записи.
+    """
+    title = ""
+    for line in protocol_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            title = stripped[2:].strip()
+            break
+
+    if title:
+        title = re.sub(r'[\\/:*?"<>|]', " ", title)
+        title = re.sub(r"\s+", " ", title).strip()[:60].strip()
+    if title:
+        return title
+
+    return os.path.splitext(os.path.basename(source_file_name))[0][:40] or "protocol"
+
+
 async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
                                  protocol_text: str, output_mode: str) -> bool:
     """Render and send the protocol as a downloadable ``.md``/``.pdf`` document.
@@ -83,7 +106,7 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
     Returns ``True`` only when the document was actually delivered.
     """
     suffix = ".pdf" if output_mode == "pdf" else ".md"
-    safe_name = os.path.splitext(os.path.basename(request.file_name))[0][:40] or "protocol"
+    safe_name = _protocol_file_name(protocol_text, request.file_name)
 
     if output_mode == "pdf":
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as pdf_file:

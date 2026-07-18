@@ -209,12 +209,24 @@ def strip_label_emoji(line: str) -> str:
     return _LABEL_EMOJI_RE.sub(r"\1", line, count=1)
 
 
+_EMOJI_RE = re.compile(r"\s?[☀-➿\U0001F000-\U0001FAFF️]+")
+
+
+def strip_emoji(text: str) -> str:
+    """Снять эмодзи из текста PDF: глифов в TTF-шрифтах нет, вместо них — тофу."""
+    return _EMOJI_RE.sub("", text).strip()
+
+
 def _format_inline(text):
-    """Escape XML special chars, then convert markdown bold/italic to ReportLab tags."""
+    """Escape XML special chars, then convert markdown inline markup to ReportLab tags.
+
+    Согласовано с чат-рендером (protocol_render.telegram_html): **жирный** и
+    `код`; одиночные звёздочки остаются буквальным текстом.
+    """
     from xml.sax.saxutils import escape
-    safe = escape(text)  # & → &amp;  < → &lt;  > → &gt;
-    safe = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', safe)
-    safe = re.sub(r'\*(.*?)\*', r'<i>\1</i>', safe)
+    safe = escape(strip_emoji(text))  # & → &amp;  < → &lt;  > → &gt;
+    safe = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe)
+    safe = re.sub(r'`([^`]+)`', r'<font face="Courier">\1</font>', safe)
     return safe
 
 
