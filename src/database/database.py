@@ -179,11 +179,18 @@ class Database:
             except Exception:
                 pass
             
+            # SQLite запрещает ADD COLUMN с неконстантным DEFAULT (CURRENT_TIMESTAMP):
+            # колонка добавляется без default, затем backfill существующих строк.
             try:
-                await db.execute("ALTER TABLE templates ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                await db.execute("ALTER TABLE templates ADD COLUMN updated_at TIMESTAMP")
+                await db.execute(
+                    "UPDATE templates SET updated_at = CURRENT_TIMESTAMP "
+                    "WHERE updated_at IS NULL"
+                )
                 logger.info("Добавлено поле updated_at в таблицу templates")
-            except Exception:
-                pass
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    logger.error(f"Миграция updated_at не применилась: {exc}")
             
             # Миграция: синхронизируем владельцев шаблонов (legacy created_by = telegram_id)
             await self._sync_template_owner_ids(db)
