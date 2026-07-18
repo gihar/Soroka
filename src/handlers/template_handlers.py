@@ -237,15 +237,26 @@ async def _show_template_preview(message: Message, template_data: dict, template
             ]
         ])
         
+        # Мягкое предупреждение: без {% if %} пустые поля оставят
+        # заголовки над пустотой (принцип «ничего пустого» из PRODUCT.md).
+        conditional_hint = ""
+        if "{% if" not in template_data["template_content"]:
+            conditional_hint = (
+                "\n\n⚠️ В шаблоне нет условных секций `{% if переменная %}` … "
+                "`{% endif %}` — если данных для поля не будет, его заголовок "
+                "останется над пустым местом. Пример — в справке /templates."
+            )
+
         preview_message = (
             f"👀 **Предварительный просмотр шаблона**\n\n"
             f"**Название:** {template_data['template_name']}\n"
             f"**Описание:** {template_data.get('template_description', '*Без описания*')}\n\n"
             f"**Результат с тестовыми данными:**\n\n"
             f"```\n{preview_text}\n```"
+            f"{conditional_hint}"
         )
-        
-        await safe_answer(message, 
+
+        await safe_answer(message,
             preview_message,
             reply_markup=keyboard,
             parse_mode="Markdown"
