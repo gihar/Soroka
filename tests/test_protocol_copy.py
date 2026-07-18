@@ -49,6 +49,12 @@ def test_field_rules_do_not_mandate_fillers():
         assert "не выявлено" not in rule, name
 
 
+def test_field_rules_use_typographic_arrows():
+    """Форматы полей видны читателю протокола: «→», а не ASCII «->»."""
+    for name, rule in FIELD_SPECIFIC_RULES.items():
+        assert "->" not in rule, name
+
+
 # ---------------------------------------------------------------------------
 # PDF: без подписи генератора
 # ---------------------------------------------------------------------------
