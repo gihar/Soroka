@@ -156,6 +156,11 @@ async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> b
     parts = render_protocol_messages(
         protocol_text, max_length=MAX_MESSAGE_LENGTH - PART_PREFIX_RESERVE
     )
+    if not parts:
+        # Протокол из одной markdown-разметки (например, только «---»)
+        # рендерится в ноль сообщений — молчание не считается доставкой.
+        logger.warning("Протокол отрендерился в пустой список сообщений")
+        return False
     total = len(parts)
     delivered = True
     for index, part in enumerate(parts, start=1):
@@ -196,11 +201,8 @@ async def send_result_to_user(
         user = await user_service.get_user_by_telegram_id(user_id)
         output_mode = getattr(user, "protocol_output_mode", None) or "messages"
 
-        result_message = MessageBuilder.processing_complete_message(
-            _build_result_dict(request, result)
-        )
-        await _send_summary_message(bot, chat_id, result_message)
-
+        # Пустой протокол проверяется ДО сводки: «✅ Протокол готов» с последующим
+        # «❌ не получился» — противоречащие друг другу статусы подряд.
         if not result.protocol_text:
             logger.warning("protocol_text пустой или None")
             await safe_send_message(
@@ -211,6 +213,11 @@ async def send_result_to_user(
                 ),
             )
             return False
+
+        result_message = MessageBuilder.processing_complete_message(
+            _build_result_dict(request, result)
+        )
+        await _send_summary_message(bot, chat_id, result_message)
 
         if output_mode in ("file", "pdf"):
             delivered = await _send_protocol_as_file(

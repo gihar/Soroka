@@ -17,8 +17,12 @@ from src.services.protocol_render.telegram_html import (
 _CONTINUATION_MARK = " (продолжение)"
 _SECTION_HEADING_RE = re.compile(r"^##\s+")
 _TAG_RE = re.compile(r"</?(b|i|code)>")
-# Запас на закрывающие/открывающие теги при балансировке частей.
-_BALANCE_RESERVE = 16
+# Запас на закрывающие/открывающие теги при балансировке частей: худший случай —
+# часть начинается переоткрытием <b><i><code> (12) и кончается закрытием
+# </code></i></b> (15).
+_BALANCE_RESERVE = 28
+# Название встречи в шапке части обрезается, чтобы шапка не съедала лимит.
+_TITLE_MAX = 120
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,34 @@ def _split_oversized_block(block: _Block, max_length: int) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
+def _document_header_lines(markdown_text: str) -> list[str]:
+    """Шапка документа для частей 2..M: название встречи и дата.
+
+    Пересланная «Часть 2/3» без шапки — документ без названия; повторяем
+    минимум контекста, не раздувая каждую часть списком участников.
+    """
+    lines = markdown_text.splitlines()
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("# "):
+            return []
+        title = stripped[2:].strip()
+        if len(title) > _TITLE_MAX:
+            title = title[:_TITLE_MAX].rstrip() + "…"
+        header = [_render_line(f"# {title}") or ""]
+        for next_line in lines[index + 1 :]:
+            next_stripped = next_line.strip()
+            if not next_stripped:
+                continue
+            if next_stripped.startswith("**Дата:**"):
+                header.append(_render_line(next_stripped) or "")
+            break
+        return [line for line in header if line]
+    return []
+
+
 def _balance_tags(parts: list[str]) -> list[str]:
     """Закрыть парные теги на границе части и переоткрыть их в следующей.
 
@@ -143,7 +175,9 @@ def render_protocol_messages(markdown_text: str, max_length: int = 4000) -> list
     if len(html_text) <= max_length:
         return [html_text] if html_text else []
 
-    max_length = max(max_length - _BALANCE_RESERVE, 1)
+    header = "\n".join(_document_header_lines(markdown_text))
+    header_overhead = len(header) + 2 if header else 0
+    max_length = max(max_length - _BALANCE_RESERVE - header_overhead, 1)
 
     parts: list[str] = []
     current = ""
@@ -172,4 +206,7 @@ def render_protocol_messages(markdown_text: str, max_length: int = 4000) -> list
         for chunk in _split_oversized_block(block, max_length):
             parts.append(chunk)
     flush()
-    return _balance_tags(parts)
+    parts = _balance_tags(parts)
+    if header:
+        parts = parts[:1] + [f"{header}\n\n{part}" for part in parts[1:]]
+    return parts

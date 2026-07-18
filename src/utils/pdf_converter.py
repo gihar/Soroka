@@ -153,9 +153,10 @@ def _make_header_footer(font, font_bold):
         canvas.setLineWidth(0.5)
         canvas.line(2 * cm, y_header, width - 2 * cm, y_header)
 
+        # Колонтитул без бренда генератора: протокол — документ владельца
+        # встречи, слева пусто, справа номер страницы.
         canvas.setFont(font_bold, 8)
         canvas.setFillColor(COLOR_MUTED)
-        canvas.drawString(2 * cm, y_header + 3 * mm, 'SOROKA')
         canvas.drawRightString(
             width - 2 * cm, y_header + 3 * mm,
             f'стр. {doc.page}'
@@ -191,7 +192,12 @@ def _is_horizontal_rule(stripped_line: str) -> bool:
     return bool(re.match(r'^-{3,}$', stripped_line))
 
 
-_EMOJI_RUN = r"[☀-➿\U0001F000-\U0001FAFF️]+"
+# Диапазоны ниже U+2600 добавлены выборочно (‼ ℹ стрелки ⌚–⏺ ▪–◾ ⬅–⭕ ⤴⤵),
+# чтобы не задеть типографику: тире U+2013/2014, буллет U+2022, № U+2116, … U+2026.
+_EMOJI_RUN = (
+    r"[‼⁉ℹ↔-↪⌚-⏺Ⓜ▪-◾"
+    r"⤴⤵⬅-⭕☀-➿\U0001F000-\U0001FAFF️]+"
+)
 # Эмодзи после начала строки, пробела или ** снимается вместе с хвостовым
 # пробелом, чтобы не оставлять дыр («**👥 Участники:**» → «**Участники:**»).
 _EMOJI_AT_BOUNDARY_RE = re.compile(rf"(^|\s|\*\*){_EMOJI_RUN}\s?")
