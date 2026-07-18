@@ -20,6 +20,8 @@ from src.services.protocol_render import render_protocol_messages
 from src.utils.telegram_safe import safe_send_document, safe_send_message
 
 MAX_MESSAGE_LENGTH = 4000
+# Запас под префикс «<i>Часть N/M</i>\n» у многочастных протоколов.
+PART_PREFIX_RESERVE = 24
 
 
 def _build_result_dict(request: ProcessingRequest, result: ProcessingResult) -> dict:
@@ -84,17 +86,21 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
     safe_name = os.path.splitext(os.path.basename(request.file_name))[0][:40] or "protocol"
 
     if output_mode == "pdf":
-        temp_path = tempfile.mktemp(suffix=".pdf")
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as pdf_file:
+            temp_path = pdf_file.name
         try:
             from src.utils.pdf_converter import convert_markdown_to_pdf_async
             await convert_markdown_to_pdf_async(protocol_text, temp_path)
         except Exception as e:
             logger.error(f"Ошибка конвертации в PDF: {e}")
             # Fall back to a markdown file when PDF conversion fails.
-            temp_path = tempfile.mktemp(suffix=".md")
+            os.remove(temp_path)
             suffix = ".md"
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(protocol_text)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=suffix, delete=False, encoding="utf-8"
+            ) as md_file:
+                temp_path = md_file.name
+                md_file.write(protocol_text)
     else:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=suffix, delete=False, encoding="utf-8"
@@ -121,14 +127,16 @@ async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> b
     show literal ##/** markers, so the chat channel renders it to HTML.
     Returns ``True`` only when every part was delivered.
     """
-    parts = render_protocol_messages(protocol_text, max_length=MAX_MESSAGE_LENGTH)
+    parts = render_protocol_messages(
+        protocol_text, max_length=MAX_MESSAGE_LENGTH - PART_PREFIX_RESERVE
+    )
+    total = len(parts)
     delivered = True
     for index, part in enumerate(parts, start=1):
-        sent = await safe_send_message(bot, chat_id, text=part, parse_mode="HTML")
+        text = f"<i>Часть {index}/{total}</i>\n{part}" if total > 1 else part
+        sent = await safe_send_message(bot, chat_id, text=text, parse_mode="HTML")
         if not sent:
-            logger.warning(
-                f"Часть протокола {index}/{len(parts)} не доставлена (flood control?)"
-            )
+            logger.warning(f"Часть протокола {index}/{total} не доставлена (flood control?)")
             delivered = False
     return delivered
 
