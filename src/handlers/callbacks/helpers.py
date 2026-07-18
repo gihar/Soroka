@@ -4,6 +4,7 @@
 
 from aiogram.types import CallbackQuery
 from loguru import logger
+
 from src.utils.telegram_safe import safe_send_message
 
 
