@@ -38,6 +38,18 @@ def _callback_data_set(keyboard):
     }
 
 
+def _menu_calls(safe_answer_mock):
+    """Вызовы safe_answer с клавиатурой — отправки меню, не статусные тексты.
+
+    Все отправки идут через safe-обёртки (рендер Markdown -> HTML на границе),
+    поэтому меню ищем среди вызовов safe_answer, а не прямого message.answer.
+    """
+    return [
+        call for call in safe_answer_mock.await_args_list
+        if call.kwargs.get("reply_markup") is not None
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Билдер: единая точка правды для текста и кнопок
 # ---------------------------------------------------------------------------
@@ -107,13 +119,14 @@ def _make_message():
 async def _accept_link(monkeypatch, state, message, *, url=_DRIVE_URL):
     """Провести реальный приём ссылки через _process_url."""
     monkeypatch.setattr(mh, "URLService", lambda: _FakeURLService())
-    monkeypatch.setattr(mh, "safe_answer", AsyncMock(return_value=MagicMock()))
+    safe_answer = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr(mh, "safe_answer", safe_answer)
     monkeypatch.setattr(mh, "safe_edit_text", AsyncMock())
     show_menu = AsyncMock()
     import src.handlers.participants_handlers as ph
     monkeypatch.setattr(ph, "show_participants_menu", show_menu)
     await mh._process_url(message, url, state, MagicMock())
-    return show_menu
+    return show_menu, safe_answer
 
 
 def _media_handler_with_service(file_service):
@@ -140,11 +153,13 @@ def _make_document_message(file_id="TG1", file_name="rec.mp3"):
 
 async def _accept_file(monkeypatch, state, message):
     """Провести реальный приём файла через media_handler."""
-    monkeypatch.setattr(mh, "safe_answer", AsyncMock())
+    safe_answer = AsyncMock()
+    monkeypatch.setattr(mh, "safe_answer", safe_answer)
     file_service = MagicMock()
     file_service.validate_file = MagicMock(return_value=None)
     media_handler = _media_handler_with_service(file_service)
     await media_handler(message, state)
+    return safe_answer
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +173,17 @@ async def test_link_shows_record_actions_menu_after_download(monkeypatch):
     state = _fresh_state()
     message = _make_message()
 
-    show_menu = await _accept_link(monkeypatch, state, message)
+    show_menu, safe_answer = await _accept_link(monkeypatch, state, message)
 
     # Меню участников больше не открывается сразу — теперь показывается меню действий.
     show_menu.assert_not_awaited()
 
-    # Отправлено меню действий с записью одним message.answer.
-    assert message.answer.await_count == 1
-    text = message.answer.call_args.args[0]
+    # Отправлено меню действий с записью одной отправкой с клавиатурой.
+    menu = _menu_calls(safe_answer)
+    assert len(menu) == 1
+    text = menu[0].args[1]
     assert "📎 **Файл получен**" in text
-    keyboard = message.answer.call_args.kwargs["reply_markup"]
+    keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {
         "quick_process_file",
         "configure_file_processing",
@@ -188,36 +204,35 @@ async def test_both_flows_build_menu_via_shared_builder(monkeypatch):
     monkeypatch.setattr(QuickActionsUI, "create_record_actions_menu", builder)
 
     file_message = _make_document_message()
-    await _accept_file(monkeypatch, _fresh_state(), file_message)
+    file_safe_answer = await _accept_file(monkeypatch, _fresh_state(), file_message)
 
     link_message = _make_message()
-    await _accept_link(monkeypatch, _fresh_state(), link_message)
+    _, link_safe_answer = await _accept_link(monkeypatch, _fresh_state(), link_message)
 
     # Общий билдер вызван обоими потоками.
     assert builder.call_count == 2
-    for msg in (file_message, link_message):
-        assert msg.answer.await_count == 1
-        assert msg.answer.call_args.args[0] == sentinel_text
-        assert msg.answer.call_args.kwargs["reply_markup"] is sentinel_keyboard
+    for safe_answer in (file_safe_answer, link_safe_answer):
+        menu = _menu_calls(safe_answer)
+        assert len(menu) == 1
+        assert menu[0].args[1] == sentinel_text
+        assert menu[0].kwargs["reply_markup"] is sentinel_keyboard
 
 
 @pytest.mark.asyncio
 async def test_link_and_file_show_identical_record_menu(monkeypatch):
     """Меню для ссылки идентично меню для файла — сравнение выводов обоих потоков."""
     file_message = _make_document_message()
-    await _accept_file(monkeypatch, _fresh_state(), file_message)
+    file_safe_answer = await _accept_file(monkeypatch, _fresh_state(), file_message)
 
     link_message = _make_message()
-    await _accept_link(monkeypatch, _fresh_state(), link_message)
+    _, link_safe_answer = await _accept_link(monkeypatch, _fresh_state(), link_message)
 
-    file_text = file_message.answer.call_args.args[0]
-    link_text = link_message.answer.call_args.args[0]
-    assert link_text == file_text
+    file_menu = _menu_calls(file_safe_answer)[0]
+    link_menu = _menu_calls(link_safe_answer)[0]
+    assert link_menu.args[1] == file_menu.args[1]
 
-    file_kb = file_message.answer.call_args.kwargs["reply_markup"]
-    link_kb = link_message.answer.call_args.kwargs["reply_markup"]
     # Полное равенство клавиатур (pydantic-модели сравниваются по значению).
-    assert link_kb == file_kb
+    assert link_menu.kwargs["reply_markup"] == file_menu.kwargs["reply_markup"]
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +292,8 @@ async def test_link_then_quick_process_enqueues_external_record(monkeypatch):
     link_message = _make_message()
 
     # Ссылка принята и показано меню с кнопкой быстрой обработки.
-    await _accept_link(monkeypatch, state, link_message)
-    keyboard = link_message.answer.call_args.kwargs["reply_markup"]
+    _, safe_answer = await _accept_link(monkeypatch, state, link_message)
+    keyboard = _menu_calls(safe_answer)[0].kwargs["reply_markup"]
     assert "quick_process_file" in _callback_data_set(keyboard)
 
     # Нажатие кнопки «Быстрая обработка» = вызов её колбэка на общем состоянии.

@@ -11,7 +11,7 @@ from loguru import logger
 from exceptions import TemplateValidationError
 from models.template import TemplateCreate
 from services import TemplateService
-from src.utils.telegram_safe import safe_edit_text
+from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 
 class TemplateStates(StatesGroup):
@@ -87,7 +87,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
 ## Следующие шаги
 {{ next_steps }}"""
 
-            await message.answer(
+            await safe_answer(message, 
                 f"✅ Название сохранено: **{name}**\n\n"
                 "Теперь введите содержимое шаблона в формате Markdown.\n\n"
                 "**Доступные переменные:**\n"
@@ -274,7 +274,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
             f"```\n{preview_text}\n```"
         )
         
-        await message.answer(
+        await safe_answer(message, 
             preview_message,
             reply_markup=keyboard,
             parse_mode="Markdown"

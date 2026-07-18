@@ -9,7 +9,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from src.utils.telegram_safe import safe_bot_edit_message
+from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
 
 
 class QueuePositionTracker:
@@ -114,14 +114,15 @@ class QueuePositionTracker:
                     self._last_text = text
             else:
                 # Если message_id еще не установлен, создаем новое сообщение
-                msg = await self.bot.send_message(
+                msg = await safe_send_message(self.bot,
                     chat_id=self.chat_id,
                     text=text,
                     reply_markup=keyboard,
                     parse_mode="Markdown"
                 )
-                self.message_id = msg.message_id
-                self._last_text = text
+                if msg is not None:
+                    self.message_id = msg.message_id
+                    self._last_text = text
                 
         except Exception as e:
             logger.error(f"Ошибка обновления трекера очереди: {e}")
@@ -239,16 +240,17 @@ class QueueTrackerFactory:
         keyboard = tracker.create_cancel_button()
         
         try:
-            msg = await bot.send_message(
+            msg = await safe_send_message(bot,
                 chat_id=chat_id,
                 text=text,
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
-            tracker.message_id = msg.message_id
-            tracker._last_text = text
-            tracker.last_position = initial_position
-            tracker.last_total = total_in_queue
+            if msg is not None:
+                tracker.message_id = msg.message_id
+                tracker._last_text = text
+                tracker.last_position = initial_position
+                tracker.last_total = total_in_queue
             
         except Exception as e:
             logger.error(f"Ошибка создания трекера очереди: {e}")

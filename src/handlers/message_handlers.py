@@ -89,7 +89,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
 
             # Меню действий с записью — единая точка правды для файла и ссылки
             text, keyboard = QuickActionsUI.create_record_actions_menu()
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
@@ -376,7 +376,7 @@ async def _send_long_protocol(message: Message, protocol_text: str):
                 part_text = _fix_markdown_tags(part_text)
                 
                 logger.debug(f"Отправляем часть {i+1}/{len(parts)} длиной {len(part_text)} символов")
-                await message.answer(part_text, parse_mode="Markdown")
+                await safe_answer(message, part_text, parse_mode="Markdown")
                 
                 # Небольшая задержка между сообщениями
                 import asyncio
@@ -397,7 +397,7 @@ async def _send_long_protocol(message: Message, protocol_text: str):
         try:
             truncated_text = protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)"
             logger.info(f"Отправляем обрезанный протокол длиной {len(truncated_text)} символов")
-            await message.answer(truncated_text, parse_mode="Markdown")
+            await safe_answer(message, truncated_text, parse_mode="Markdown")
         except Exception as fallback_error:
             logger.error(f"Не удалось отправить даже обрезанный протокол: {fallback_error}")
             await message.answer("❌ Ошибка при отправке протокола. Попробуйте еще раз.")
@@ -539,7 +539,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки"
         )
         
-        await message.answer(
+        await safe_answer(message, 
             message_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
@@ -624,7 +624,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
 
                 # Меню действий с записью — то же, что и для файла (единая точка правды)
                 text, keyboard = QuickActionsUI.create_record_actions_menu()
-                await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+                await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
                 
             except FileSizeError:
                 from src.config import settings

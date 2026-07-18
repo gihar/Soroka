@@ -83,6 +83,18 @@ def _callback_data_set(keyboard):
     }
 
 
+def _menu_calls(safe_answer_mock):
+    """Вызовы safe_answer с клавиатурой — отправки меню, не статусные тексты.
+
+    Все отправки идут через safe-обёртки (рендер Markdown -> HTML на границе),
+    поэтому меню ищем среди вызовов safe_answer, а не прямого message.answer.
+    """
+    return [
+        call for call in safe_answer_mock.await_args_list
+        if call.kwargs.get("reply_markup") is not None
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Точка 1: приём файла
 # ---------------------------------------------------------------------------
@@ -91,7 +103,8 @@ def _callback_data_set(keyboard):
 @pytest.mark.asyncio
 async def test_document_intake_saves_file_and_shows_action_menu(monkeypatch):
     """Документ → file_id/file_name в состоянии + меню с двумя кнопками."""
-    monkeypatch.setattr(mh, "safe_answer", AsyncMock())
+    safe_answer = AsyncMock()
+    monkeypatch.setattr(mh, "safe_answer", safe_answer)
     file_service = MagicMock()
     file_service.validate_file = MagicMock(return_value=None)
     media_handler = _media_handler_with_service(file_service)
@@ -107,11 +120,12 @@ async def test_document_intake_saves_file_and_shows_action_menu(monkeypatch):
     assert data["file_id"] == "DOC_FILE_ID"
     assert data["file_name"] == "meeting.mp3"
 
-    # Показано меню действий одним message.answer.
-    assert message.answer.await_count == 1
-    text = message.answer.call_args.args[0]
+    # Показано меню действий одной отправкой с клавиатурой.
+    menu = _menu_calls(safe_answer)
+    assert len(menu) == 1
+    text = menu[0].args[1]
     assert "📎 **Файл получен**" in text
-    keyboard = message.answer.call_args.kwargs["reply_markup"]
+    keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 
 
@@ -128,7 +142,8 @@ async def test_document_intake_saves_file_and_shows_action_menu(monkeypatch):
 )
 async def test_all_media_types_show_action_menu(monkeypatch, content_type, file_obj):
     """Любой тип записи-файла ведёт к тому же меню действий, file_id сохранён."""
-    monkeypatch.setattr(mh, "safe_answer", AsyncMock())
+    safe_answer = AsyncMock()
+    monkeypatch.setattr(mh, "safe_answer", safe_answer)
     file_service = MagicMock()
     file_service.validate_file = MagicMock(return_value=None)
     media_handler = _media_handler_with_service(file_service)
@@ -142,7 +157,7 @@ async def test_all_media_types_show_action_menu(monkeypatch, content_type, file_
     assert data["file_id"] == file_obj.file_id
     assert data.get("file_name")  # имя всегда проставлено
 
-    keyboard = message.answer.call_args.kwargs["reply_markup"]
+    keyboard = _menu_calls(safe_answer)[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 
 
@@ -251,12 +266,13 @@ class _FakeURLService:
 def _patch_url_flow(monkeypatch, fake_service):
     """Общие патчи для _process_url: URLService, safe_*, меню участников."""
     monkeypatch.setattr(mh, "URLService", lambda: fake_service)
-    monkeypatch.setattr(mh, "safe_answer", AsyncMock(return_value=MagicMock()))
+    safe_answer = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr(mh, "safe_answer", safe_answer)
     monkeypatch.setattr(mh, "safe_edit_text", AsyncMock())
     show_menu = AsyncMock()
     import src.handlers.participants_handlers as ph
     monkeypatch.setattr(ph, "show_participants_menu", show_menu)
-    return show_menu
+    return show_menu, safe_answer
 
 
 @pytest.mark.asyncio
@@ -267,7 +283,7 @@ async def test_supported_link_downloads_and_shows_record_actions_menu(monkeypatc
     прежнего немедленного меню участников — единая точка входа в обработку.
     """
     fake = _FakeURLService()
-    show_menu = _patch_url_flow(monkeypatch, fake)
+    show_menu, safe_answer = _patch_url_flow(monkeypatch, fake)
 
     message = MagicMock()
     message.from_user = SimpleNamespace(id=111)
@@ -293,11 +309,12 @@ async def test_supported_link_downloads_and_shows_record_actions_menu(monkeypatc
     # Новое поведение: меню участников сразу НЕ открывается.
     show_menu.assert_not_awaited()
 
-    # Показано меню действий с записью одним message.answer с двумя кнопками.
-    assert message.answer.await_count == 1
-    menu_text = message.answer.call_args.args[0]
+    # Показано меню действий с записью одной отправкой с двумя кнопками.
+    menu = _menu_calls(safe_answer)
+    assert len(menu) == 1
+    menu_text = menu[0].args[1]
     assert "📎 **Файл получен**" in menu_text
-    keyboard = message.answer.call_args.kwargs["reply_markup"]
+    keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 
 
@@ -305,7 +322,7 @@ async def test_supported_link_downloads_and_shows_record_actions_menu(monkeypatc
 async def test_unsupported_link_stops_before_download(monkeypatch):
     """Неподдерживаемая ссылка → ошибка, без скачивания и без меню участников."""
     fake = _FakeURLService(supported=False)
-    show_menu = _patch_url_flow(monkeypatch, fake)
+    show_menu, _ = _patch_url_flow(monkeypatch, fake)
 
     message = MagicMock()
     message.from_user = SimpleNamespace(id=111)
@@ -331,7 +348,7 @@ async def test_link_size_error_stops_before_download(monkeypatch):
         file_info=("huge.mp4", 900 * 1024 * 1024, "https://direct/huge"),
         validate_exc=FileSizeError(900 * 1024 * 1024, 300 * 1024 * 1024),
     )
-    show_menu = _patch_url_flow(monkeypatch, fake)
+    show_menu, _ = _patch_url_flow(monkeypatch, fake)
     edit = mh.safe_edit_text  # AsyncMock из _patch_url_flow
 
     message = MagicMock()

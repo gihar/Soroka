@@ -12,7 +12,7 @@ from reliability.health_check import health_checker
 from services.processing_service import ProcessingService
 from src.config import settings
 from src.utils.admin_utils import is_admin
-from src.utils.telegram_safe import safe_edit_text
+from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 # Импорт сервиса очистки
 try:
@@ -43,7 +43,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
         
         try:
             report = monitoring_api.format_status_report()
-            await message.answer(report, parse_mode="Markdown")
+            await safe_answer(message, report, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в status_handler: {e}")
             await message.answer(f"❌ Ошибка при получении статуса: {e}")
@@ -80,7 +80,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
                 report_lines.append("")
             
             report = "\n".join(report_lines)
-            await message.answer(report, parse_mode="Markdown")
+            await safe_answer(message, report, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в health_handler: {e}")
@@ -153,7 +153,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
                 report_lines.append("")
             
             report = "\n".join(report_lines)
-            await message.answer(report, parse_mode="Markdown")
+            await safe_answer(message, report, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в stats_handler: {e}")
@@ -275,7 +275,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             
             current_description = mode_descriptions.get(current_mode, "Неизвестный режим")
             
-            await message.answer(
+            await safe_answer(message, 
                 f"🎙️ **Текущий режим транскрипции:** {current_mode}\n"
                 f"📝 **Описание:** {current_description}\n\n"
                 f"Выберите новый режим:",
@@ -325,7 +325,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
 **Примечание:** Административные команды доступны только авторизованным пользователям.
         """
 
-        await message.answer(help_text, parse_mode="Markdown")
+        await safe_answer(message, help_text, parse_mode="Markdown")
 
     @router.message(Command("performance"))
     async def performance_handler(message: Message):
@@ -370,7 +370,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
                 f"• Эффективность: {metrics_stats['processing']['avg_efficiency_ratio']}\n"
             )
             
-            await message.answer(report, parse_mode="Markdown")
+            await safe_answer(message, report, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в performance_handler: {e}")
@@ -404,7 +404,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
                 f"📊 Память после: {memory_result['memory_after_mb']}MB"
             )
             
-            await status_msg.edit_text(report, parse_mode="Markdown")
+            await safe_edit_text(status_msg, report, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка в optimize_handler: {e}")
@@ -910,7 +910,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
         args_str = raw_args[1].strip() if len(raw_args) > 1 else ""
 
         if not args_str:
-            await message.answer(
+            await safe_answer(message, 
                 "📖 **Использование:**\n"
                 "`/add_model model_id \"Название\" base_url [api_key]`\n\n"
                 "**Пример:**\n"
@@ -924,7 +924,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
         pattern_simple = r'(\S+)\s+(\S+)\s+(https?://\S+)(?:\s+(\S+))?'
         match = re.match(pattern_quoted, args_str) or re.match(pattern_simple, args_str)
         if not match:
-            await message.answer(
+            await safe_answer(message, 
                 "❌ Неверный формат. Используйте:\n"
                 "`/add_model model_id Название base_url [api_key]`",
                 parse_mode="Markdown",
@@ -952,7 +952,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             await repo.upsert(key, name, model_id, base_url, api_key)
 
             api_display = "задан" if api_key else "не задан (используется существующий)"
-            await message.answer(
+            await safe_answer(message, 
                 f"✅ Модель добавлена/обновлена\n\n"
                 f"**Key:** `{key}`\n"
                 f"**Название:** {name}\n"
@@ -978,7 +978,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             repo = model_preset_repo
             presets = await repo.get_all()
             text, keyboard = await _render_models_list(presets)
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в models_handler: {e}")
             await message.answer(f"❌ Ошибка при получении списка моделей: {e}")

@@ -18,7 +18,7 @@ from loguru import logger
 
 from src.config import settings
 from src.services import TemplateService
-from src.utils.telegram_safe import safe_edit_text
+from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.template_sort import sort_templates_by_name
 
 
@@ -390,7 +390,7 @@ def setup_quick_actions_handlers() -> Router:
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
-            await message.answer(
+            await safe_answer(message, 
                 f"📝 **Доступные шаблоны ({len(templates)}):**",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -481,11 +481,11 @@ def setup_quick_actions_handlers() -> Router:
                     "🚀 Отправьте свой первый файл для обработки!"
                 )
             
-            await message.answer(stats_text, parse_mode="Markdown")
+            await safe_answer(message, stats_text, parse_mode="Markdown")
             
         except Exception as e:
             logger.error(f"Ошибка при получении статистики: {e}")
-            await message.answer(
+            await safe_answer(message, 
                 "📊 **Статистика**\n\n"
                 "❌ Временно недоступна статистика.\n"
                 "Попробуйте позже или обратитесь к администратору.",
@@ -497,14 +497,14 @@ def setup_quick_actions_handlers() -> Router:
         """Обработчик кнопки помощи"""
         from ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
-        await message.answer(help_text, parse_mode="Markdown")
+        await safe_answer(message, help_text, parse_mode="Markdown")
     
     @router.message(F.text == "💬 Обратная связь")
     async def feedback_button_handler(message: Message):
         """Обработчик кнопки обратной связи"""
         from ux.feedback_system import FeedbackUI
         keyboard = FeedbackUI.create_feedback_type_keyboard()
-        await message.answer(
+        await safe_answer(message, 
             "💬 **Обратная связь**\n\n"
             "Помогите нам стать лучше! Выберите тип обратной связи:",
             reply_markup=keyboard,
@@ -523,7 +523,7 @@ def setup_quick_actions_handlers() -> Router:
         
         # Показываем меню администратора
         keyboard = QuickActionsUI.create_admin_menu()
-        await message.answer(
+        await safe_answer(message, 
             "🔧 **Меню администратора**\n\n"
             "Выберите действие:",
             reply_markup=keyboard,
@@ -571,7 +571,7 @@ def setup_quick_actions_handlers() -> Router:
         @router.message(Command(alias))
         async def alias_handler(message: Message, command=original):
             """Обработчик команд-алиасов"""
-            await message.answer(
+            await safe_answer(message, 
                 f"↪️ Выполняю команду `/{command}`",
                 parse_mode="Markdown"
             )

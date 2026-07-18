@@ -4,6 +4,7 @@
 
 from aiogram.types import CallbackQuery
 from loguru import logger
+from src.utils.telegram_safe import safe_send_message
 
 
 async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
@@ -47,7 +48,7 @@ async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 409
 
     if len(text) <= max_length:
         try:
-            await bot.send_message(chat_id, text, parse_mode="Markdown")
+            await safe_send_message(bot, chat_id, text, parse_mode="Markdown")
             return
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения: {e}")
@@ -84,7 +85,7 @@ async def _send_long_message(chat_id: int, text: str, bot, max_length: int = 409
                 # Если превышает, отправляем без Markdown
                 await bot.send_message(chat_id, full_message)
             else:
-                await bot.send_message(chat_id, full_message, parse_mode="Markdown")
+                await safe_send_message(bot, chat_id, full_message, parse_mode="Markdown")
 
         except Exception as e:
             logger.error(f"Ошибка отправки части {i+1}: {e}")

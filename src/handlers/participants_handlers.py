@@ -15,6 +15,7 @@ from src.exceptions.file import FileError
 from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
+from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 
 async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
@@ -63,7 +64,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
             "Введите имена в любом формате — по одному на строку."
         )
         
-        await message.answer(
+        await safe_answer(message, 
             message_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
@@ -94,7 +95,7 @@ async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dic
             "Выберите действие:"
         )
 
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             message_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
@@ -122,7 +123,7 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_participants")]
             ])
 
-            await callback.message.answer(
+            await safe_answer(callback.message, 
                 "🔍 **Автоматическое извлечение информации о встрече**\n\n"
                 "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
                 "**Поддерживаемые форматы:**\n"
@@ -154,7 +155,7 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
 
-            await callback.message.answer(
+            await safe_answer(callback.message, 
                 "📝 **Введите список участников**\n\n"
                 "Отправьте список участников текстом (один участник на строку).\n\n"
                 "**Примеры форматов:**\n"
@@ -182,7 +183,7 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
             
-            await callback.message.answer(
+            await safe_answer(callback.message, 
                 "📎 **Загрузите файл с участниками**\n\n"
                 "Отправьте файл в формате .txt или .csv\n\n"
                 "**Формат .txt:**\n"
@@ -238,7 +239,7 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
             ])
             
-            await callback.message.answer(
+            await safe_answer(callback.message, 
                 f"{display_text}\n\n**Использовать этот список?**",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -310,7 +311,7 @@ def setup_participants_handlers() -> Router:
 
             # Проверяем, есть ли участники
             if not all_participants:
-                await message.answer(
+                await safe_answer(message, 
                     "❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
                     "Попробуйте другой текст или отправьте /cancel для отмены.",
                     parse_mode="Markdown"
@@ -320,7 +321,7 @@ def setup_participants_handlers() -> Router:
             # Валидируем объединенный список
             is_valid, error_message = participants_service.validate_participants(all_participants)
             if not is_valid:
-                await message.answer(
+                await safe_answer(message, 
                     f"❌ **Ошибка валидации:**\n{error_message}\n\n"
                     f"Попробуйте еще раз или отправьте /cancel для отмены.",
                     parse_mode="Markdown"
@@ -361,7 +362,7 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await message.answer(
+                await safe_answer(message, 
                     f"🔍 **Автоматически извлечена информация о встрече:**\n\n"
                     f"{display_text}{warning_text}\n\n**Использовать эту информацию?**",
                     reply_markup=keyboard,
@@ -387,7 +388,7 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await message.answer(
+                await safe_answer(message, 
                     f"{display_text}\n\n**Все верно?**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -433,7 +434,7 @@ def setup_participants_handlers() -> Router:
                 is_valid, error_message = participants_service.validate_participants(participants)
                 
                 if not is_valid:
-                    await message.answer(
+                    await safe_answer(message, 
                         f"❌ **Ошибка валидации:**\n{error_message}\n\n"
                         f"Попробуйте еще раз.",
                         parse_mode="Markdown"
@@ -458,7 +459,7 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
                 
-                await message.answer(
+                await safe_answer(message, 
                     f"{display_text}\n\n**Все верно?**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -640,7 +641,7 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
             ])
 
-            await callback.message.answer(
+            await safe_answer(callback.message, 
                 prompt_text,
                 reply_markup=keyboard,
                 parse_mode="Markdown"
