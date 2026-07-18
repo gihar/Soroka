@@ -47,7 +47,7 @@ class SpeakerMappingService:
         Returns:
             Tuple (speaker_mapping, meeting_type):
                 - speaker_mapping: Словарь сопоставления {speaker_id: participant_name}
-                - meeting_type: Тип встречи (technical, business, educational, brainstorm, status, general)
+                - meeting_type: Тип встречи (technical, business, educational, brainstorm, status, management, general)
         """
         try:
             logger.info(f"Начало сопоставления {len(participants)} участников со спикерами и определения типа встречи")
@@ -372,6 +372,7 @@ class SpeakerMappingService:
 - **educational** (образовательное): Обучение, объяснение, изучение, лекции, семинары, тренинги, презентации, передача знаний, менторство
 - **brainstorm** (брейншторм): Генерация идей, креативные сессии, предложение вариантов, обсуждение возможностей, инновации, новые подходы
 - **status** (статусное): Отчеты о прогрессе, статусные обновления, обсуждение метрик, KPI, результатов достижений, стендапы, ретроспективы
+- **management** (управленческое): Совещание у руководителя: раздача поручений, назначение ответственных и сроков, контроль исполнения, директивные решения
 - **general** (общее): Если тип точно не определяется или смешанное содержание
 
 ЛОГИКА ОПРЕДЕЛЕНИЯ:

@@ -137,6 +137,12 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 text="➕ Добавить шаблон",
                 callback_data="add_template"
             )])
+
+            # Справка: как устроены шаблоны (переменные, {% if %}, пример)
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="ℹ️ Как устроены шаблоны",
+                callback_data="templates_help"
+            )])
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             

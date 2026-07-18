@@ -17,6 +17,7 @@ _BULLET_RE = re.compile(r"^(\s*)[-*]\s+(.*)$")
 _HR_RE = re.compile(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _CODE_RE = re.compile(r"`([^`]+)`")
+_FENCE_RE = re.compile(r"^\s*```")
 
 
 def _render_inline(text: str) -> str:
@@ -44,11 +45,35 @@ def _render_line(line: str) -> str | None:
 
 
 def markdown_to_telegram_html(markdown_text: str) -> str:
-    """Перевести Markdown-протокол в текст для parse_mode="HTML"."""
-    rendered_lines = [
-        rendered
-        for line in markdown_text.splitlines()
-        if (rendered := _render_line(line)) is not None
-    ]
+    """Перевести Markdown-протокол в текст для parse_mode="HTML".
+
+    ```-фенсы становятся <pre>: содержимое экранируется и не трогается
+    инлайн-разметкой. Незакрытый фенс не теряет контент.
+    """
+    rendered_lines: list[str] = []
+    code_lines: list[str] = []
+    in_code = False
+
+    def close_code_block() -> None:
+        nonlocal code_lines
+        if code_lines:
+            escaped = html.escape("\n".join(code_lines), quote=False)
+            rendered_lines.append(f"<pre>{escaped}</pre>")
+        code_lines = []
+
+    for line in markdown_text.splitlines():
+        if _FENCE_RE.match(line):
+            if in_code:
+                close_code_block()
+            in_code = not in_code
+            continue
+        if in_code:
+            code_lines.append(line)
+            continue
+        rendered = _render_line(line)
+        if rendered is not None:
+            rendered_lines.append(rendered)
+    close_code_block()
+
     joined = "\n".join(rendered_lines)
     return re.sub(r"\n{3,}", "\n\n", joined).strip("\n")

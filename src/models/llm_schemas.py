@@ -100,7 +100,7 @@ class UnifiedProtocolSchema(BaseModel):
 class SpeakerMappingSchema(BaseModel):
     """Схема для сопоставления спикеров с участниками и определения типа встречи"""
     meeting_type: str = Field(
-        description="Тип встречи (technical, business, educational, brainstorm, status, general)"
+        description="Тип встречи (technical, business, educational, brainstorm, status, management, general)"
     )
     speaker_mappings: Dict[str, str] = Field(
         description="Сопоставление speaker_id -> participant_name в формате 'Имя Фамилия' (БЕЗ отчества)"
@@ -256,7 +256,7 @@ class MeetingAnalysisSchema(BaseModel):
     Схема для первого запроса: анализ типа встречи и сопоставление спикеров
     """
     meeting_type: str = Field(
-        description="Тип встречи (technical, business, educational, brainstorm, status, general)"
+        description="Тип встречи (technical, business, educational, brainstorm, status, management, general)"
     )
     speaker_mappings: Dict[str, str] = Field(
         default_factory=dict,
@@ -339,7 +339,7 @@ class ExtractionSchema(BaseModel):
 
     # Meeting structure extraction results
     meeting_title: str = Field(default="", description="Название встречи")
-    meeting_type: str = Field(default="", description="Тип встречи определенный из анализа (technical, business, educational, brainstorm, status, general)")
+    meeting_type: str = Field(default="", description="Тип встречи определенный из анализа (technical, business, educational, brainstorm, status, management, general)")
     meeting_date: str = Field(default="", description="Дата встречи")
     meeting_time: str = Field(default="", description="Время встречи")
     participants: str = Field(default="", description="Список участников (каждое с новой строки через \\n)")
@@ -470,7 +470,7 @@ class ConsolidatedProtocolSchema(BaseModel):
     # Meeting classification and type-specific data
     meeting_type: str = Field(
         default="general",
-        description="Тип встречи (general, technical, business, educational, brainstorm, status)"
+        description="Тип встречи (general, technical, business, educational, brainstorm, status, management)"
     )
     type_specific_observations: str = Field(
         default="",

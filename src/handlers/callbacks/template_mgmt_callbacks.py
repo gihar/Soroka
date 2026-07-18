@@ -49,6 +49,26 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             logger.error(f"Ошибка в view_template_category_callback: {e}")
             await callback.answer("❌ Ошибка при загрузке шаблонов")
 
+    @router.callback_query(F.data == "templates_help")
+    async def templates_help_callback(callback: CallbackQuery):
+        """Справка по устройству шаблонов: переменные, {% if %}, пример."""
+        try:
+            from src.ux.message_builder import MessageBuilder
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_templates")
+            ]])
+            await safe_edit_text(
+                callback.message,
+                MessageBuilder.templates_help_message(),
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+            await _safe_callback_answer(callback)
+        except Exception as e:
+            logger.error(f"Ошибка в templates_help_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка")
+
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
         """Обработчик просмотра шаблона"""

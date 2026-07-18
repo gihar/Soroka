@@ -75,41 +75,12 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             # Упрощенный сценарий: сразу переходим к содержимому шаблона
             await state.set_state(TemplateStates.waiting_for_content)
 
-            example_template = """# Пример шаблона
+            from src.ux.message_builder import MessageBuilder
 
-## Информация о встрече
-**Дата:** {{ date }}
-**Участники:** {{ participants }}
-
-## Ключевые решения
-{{ decisions }}
-
-## Следующие шаги
-{{ next_steps }}"""
-
-            await safe_answer(message, 
+            await safe_answer(message,
                 f"✅ Название сохранено: **{name}**\n\n"
-                "Теперь введите содержимое шаблона в формате Markdown.\n\n"
-                "**Доступные переменные:**\n"
-                "• `{{ participants }}` - участники встречи\n"
-                "• `{{ date }}` - дата встречи\n"
-                "• `{{ time }}` - время встречи\n"
-                "• `{{ agenda }}` - повестка дня\n"
-                "• `{{ discussion }}` - обсуждение\n"
-                "• `{{ decisions }}` - принятые решения\n"
-                "• `{{ tasks }}` - поставленные задачи\n"
-                "• `{{ next_steps }}` - следующие шаги\n"
-                "• `{{ key_points }}` - ключевые моменты\n"
-                "• `{{ action_items }}` - задачи к выполнению\n"
-                "• `{{ technical_issues }}` - технические вопросы\n"
-                "• `{{ architecture_decisions }}` - архитектурные решения\n"
-                "• `{{ technical_tasks }}` - технические задачи\n"
-                "• `{{ risks_and_blockers }}` - риски и блокеры\n"
-                "• `{{ next_sprint_plans }}` - планы на следующий спринт\n"
-                "• `{{ speakers_summary }}` - краткая информация о говорящих\n"
-                "• `{{ speaker_contributions }}` - вклад каждого участника\n"
-                "• `{{ dialogue_analysis }}` - анализ диалога между участниками\n\n"
-                f"**Пример шаблона:**\n```\n{example_template}\n```",
+                + MessageBuilder.templates_help_message()
+                + "\n\nТеперь отправьте содержимое шаблона одним сообщением.",
                 parse_mode="Markdown"
             )
         except Exception as e:
