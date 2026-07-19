@@ -131,15 +131,33 @@ def test_protocol_data_standard_has_exact_keys():
 
 
 # ---------------------------------------------------------------------------
-# brief_field_rules: инструкции секций для промпта
+# brief_field_rules: инструкции для промпта покрывают ВСЕ ключи схемы (шапка +
+# extra + секции). Паритет с legacy: без правил шапочных полей LLM теряет формат
+# meeting_title/participants/date/time — тихая деградация шапки.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
-def test_field_rules_cover_sections_and_header_extras(brief):
-    expected = {s.key: s.instruction for s in brief.sections}
+def test_field_rules_keys_match_schema_keys(brief):
+    """Ключи правил и ключи protocol_data-схемы совпадают — не разъезжаются."""
+    schema_keys = set(_protocol_data_node(brief)["properties"])
+    assert set(brief_field_rules(brief)) == schema_keys
+
+
+@pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
+def test_field_rules_include_header_fields(brief):
+    """Шапочные поля несут тексты из FIELD_SPECIFIC_RULES (паритет с legacy)."""
+    rules = brief_field_rules(brief)
+    for key in HEADER_FIELDS:
+        assert rules[key] == FIELD_SPECIFIC_RULES[key]
+
+
+@pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
+def test_field_rules_cover_header_extras_and_sections(brief):
+    expected = {key: FIELD_SPECIFIC_RULES.get(key, "") for key in HEADER_FIELDS}
     if brief.include_lecturer_in_header:
         expected["lecturer"] = FIELD_SPECIFIC_RULES["lecturer"]
+    expected.update({s.key: s.instruction for s in brief.sections})
     assert brief_field_rules(brief) == expected
 
 

@@ -51,6 +51,20 @@ def brief_to_template_content(brief: ProtocolBrief) -> str:
     return title + _header(brief) + "\n" + body
 
 
+def _protocol_data_keys(brief: ProtocolBrief) -> tuple[str, ...]:
+    """Порядок фиксированных ключей ``protocol_data``: шапка + extra + секции.
+
+    Единый источник ключей для схемы (``brief_to_schema``) и правил промпта
+    (``brief_field_rules``) — чтобы набор ключей в схеме и в промпте не
+    разъезжался: новый ключ автоматически попадёт и туда, и туда.
+    """
+    return (
+        *HEADER_FIELDS,
+        *_header_extra_keys(brief),
+        *(section.key for section in brief.sections),
+    )
+
+
 def _protocol_data_object(brief: ProtocolBrief) -> dict:
     """Закрытый объект ``protocol_data``: фиксированные ключи (шапка + секции).
 
@@ -58,14 +72,7 @@ def _protocol_data_object(brief: ProtocolBrief) -> dict:
     strict mode начинает гарантировать покрытие секций (в отличие от legacy
     Dict[str, str], где ключи динамические).
     """
-    properties = {
-        key: {"type": "string"}
-        for key in (
-            *HEADER_FIELDS,
-            *_header_extra_keys(brief),
-            *(section.key for section in brief.sections),
-        )
-    }
+    properties = {key: {"type": "string"} for key in _protocol_data_keys(brief)}
     return {
         "type": "object",
         "properties": properties,
@@ -93,11 +100,16 @@ def brief_to_schema(brief: ProtocolBrief) -> dict:
 
 
 def brief_field_rules(brief: ProtocolBrief) -> dict[str, str]:
-    """Правила извлечения для промпта: {ключ: инструкция}.
+    """Правила извлечения для промпта: {ключ: инструкция} для ВСЕХ ключей схемы.
 
-    Секции — плюс шапочные extra-поля (лекция: lecturer), которые тоже
-    заполняются LLM и потому нуждаются в инструкции.
+    Ключи — тот же источник, что и у схемы (``_protocol_data_keys``), поэтому
+    правила и схема не разъезжаются. Шапочные и extra-поля (лекция: lecturer)
+    тоже получают правила: паритет с legacy-путём — иначе LLM теряет форматы
+    meeting_title/participants/date/time (тихая деградация шапки). Тексты — из
+    ``FIELD_SPECIFIC_RULES``; секции несут их в ``section.instruction``.
     """
-    rules = {key: FIELD_SPECIFIC_RULES.get(key, "") for key in _header_extra_keys(brief)}
-    rules.update({section.key: section.instruction for section in brief.sections})
-    return rules
+    section_rules = {section.key: section.instruction for section in brief.sections}
+    return {
+        key: section_rules.get(key, FIELD_SPECIFIC_RULES.get(key, ""))
+        for key in _protocol_data_keys(brief)
+    }
