@@ -32,6 +32,8 @@ from src.reliability import (
     RetryManager,
     global_rate_limiter,
 )
+from src.services.brief_compiler import brief_field_rules, brief_to_schema
+from src.services.protocol_briefs import get_brief_for
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
 
@@ -41,6 +43,28 @@ def _is_insufficient_credits_error(exc: Exception) -> bool:
         return True
     text = str(exc).lower()
     return "error code: 402" in text or "more credits" in text
+
+
+def _select_generation_contract(
+    template_name: Optional[str], template_variables: Dict[str, str]
+) -> tuple[Dict[str, Any], str]:
+    """Единая точка выбора контракта ЭТАПА 2 (схема + системный промпт).
+
+    Системный шаблон (есть бриф по имени) → строгая бриф-схема с фиксированными
+    ключами + инструкции секций брифа. Кастомный шаблон (брифа нет) → legacy-путь:
+    PROTOCOL_DATA_SCHEMA (Dict[str, str]) + правила, выведенные из переменных
+    шаблона. Ничего в legacy-ветке не меняется.
+    """
+    brief = get_brief_for(template_name) if template_name else None
+    if brief is not None:
+        return (
+            brief_to_schema(brief),
+            build_generation_system_prompt(field_rules=brief_field_rules(brief)),
+        )
+    return (
+        PROTOCOL_DATA_SCHEMA,
+        build_generation_system_prompt(template_variables=template_variables),
+    )
 
 
 class ProtocolGenerator:
@@ -259,8 +283,13 @@ class ProtocolGenerator:
 
         client = self._get_client(preset)
 
+        # Единая точка: бриф-контракт для системного шаблона, legacy — для кастомного.
+        generation_schema, generation_system_prompt = _select_generation_contract(
+            kwargs.get('template_name'), template_variables
+        )
+
         generation_result = await self._call_openai(
-            system_prompt=build_generation_system_prompt(template_variables=template_variables),
+            system_prompt=generation_system_prompt,
             user_prompt=build_generation_prompt(
                 transcription=analysis_transcription,
                 template_variables=template_variables,
@@ -269,7 +298,7 @@ class ProtocolGenerator:
                 meeting_agenda=kwargs.get('meeting_agenda'),
                 project_list=kwargs.get('project_list')
             ),
-            schema=PROTOCOL_DATA_SCHEMA,
+            schema=generation_schema,
             step_name="Generation",
             model=selected_model,
             client=client

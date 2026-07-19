@@ -5,6 +5,9 @@
 (инвариант Фазы 1, проверяется снапшот-тестом).
 """
 
+import copy
+
+from src.models.llm_schemas import PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import FIELD_SPECIFIC_RULES
 from src.services.protocol_briefs import HEADER_FIELDS, ProtocolBrief
 
@@ -48,13 +51,12 @@ def brief_to_template_content(brief: ProtocolBrief) -> str:
     return title + _header(brief) + "\n" + body
 
 
-def brief_to_schema(brief: ProtocolBrief) -> dict:
-    """Строгая схема с фиксированными ключами: шапочные поля + секции.
+def _protocol_data_object(brief: ProtocolBrief) -> dict:
+    """Закрытый объект ``protocol_data``: фиксированные ключи (шапка + секции).
 
-    Форма обёртки как у PROTOCOL_DATA_SCHEMA. В отличие от legacy Dict[str, str]
-    (additionalProperties), здесь набор ключей закрыт — strict mode начинает
-    гарантировать покрытие секций. Все поля required, string; каждый объектный
-    узел (здесь только корень) — additionalProperties: false.
+    Все поля required, string; ``additionalProperties: false`` закрывает набор —
+    strict mode начинает гарантировать покрытие секций (в отличие от legacy
+    Dict[str, str], где ключи динамические).
     """
     properties = {
         key: {"type": "string"}
@@ -65,15 +67,29 @@ def brief_to_schema(brief: ProtocolBrief) -> dict:
         )
     }
     return {
-        "name": "protocol_data",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": properties,
-            "required": list(properties),
-            "additionalProperties": False,
-        },
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
     }
+
+
+def brief_to_schema(brief: ProtocolBrief) -> dict:
+    """Строгая схема, ЗЕРКАЛЯЩАЯ прод-обёртку ``PROTOCOL_DATA_SCHEMA``.
+
+    Корень и мета-поля (``quality_score``, ``issues``, ``context_used``)
+    идентичны прод-схеме — иначе парсинг ``generation_result.get('protocol_data')``
+    не совпал бы. Отличие ровно одно: ``protocol_data`` — не Dict[str, str], а
+    закрытый объект с фиксированными ключами (шапка + секции брифа). Из-за этого
+    ``protocol_data`` становится required: провайдер исключает из required только
+    Dict-поля (с типизированным additionalProperties), а закрытый объект — нет.
+    """
+    schema = copy.deepcopy(PROTOCOL_DATA_SCHEMA)
+    root = schema["schema"]
+    root["properties"]["protocol_data"] = _protocol_data_object(brief)
+    if "protocol_data" not in root["required"]:
+        root["required"] = [*root["required"], "protocol_data"]
+    return schema
 
 
 def brief_field_rules(brief: ProtocolBrief) -> dict[str, str]:

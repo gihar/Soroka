@@ -7,6 +7,7 @@
 import pytest
 from fixtures.system_templates_snapshot import SYSTEM_TEMPLATES_SNAPSHOT
 
+from src.models.llm_schemas import PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import FIELD_SPECIFIC_RULES
 from src.services.brief_compiler import (
     brief_field_rules,
@@ -47,13 +48,36 @@ def test_get_brief_for_returns_none_for_custom_template():
 
 
 # ---------------------------------------------------------------------------
-# brief_to_schema: строгая схема с фиксированными ключами
+# brief_to_schema: строгая схема ЗЕРКАЛИТ прод-обёртку PROTOCOL_DATA_SCHEMA.
+# Корень — {protocol_data, quality_score, issues, context_used}; фиксированные
+# ключи брифа живут ВНУТРИ закрытого объекта protocol_data (совместимо с
+# парсингом generation_result.get('protocol_data')).
 # ---------------------------------------------------------------------------
 
 
+def _protocol_data_node(brief):
+    """Узел protocol_data строгой схемы брифа."""
+    return brief_to_schema(brief)["schema"]["properties"]["protocol_data"]
+
+
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
-def test_schema_keys_are_header_fields_plus_sections(brief):
-    props = brief_to_schema(brief)["schema"]["properties"]
+def test_schema_root_mirrors_prod_wrapper(brief):
+    root = brief_to_schema(brief)["schema"]
+    # Тот же набор корневых ключей, что у прод-схемы.
+    assert set(root["properties"]) == set(PROTOCOL_DATA_SCHEMA["schema"]["properties"])
+    # Мета-поля идентичны прод-схеме — меняется только protocol_data.
+    for meta in ("quality_score", "issues", "context_used"):
+        assert (
+            root["properties"][meta]
+            == PROTOCOL_DATA_SCHEMA["schema"]["properties"][meta]
+        )
+    # protocol_data — закрытый объект (не Dict), поэтому обязан быть в required.
+    assert "protocol_data" in root["required"]
+
+
+@pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
+def test_protocol_data_keys_are_header_fields_plus_sections(brief):
+    props = _protocol_data_node(brief)["properties"]
     expected = set(HEADER_FIELDS) | {s.key for s in brief.sections}
     if brief.include_lecturer_in_header:
         expected.add("lecturer")  # шапка лекции показывает лектора -> ключ обязателен
@@ -78,16 +102,16 @@ def test_schema_every_object_node_is_closed(brief):
 
 
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
-def test_schema_all_fields_required_string(brief):
-    root = brief_to_schema(brief)["schema"]
-    props = root["properties"]
+def test_protocol_data_fields_required_string(brief):
+    node = _protocol_data_node(brief)
+    props = node["properties"]
     for key, prop in props.items():
         assert prop == {"type": "string"}, key
-    assert set(root["required"]) == set(props)
+    assert set(node["required"]) == set(props)
 
 
-def test_schema_standard_has_exact_keys():
-    props = brief_to_schema(get_brief_for("Стандартный протокол встречи"))["schema"][
+def test_protocol_data_standard_has_exact_keys():
+    props = _protocol_data_node(get_brief_for("Стандартный протокол встречи"))[
         "properties"
     ]
     assert set(props) == {
@@ -140,9 +164,9 @@ def test_field_rules_standard_carry_real_texts():
 
 def test_lecture_schema_and_rules_include_lecturer():
     lecture = get_brief_for("Лекция и презентация")
-    root = brief_to_schema(lecture)["schema"]
-    assert root["properties"]["lecturer"] == {"type": "string"}
-    assert "lecturer" in root["required"]
+    node = _protocol_data_node(lecture)
+    assert node["properties"]["lecturer"] == {"type": "string"}
+    assert "lecturer" in node["required"]
     assert brief_field_rules(lecture)["lecturer"] == FIELD_SPECIFIC_RULES["lecturer"]
 
 
@@ -152,7 +176,7 @@ def test_lecture_schema_and_rules_include_lecturer():
     ids=lambda b: b.template_name,
 )
 def test_non_lecture_briefs_omit_lecturer(brief):
-    root = brief_to_schema(brief)["schema"]
-    assert "lecturer" not in root["properties"]
-    assert "lecturer" not in root["required"]
+    node = _protocol_data_node(brief)
+    assert "lecturer" not in node["properties"]
+    assert "lecturer" not in node["required"]
     assert "lecturer" not in brief_field_rules(brief)
