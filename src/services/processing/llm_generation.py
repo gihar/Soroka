@@ -13,16 +13,7 @@ from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
 from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.services.protocol_validator import protocol_validator
-
-
-def _extract_template_name(template: Any) -> Optional[str]:
-    """Имя шаблона устойчиво: ``template`` бывает объектом (атрибут ``name``) или
-    dict (ключ ``"name"``). ``None`` — если имени нет (тогда генерация идёт
-    legacy-путём)."""
-    return (
-        getattr(template, "name", None)
-        or (template.get("name") if isinstance(template, dict) else None)
-    )
+from src.utils.template_sort import template_name_of
 
 
 async def resolve_active_preset(app_settings_repo, preset_repo) -> Dict[str, Any]:
@@ -106,7 +97,7 @@ class LLMGenerationService:
                 preset=active_preset,
                 transcription=transcription_text,
                 template_variables=template_variables,
-                template_name=_extract_template_name(template),
+                template_name=template_name_of(template),
                 participants_list=participants_list,
                 meeting_metadata=meeting_metadata,
                 speaker_mapping=request.speaker_mapping,

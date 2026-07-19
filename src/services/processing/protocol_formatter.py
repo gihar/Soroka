@@ -126,10 +126,10 @@ class ProtocolFormatter:
                             "- рекомендуется другой шаблон"
                         )
                         if warnings is not None:
-                            template_name = (
-                                getattr(template, "name", None)
-                                or (template.get("name") if isinstance(template, dict) else None)
-                                or "выбранный"
+                            from src.utils.template_sort import template_name_of
+
+                            template_name = template_name_of(
+                                template, default="выбранный"
                             )
                             warnings.append(
                                 f"⚠️ Шаблон «{template_name}» слабо совпал с содержимым "
