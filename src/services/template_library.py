@@ -1,6 +1,11 @@
 """
 Библиотека системных шаблонов протоколов.
 
+Единый источник структуры — брифы (``protocol_briefs``): content каждого
+системного шаблона генерируется компилятором (``brief_compiler``) из брифа,
+байт-в-байт равного прежнему тексту. Метаданные (имя, категория, теги, ключевые
+слова) живут здесь.
+
 Единая структура (см. PRODUCT.md и ADR о канальном рендере):
 - шапка: название встречи ({{ meeting_title }} с фолбэком на тип), дата, участники;
 - порядок секций: решения -> задачи/сроки -> блокеры -> спец-секции типа встречи
@@ -20,10 +25,16 @@
 
 from typing import Any, Dict, List
 
-_HEADER = """{% if date %}**Дата:** {{ date }}{% if time %} · {{ time }}{% endif %}
-{% endif %}{% if participants %}**👥 Участники:**
-{{ participants }}
-{% endif %}"""
+from src.services.brief_compiler import brief_to_template_content
+from src.services.protocol_briefs import get_brief_for
+
+
+def _content(template_name: str) -> str:
+    """Jinja-контент системного шаблона, собранный из его брифа."""
+    brief = get_brief_for(template_name)
+    if brief is None:  # pragma: no cover - защита от рассинхронизации имён
+        raise KeyError(f"Нет брифа для системного шаблона: {template_name!r}")
+    return brief_to_template_content(brief)
 
 
 class TemplateLibrary:
@@ -50,43 +61,7 @@ class TemplateLibrary:
             "tags": ["general", "meeting"],
             "keywords": ["встреча", "протокол", "общий"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Протокол встречи' }}
-
-"""
-            + _HEADER
-            + """
-{% if agenda %}
-## 📋 Повестка дня
-{{ agenda }}
-{% endif %}
-{% if decisions %}
-## ✅ Решения
-{{ decisions }}
-{% endif %}
-{% if action_items %}
-## 📌 Задачи и сроки
-{{ action_items }}
-{% endif %}
-{% if risks_and_blockers %}
-## ⚠️ Блокеры и риски
-{{ risks_and_blockers }}
-{% endif %}
-{% if key_points %}
-## 💡 Ключевые выводы
-{{ key_points }}
-{% endif %}
-{% if discussion %}
-## 💬 Обсуждение
-{{ discussion }}
-{% endif %}
-{% if questions %}
-## ❓ Открытые вопросы
-{{ questions }}
-{% endif %}
-{% if next_steps %}
-## 📅 Следующие шаги
-{{ next_steps }}
-{% endif %}""",
+            "content": _content("Стандартный протокол встречи"),
         }
 
     @staticmethod
@@ -98,27 +73,7 @@ class TemplateLibrary:
             "tags": ["brief", "summary"],
             "keywords": ["резюме", "краткое", "summary"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Резюме встречи' }}
-
-"""
-            + _HEADER
-            + """
-{% if decisions %}
-## ✅ Решения
-{{ decisions }}
-{% endif %}
-{% if action_items %}
-## 📌 Задачи и сроки
-{{ action_items }}
-{% endif %}
-{% if key_points %}
-## 💡 Ключевые выводы
-{{ key_points }}
-{% endif %}
-{% if next_steps %}
-## 📅 Следующие шаги
-{{ next_steps }}
-{% endif %}""",
+            "content": _content("Краткое резюме встречи"),
         }
 
     @staticmethod
@@ -130,47 +85,7 @@ class TemplateLibrary:
             "tags": ["technical", "engineering", "code_review"],
             "keywords": ["техническое", "разработка", "код", "архитектура"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Техническое совещание' }}
-
-"""
-            + _HEADER
-            + """
-{% if agenda %}
-## 📋 Повестка дня
-{{ agenda }}
-{% endif %}
-{% if decisions %}
-## ✅ Решения
-{{ decisions }}
-{% endif %}
-{% if action_items %}
-## 📌 Задачи и сроки
-{{ action_items }}
-{% endif %}
-{% if risks_and_blockers %}
-## ⚠️ Блокеры и риски
-{{ risks_and_blockers }}
-{% endif %}
-{% if technical_issues %}
-## Технические вопросы
-{{ technical_issues }}
-{% endif %}
-{% if architecture_decisions %}
-## Архитектурные решения
-{{ architecture_decisions }}
-{% endif %}
-{% if technical_tasks %}
-## Технические задачи
-{{ technical_tasks }}
-{% endif %}
-{% if discussion %}
-## 💬 Обсуждение
-{{ discussion }}
-{% endif %}
-{% if next_sprint_plans %}
-## 📅 Планы на следующий спринт
-{{ next_sprint_plans }}
-{% endif %}""",
+            "content": _content("Техническое совещание"),
         }
 
     @staticmethod
@@ -183,21 +98,7 @@ class TemplateLibrary:
             "tags": ["поручения", "од", "руководители", "протокол"],
             "keywords": ["од", "поручение", "задача", "срок", "ответственный"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Протокол поручений' }}
-
-"""
-            + _HEADER
-            + """
-{% if tasks_od %}
-## 📌 Поручения
-{{ tasks_od }}
-{% else %}
-Поручений в записи не зафиксировано.
-{% endif %}
-{% if additional_notes %}
-## Дополнительные заметки
-{{ additional_notes }}
-{% endif %}""",
+            "content": _content("Протокол ОД (Поручения)"),
         }
 
     @staticmethod
@@ -209,39 +110,7 @@ class TemplateLibrary:
             "tags": ["daily", "scrum"],
             "keywords": ["standup", "вчера", "сегодня", "блокеры", "ежедневно"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Дейли' }}
-
-"""
-            + _HEADER
-            + """
-{% if decisions %}
-## ✅ Решения
-{{ decisions }}
-{% endif %}
-{% if action_items %}
-## 📌 Задачи и сроки
-{{ action_items }}
-{% endif %}
-{% if risks_and_blockers %}
-## ⚠️ Блокеры и риски
-{{ risks_and_blockers }}
-{% endif %}
-{% if yesterday_progress %}
-## Вчера
-{{ yesterday_progress }}
-{% endif %}
-{% if today_plans %}
-## Сегодня
-{{ today_plans }}
-{% endif %}
-{% if discussion %}
-## 💬 Обсуждение
-{{ discussion }}
-{% endif %}
-{% if next_steps %}
-## 📅 Следующие шаги
-{{ next_steps }}
-{% endif %}""",
+            "content": _content("Дейли"),
         }
 
     @staticmethod
@@ -253,43 +122,7 @@ class TemplateLibrary:
             "tags": ["retrospective", "agile", "improvement"],
             "keywords": ["ретроспектива", "что хорошо", "что улучшить", "действия", "retro"],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Ретроспектива спринта' }}
-
-"""
-            + _HEADER
-            + """
-{% if decisions %}
-## ✅ Решения
-{{ decisions }}
-{% endif %}
-{% if action_items %}
-## 📌 Задачи и сроки
-{{ action_items }}
-{% endif %}
-{% if risks_and_blockers %}
-## ⚠️ Блокеры и риски
-{{ risks_and_blockers }}
-{% endif %}
-{% if went_well %}
-## Что прошло хорошо
-{{ went_well }}
-{% endif %}
-{% if to_improve %}
-## Что улучшить
-{{ to_improve }}
-{% endif %}
-{% if dialogue_analysis %}
-## Анализ взаимодействия
-{{ dialogue_analysis }}
-{% endif %}
-{% if discussion %}
-## 💬 Обсуждение
-{{ discussion }}
-{% endif %}
-{% if next_sprint_plans %}
-## 📅 Следующий спринт
-{{ next_sprint_plans }}
-{% endif %}""",
+            "content": _content("Ретроспектива спринта"),
         }
 
     @staticmethod
@@ -305,51 +138,5 @@ class TemplateLibrary:
                 "определения", "примеры", "материал",
             ],
             "is_default": True,
-            "content": """# {{ meeting_title or 'Лекция' }}
-
-{% if date %}**Дата:** {{ date }}{% if time %} · {{ time }}{% endif %}
-{% endif %}{% if lecturer %}**Лектор:** {{ lecturer }}
-{% endif %}{% if participants %}**👥 Участники:**
-{{ participants }}
-{% endif %}
-{% if learning_objectives %}
-## Цели обучения
-{{ learning_objectives }}
-{% endif %}
-{% if agenda %}
-## 📋 Структура лекции
-{{ agenda }}
-{% endif %}
-{% if key_concepts %}
-## Ключевые концепции
-{{ key_concepts }}
-{% endif %}
-{% if discussion %}
-## 💬 Основной материал
-{{ discussion }}
-{% endif %}
-{% if examples_and_cases %}
-## Примеры и кейсы
-{{ examples_and_cases }}
-{% endif %}
-{% if questions_and_answers %}
-## ❓ Вопросы и ответы
-{{ questions_and_answers }}
-{% endif %}
-{% if key_points %}
-## 💡 Ключевые выводы
-{{ key_points }}
-{% endif %}
-{% if homework %}
-## Домашнее задание
-{{ homework }}
-{% endif %}
-{% if additional_materials %}
-## Дополнительные материалы
-{{ additional_materials }}
-{% endif %}
-{% if next_steps %}
-## 📅 Следующие шаги
-{{ next_steps }}
-{% endif %}""",
+            "content": _content("Лекция и презентация"),
         }
