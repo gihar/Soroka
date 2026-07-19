@@ -3,7 +3,22 @@
 """
 
 import re
-from typing import Dict
+from typing import Dict, Tuple
+
+_SPEAKER_LABEL_RE = re.compile(r"\bSPEAKER[_\s](\d+)\b")
+
+
+def humanize_speaker_labels(text: str) -> Tuple[str, int]:
+    """Заменить оставшиеся метки SPEAKER_N на «Участник N».
+
+    Метка диаризации в пересланном «наверх» протоколе — сырой машинный
+    вывод (анти-референс PRODUCT.md). Возвращает (текст, число разных
+    несопоставленных говорящих) — по счётчику владелец получает пометку.
+    """
+    numbers = set(_SPEAKER_LABEL_RE.findall(text))
+    if not numbers:
+        return text, 0
+    return _SPEAKER_LABEL_RE.sub(r"Участник \1", text), len(numbers)
 
 
 def replace_speakers_in_text(text: str, speaker_mapping: Dict[str, str]) -> str:

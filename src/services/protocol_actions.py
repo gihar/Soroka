@@ -76,6 +76,15 @@ async def regenerate_protocol(
         template, llm_result, transcription_result, warnings=warnings
     )
 
+    from src.utils.text_processing import humanize_speaker_labels
+
+    protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
+    if unmapped_count:
+        warnings.append(
+            "ℹ️ Не всех говорящих удалось сопоставить с именами — "
+            "в протоколе они обозначены как «Участник N»."
+        )
+
     template_name = getattr(template, "name", None) or "Шаблон"
     result = ProcessingResult(
         transcription_result=transcription_result,
