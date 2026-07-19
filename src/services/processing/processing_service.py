@@ -237,8 +237,9 @@ class ProcessingService(BaseProcessingService):
         with PerformanceTimer("formatting", metrics_collector):
             processing_metrics.formatting_duration = 0.1
 
+            user_warnings: list = []
             protocol_text = self.formatter.format_protocol(
-                template, llm_result, transcription_result
+                template, llm_result, transcription_result, warnings=user_warnings
             )
 
             if request.speaker_mapping:
@@ -265,6 +266,7 @@ class ProcessingService(BaseProcessingService):
             llm_provider_used=request.llm_provider,
             llm_model_used=llm_model_display_name,
             processing_duration=processing_metrics.total_duration,
+            warnings=user_warnings,
         )
 
     async def _process_file_optimized(

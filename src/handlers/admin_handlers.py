@@ -34,7 +34,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             text = text.replace(char, f'\\{char}')
         return text
     
-    @router.message(Command("status"))
+    @router.message(Command("status", "st"))
     async def status_handler(message: Message):
         """Обработчик команды /status - статус системы"""
         if not is_admin(message.from_user.id):

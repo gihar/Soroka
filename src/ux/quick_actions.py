@@ -258,46 +258,6 @@ class QuickActionsUI:
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-class CommandShortcuts:
-    """Система сокращенных команд"""
-    
-    # Алиасы команд
-    COMMAND_ALIASES = {
-        "t": "templates",      # /t -> /templates
-        "s": "settings",       # /s -> /settings
-        "h": "help",          # /h -> /help
-        "st": "status",       # /st -> /status
-        "fb": "feedback",     # /fb -> /feedback
-        "q": "quick"          # /q -> /quick
-    }
-    
-    @staticmethod
-    def get_command_help() -> str:
-        """Получить справку по быстрым командам"""
-        return (
-            "⚡ **Быстрые команды**\n\n"
-            "🔤 **Сокращения:**\n"
-            "• `/t` → `/templates` - шаблоны\n"
-            "• `/s` → `/settings` - настройки\n"
-            "• `/h` → `/help` - помощь\n"
-            "• `/st` → `/status` - статус системы\n"
-            "• `/fb` → `/feedback` - обратная связь\n"
-            "• `/q` → `/quick` - быстрые действия\n\n"
-            
-            "⚡ **Быстрые действия:**\n"
-            "• Отправьте файл + нажмите \"🚀 Быстрая обработка\"\n"
-            "• Используйте главное меню для навигации\n"
-            "• Команда `/quick` для панели быстрых действий\n\n"
-            
-            "🎯 **Профили обработки:**\n"
-            "• `/quick meeting` - быстрая обработка встречи\n"
-            "• `/quick lecture` - обработка лекции\n"
-            "• `/quick interview` - обработка интервью\n\n"
-            
-            "💡 **Подсказка:** используйте кнопки меню вместо команд!"
-        )
-
-
 def setup_quick_actions_handlers() -> Router:
     """Настройка обработчиков быстрых действий"""
     router = Router()
@@ -565,17 +525,6 @@ def setup_quick_actions_handlers() -> Router:
             f"📝 **Выбран шаблон:** {template_name}\n\n"
             f"Теперь отправьте файл для обработки или выберите ИИ для генерации."
         )
-    
-    # Команды-алиасы
-    for alias, original in CommandShortcuts.COMMAND_ALIASES.items():
-        @router.message(Command(alias))
-        async def alias_handler(message: Message, command=original):
-            """Обработчик команд-алиасов"""
-            await safe_answer(message, 
-                f"↪️ Выполняю команду `/{command}`",
-                parse_mode="Markdown"
-            )
-            # Здесь должен быть вызов соответствующего обработчика
     
     return router
 

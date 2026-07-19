@@ -49,8 +49,13 @@ class ProtocolFormatter:
         template: Any,
         llm_result: Any,
         transcription_result: Any,
+        warnings: Any = None,
     ) -> str:
-        """Форматирование протокола с мягкой обработкой типов результата LLM"""
+        """Форматирование протокола с мягкой обработкой типов результата LLM.
+
+        ``warnings`` — необязательный список: сюда складываются предупреждения,
+        которые должен увидеть пользователь (не только логи).
+        """
         from jinja2 import Template as Jinja2Template
         from jinja2 import meta
 
@@ -120,6 +125,17 @@ class ProtocolFormatter:
                             f"Низкая совместимость шаблона ({compatibility_score:.1%}) "
                             "- рекомендуется другой шаблон"
                         )
+                        if warnings is not None:
+                            template_name = (
+                                getattr(template, "name", None)
+                                or (template.get("name") if isinstance(template, dict) else None)
+                                or "выбранный"
+                            )
+                            warnings.append(
+                                f"⚠️ Шаблон «{template_name}» слабо совпал с содержимым "
+                                "встречи — часть секций могла остаться пустой. "
+                                "Попробуйте другой шаблон в /templates."
+                            )
                         llm_only_variables = available_variables - template_variables
                         if llm_only_variables:
                             important_llm_vars = [

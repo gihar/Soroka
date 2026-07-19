@@ -236,6 +236,12 @@ async def send_result_to_user(
                     "Отправьте запись ещё раз или выберите формат файла в /settings."
                 ),
             )
+
+        # Предупреждения конвейера (например, слабая совместимость шаблона)
+        # должны дойти до пользователя, а не остаться в логах.
+        for warning in getattr(result, "warnings", None) or []:
+            await safe_send_message(bot, chat_id, text=warning)
+
         return delivered
 
     except Exception as e:

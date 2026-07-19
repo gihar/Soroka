@@ -47,14 +47,14 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             logger.error(f"Ошибка в start_handler: {e}")
             await message.answer("❌ Произошла ошибка при запуске. Попробуйте еще раз.")
     
-    @router.message(Command("help"))
+    @router.message(Command("help", "h"))
     async def help_handler(message: Message):
         """Обработчик команды /help"""
         from ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
         await safe_answer(message, help_text, parse_mode="Markdown")
     
-    @router.message(Command("settings"))
+    @router.message(Command("settings", "s"))
     async def settings_handler(message: Message):
         """Обработчик команды /settings."""
         try:
@@ -90,7 +90,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             logger.error(f"Ошибка в settings_handler: {e}")
             await message.answer("❌ Произошла ошибка при загрузке настроек.")
     
-    @router.message(Command("templates"))
+    @router.message(Command("templates", "t"))
     async def templates_handler(message: Message):
         """Обработчик команды /templates"""
         try:
@@ -157,7 +157,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             logger.error(f"Ошибка в templates_handler: {e}")
             await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
     
-    @router.message(Command("feedback"))
+    @router.message(Command("feedback", "fb"))
     async def feedback_handler(message: Message):
         """Обработчик команды /feedback"""
         from ux.feedback_system import FeedbackUI

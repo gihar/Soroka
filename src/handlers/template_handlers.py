@@ -21,6 +21,17 @@ class TemplateStates(StatesGroup):
     preview_template = State()
 
 
+def _cancel_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка выхода из создания шаблона — FSM не должен быть ловушкой."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_template_creation")
+    ]])
+
+
+def _looks_like_command(text: str) -> bool:
+    return bool(text) and text.lstrip().startswith("/")
+
+
 def setup_template_handlers(template_service: TemplateService) -> Router:
     """Настройка обработчиков шаблонов"""
     router = Router()
@@ -34,13 +45,14 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
                 callback.message,
                 "📝 **Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
+                reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
             )
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в add_template_callback: {e}")
             await callback.answer("❌ Произошла ошибка")
-    
+
     @router.callback_query(F.data == "create_template")
     async def create_template_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик создания шаблона из меню настроек"""
@@ -50,11 +62,23 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
                 callback.message,
                 "📝 **Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
+                reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
             )
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в create_template_callback: {e}")
+            await callback.answer("❌ Произошла ошибка")
+
+    @router.callback_query(F.data == "cancel_template_creation")
+    async def cancel_template_creation_callback(callback: CallbackQuery, state: FSMContext):
+        """Выход из любого шага создания шаблона."""
+        try:
+            await state.clear()
+            await safe_edit_text(callback.message, "Создание шаблона отменено.")
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в cancel_template_creation_callback: {e}")
             await callback.answer("❌ Произошла ошибка")
     
     @router.message(TemplateStates.waiting_for_name)
@@ -62,7 +86,15 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Обработчик ввода названия шаблона"""
         try:
             name = message.text.strip()
-            
+
+            if _looks_like_command(name):
+                # Неизвестная команда не должна стать названием шаблона.
+                await state.clear()
+                await safe_answer(message,
+                    "Создание шаблона отменено. Отправьте команду ещё раз."
+                )
+                return
+
             if len(name) < 3:
                 await message.answer("❌ Название должно содержать минимум 3 символа. Попробуйте еще раз:")
                 return
@@ -81,6 +113,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
                 f"✅ Название сохранено: **{name}**\n\n"
                 + MessageBuilder.templates_help_message()
                 + "\n\nТеперь отправьте содержимое шаблона одним сообщением.",
+                reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
             )
         except Exception as e:
@@ -94,7 +127,15 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
         """Обработчик ввода содержимого шаблона"""
         try:
             content = message.text.strip()
-            
+
+            if _looks_like_command(content):
+                # Неизвестная команда не должна стать содержимым шаблона.
+                await state.clear()
+                await safe_answer(message,
+                    "Создание шаблона отменено. Отправьте команду ещё раз."
+                )
+                return
+
             if len(content) < 10:
                 await message.answer("❌ Содержимое шаблона слишком короткое (минимум 10 символов). Попробуйте еще раз:")
                 return
@@ -247,6 +288,21 @@ async def _show_template_preview(message: Message, template_data: dict, template
                 "останется над пустым местом. Пример — в справке /templates."
             )
 
+        # Опечатка в переменной иначе проявится только вечно пустой секцией.
+        from src.services.template_variables import unknown_variables
+
+        unknown_hint = ""
+        unknown = unknown_variables(template_data["template_content"])
+        if unknown:
+            lines = []
+            for var_name, suggestion in unknown.items():
+                hint = f" (возможно, `{suggestion}`)" if suggestion else ""
+                lines.append(f"• `{var_name}`{hint}")
+            unknown_hint = (
+                "\n\n⚠️ Переменные, которых нет в реестре полей — их секции "
+                "останутся пустыми:\n" + "\n".join(lines)
+            )
+
         preview_message = (
             f"👀 **Предварительный просмотр шаблона**\n\n"
             f"**Название:** {template_data['template_name']}\n"
@@ -254,6 +310,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
             f"**Результат с тестовыми данными:**\n\n"
             f"```\n{preview_text}\n```"
             f"{conditional_hint}"
+            f"{unknown_hint}"
         )
 
         await safe_answer(message,
