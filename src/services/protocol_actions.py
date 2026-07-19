@@ -16,6 +16,7 @@ from src.models.processing import (
     TranscriptionResult,
 )
 from src.services.result_sender import send_result_to_user
+from src.utils.template_sort import template_name_of
 
 
 async def regenerate_protocol(
@@ -76,16 +77,11 @@ async def regenerate_protocol(
         template, llm_result, transcription_result, warnings=warnings
     )
 
-    from src.utils.text_processing import humanize_speaker_labels
+    from src.utils.text_processing import humanize_speaker_labels_for_reader
 
-    protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
-    if unmapped_count:
-        warnings.append(
-            "ℹ️ Не всех говорящих удалось сопоставить с именами — "
-            "в протоколе они обозначены как «Участник N»."
-        )
+    protocol_text = humanize_speaker_labels_for_reader(protocol_text, warnings)
 
-    template_name = getattr(template, "name", None) or "Шаблон"
+    template_name = template_name_of(template, default="Шаблон")
     result = ProcessingResult(
         transcription_result=transcription_result,
         protocol_text=protocol_text,

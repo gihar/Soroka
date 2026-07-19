@@ -251,15 +251,11 @@ class ProcessingService(BaseProcessingService):
                 )
                 logger.info("Применена замена спикеров на имена участников")
 
-            # Оставшиеся метки диаризации не должны доехать до читателя:
-            # SPEAKER_N -> «Участник N», владельцу — пометка.
-            from src.utils.text_processing import humanize_speaker_labels
-            protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
-            if unmapped_count:
-                user_warnings.append(
-                    "ℹ️ Не всех говорящих удалось сопоставить с именами — "
-                    "в протоколе они обозначены как «Участник N»."
-                )
+            # Оставшиеся метки диаризации не должны доехать до читателя.
+            from src.utils.text_processing import humanize_speaker_labels_for_reader
+            protocol_text = humanize_speaker_labels_for_reader(
+                protocol_text, user_warnings
+            )
 
         # Очистка временного файла в фоне (только для внешних файлов)
         if request.is_external_file and temp_file_path:

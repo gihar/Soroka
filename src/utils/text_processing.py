@@ -21,6 +21,21 @@ def humanize_speaker_labels(text: str) -> Tuple[str, int]:
     return _SPEAKER_LABEL_RE.sub(r"Участник \1", text), len(numbers)
 
 
+def humanize_speaker_labels_for_reader(protocol_text: str, warnings: list) -> str:
+    """Финальный проход перед доставкой: SPEAKER_N -> «Участник N» + пометка.
+
+    Единая точка для обоих путей генерации (пайплайн и перегенерация из
+    истории): текст пометки владельцу не должен разъезжаться между ними.
+    """
+    protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
+    if unmapped_count:
+        warnings.append(
+            "ℹ️ Не всех говорящих удалось сопоставить с именами — "
+            "в протоколе они обозначены как «Участник N»."
+        )
+    return protocol_text
+
+
 def replace_speakers_in_text(text: str, speaker_mapping: Dict[str, str]) -> str:
     """
     Заменяет все упоминания 'Спикер N' или 'SPEAKER_N' на реальные имена

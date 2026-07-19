@@ -381,6 +381,7 @@ def build_generation_prompt(
 
 def build_generation_system_prompt(
     template_variables: Optional[Dict[str, str]] = None,
+    field_rules: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Системный промпт для второго запроса (извлечение данных).
@@ -388,6 +389,9 @@ def build_generation_system_prompt(
     Field-specific rules are included in the system prompt (stable per template)
     so that OpenAI can cache the prefix and reduce token costs on repeated calls
     with the same template.
+
+    ``field_rules`` (бриф-путь) — готовые {ключ: инструкция} в нужном порядке;
+    когда задан, вытесняет вывод правил из ``template_variables`` (legacy-путь).
     """
     base = (
         "Ты — профессиональный протоколист. Извлекай данные из транскрипции "
@@ -414,10 +418,15 @@ def build_generation_system_prompt(
         "- participants — полный список"
     )
 
-    if template_variables:
-        field_rules = _build_field_specific_rules(template_variables)
-        if field_rules:
-            base += f"\n\nПРАВИЛА ДЛЯ ПОЛЕЙ:\n{field_rules}"
+    if field_rules is not None:
+        rules_text = "\n\n".join(rule for rule in field_rules.values() if rule)
+    elif template_variables:
+        rules_text = _build_field_specific_rules(template_variables)
+    else:
+        rules_text = ""
+
+    if rules_text:
+        base += f"\n\nПРАВИЛА ДЛЯ ПОЛЕЙ:\n{rules_text}"
 
     return base
 

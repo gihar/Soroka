@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from loguru import logger
 
 from src.utils.telegram_safe import safe_edit_text
-from src.utils.template_sort import sort_templates_by_name
+from src.utils.template_sort import sort_templates_by_name, template_name_of
 
 from .helpers import _safe_callback_answer
 
@@ -66,7 +66,7 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             history_id, template_id = int(history_id), int(template_id)
 
             template = await template_service.get_template_by_id(template_id)
-            template_name = getattr(template, "name", None) or "выбранный шаблон"
+            template_name = template_name_of(template, default="выбранный шаблон")
             await safe_edit_text(
                 callback.message,
                 f"⏳ Генерирую протокол по шаблону «{template_name}» — "
