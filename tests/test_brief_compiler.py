@@ -55,6 +55,8 @@ def test_get_brief_for_returns_none_for_custom_template():
 def test_schema_keys_are_header_fields_plus_sections(brief):
     props = brief_to_schema(brief)["schema"]["properties"]
     expected = set(HEADER_FIELDS) | {s.key for s in brief.sections}
+    if brief.include_lecturer_in_header:
+        expected.add("lecturer")  # шапка лекции показывает лектора -> ключ обязателен
     assert set(props) == expected
 
 
@@ -110,9 +112,11 @@ def test_schema_standard_has_exact_keys():
 
 
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
-def test_field_rules_map_each_section_key_to_its_instruction(brief):
-    rules = brief_field_rules(brief)
-    assert rules == {s.key: s.instruction for s in brief.sections}
+def test_field_rules_cover_sections_and_header_extras(brief):
+    expected = {s.key: s.instruction for s in brief.sections}
+    if brief.include_lecturer_in_header:
+        expected["lecturer"] = FIELD_SPECIFIC_RULES["lecturer"]
+    assert brief_field_rules(brief) == expected
 
 
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
@@ -126,3 +130,29 @@ def test_field_rules_standard_carry_real_texts():
     rules = brief_field_rules(get_brief_for("Стандартный протокол встречи"))
     assert rules["decisions"] == FIELD_SPECIFIC_RULES["decisions"]
     assert rules["discussion"].startswith("discussion —")
+
+
+# ---------------------------------------------------------------------------
+# Лектор в шапке лекции: strict-схема с фикс. ключами обязана содержать
+# "lecturer", иначе LLM не сможет его вернуть и шапка всегда будет пустой.
+# ---------------------------------------------------------------------------
+
+
+def test_lecture_schema_and_rules_include_lecturer():
+    lecture = get_brief_for("Лекция и презентация")
+    root = brief_to_schema(lecture)["schema"]
+    assert root["properties"]["lecturer"] == {"type": "string"}
+    assert "lecturer" in root["required"]
+    assert brief_field_rules(lecture)["lecturer"] == FIELD_SPECIFIC_RULES["lecturer"]
+
+
+@pytest.mark.parametrize(
+    "brief",
+    [b for b in ALL_BRIEFS if not b.include_lecturer_in_header],
+    ids=lambda b: b.template_name,
+)
+def test_non_lecture_briefs_omit_lecturer(brief):
+    root = brief_to_schema(brief)["schema"]
+    assert "lecturer" not in root["properties"]
+    assert "lecturer" not in root["required"]
+    assert "lecturer" not in brief_field_rules(brief)

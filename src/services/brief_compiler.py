@@ -5,6 +5,7 @@
 (инвариант Фазы 1, проверяется снапшот-тестом).
 """
 
+from src.prompts.prompts import FIELD_SPECIFIC_RULES
 from src.services.protocol_briefs import HEADER_FIELDS, ProtocolBrief
 
 # Шапка: дата/время и участники — общие для всех брифов. Лекция вставляет между
@@ -20,6 +21,16 @@ def _header(brief: ProtocolBrief) -> str:
     if brief.include_lecturer_in_header:
         return _DATE_BLOCK + _LECTURER_BLOCK + _PARTICIPANTS_BLOCK
     return _DATE_BLOCK + _PARTICIPANTS_BLOCK
+
+
+def _header_extra_keys(brief: ProtocolBrief) -> tuple[str, ...]:
+    """Шапочные поля сверх общих HEADER_FIELDS (лекция показывает «Лектор»).
+
+    Такое поле обязано попасть в схему и правила промпта: strict-схема с
+    additionalProperties:false запрещает лишние ключи, поэтому без него LLM не
+    смог бы вернуть lecturer и шапка лекции была бы всегда пустой.
+    """
+    return ("lecturer",) if brief.include_lecturer_in_header else ()
 
 
 def _section_block(section) -> str:
@@ -47,7 +58,11 @@ def brief_to_schema(brief: ProtocolBrief) -> dict:
     """
     properties = {
         key: {"type": "string"}
-        for key in (*HEADER_FIELDS, *(section.key for section in brief.sections))
+        for key in (
+            *HEADER_FIELDS,
+            *_header_extra_keys(brief),
+            *(section.key for section in brief.sections),
+        )
     }
     return {
         "name": "protocol_data",
@@ -62,5 +77,11 @@ def brief_to_schema(brief: ProtocolBrief) -> dict:
 
 
 def brief_field_rules(brief: ProtocolBrief) -> dict[str, str]:
-    """Правила извлечения секций для промпта: {ключ секции: инструкция}."""
-    return {section.key: section.instruction for section in brief.sections}
+    """Правила извлечения для промпта: {ключ: инструкция}.
+
+    Секции — плюс шапочные extra-поля (лекция: lecturer), которые тоже
+    заполняются LLM и потому нуждаются в инструкции.
+    """
+    rules = {key: FIELD_SPECIFIC_RULES.get(key, "") for key in _header_extra_keys(brief)}
+    rules.update({section.key: section.instruction for section in brief.sections})
+    return rules
