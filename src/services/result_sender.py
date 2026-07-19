@@ -14,7 +14,7 @@ import os
 import re
 import tempfile
 
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
 from src.models.processing import ProcessingRequest, ProcessingResult
@@ -78,6 +78,26 @@ async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
             pass
 
 
+def _protocol_actions_keyboard(history_id, output_mode: str):
+    """Кнопки под доставленным протоколом: PDF и перегенерация из истории.
+
+    Доставка — не конец разговора: PDF рендерится из готового текста,
+    перегенерация не требует повторной транскрипции. Без записи истории
+    кнопкам не на что ссылаться — клавиатуры нет.
+    """
+    if not history_id:
+        return None
+    rows = []
+    if output_mode != "pdf":
+        rows.append([InlineKeyboardButton(
+            text="📄 PDF", callback_data=f"proto_pdf_{history_id}"
+        )])
+    rows.append([InlineKeyboardButton(
+        text="🔁 Другой шаблон", callback_data=f"proto_regen_{history_id}"
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _protocol_file_name(protocol_text: str, source_file_name: str) -> str:
     """Имя файла протокола: название встречи из первого заголовка.
 
@@ -100,14 +120,16 @@ def _protocol_file_name(protocol_text: str, source_file_name: str) -> str:
     return os.path.splitext(os.path.basename(source_file_name))[0][:40] or "protocol"
 
 
-async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
-                                 protocol_text: str, output_mode: str) -> bool:
+async def send_protocol_file(bot, chat_id: int, protocol_text: str,
+                             source_file_name: str, output_mode: str,
+                             reply_markup=None) -> bool:
     """Render and send the protocol as a downloadable ``.md``/``.pdf`` document.
 
-    Returns ``True`` only when the document was actually delivered.
+    Reusable outside the delivery pipeline (e.g. the «📄 PDF» action on an
+    already delivered protocol). Returns ``True`` only when delivered.
     """
     suffix = ".pdf" if output_mode == "pdf" else ".md"
-    safe_name = _protocol_file_name(protocol_text, request.file_name)
+    safe_name = _protocol_file_name(protocol_text, source_file_name)
 
     if output_mode == "pdf":
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as pdf_file:
@@ -136,7 +158,9 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
 
     try:
         input_file = FSInputFile(temp_path, filename=f"{safe_name}{suffix}")
-        sent = await safe_send_document(bot, chat_id, document=input_file)
+        sent = await safe_send_document(
+            bot, chat_id, document=input_file, reply_markup=reply_markup
+        )
         if not sent:
             logger.warning("Документ протокола не был доставлен (flood control?)")
             return False
@@ -146,12 +170,14 @@ async def _send_protocol_as_file(bot, chat_id: int, request: ProcessingRequest,
             os.remove(temp_path)
 
 
-async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> bool:
+async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str,
+                                     reply_markup=None) -> bool:
     """Send the protocol inline as Telegram HTML, split on section boundaries.
 
     The canonical protocol text is Markdown; legacy parse_mode="Markdown" would
     show literal ##/** markers, so the chat channel renders it to HTML.
-    Returns ``True`` only when every part was delivered.
+    ``reply_markup`` attaches to the LAST part — the actions sit right under
+    the document. Returns ``True`` only when every part was delivered.
     """
     parts = render_protocol_messages(
         protocol_text, max_length=MAX_MESSAGE_LENGTH - PART_PREFIX_RESERVE
@@ -165,7 +191,10 @@ async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str) -> b
     delivered = True
     for index, part in enumerate(parts, start=1):
         text = f"<i>Часть {index}/{total}</i>\n{part}" if total > 1 else part
-        sent = await safe_send_message(bot, chat_id, text=text, parse_mode="HTML")
+        markup = reply_markup if index == total else None
+        sent = await safe_send_message(
+            bot, chat_id, text=text, parse_mode="HTML", reply_markup=markup
+        )
         if not sent:
             logger.warning(f"Часть протокола {index}/{total} не доставлена (flood control?)")
             delivered = False
@@ -219,13 +248,17 @@ async def send_result_to_user(
         )
         await _send_summary_message(bot, chat_id, result_message)
 
+        actions_keyboard = _protocol_actions_keyboard(
+            getattr(result, "history_id", None), output_mode
+        )
         if output_mode in ("file", "pdf"):
-            delivered = await _send_protocol_as_file(
-                bot, chat_id, request, result.protocol_text, output_mode
+            delivered = await send_protocol_file(
+                bot, chat_id, result.protocol_text, request.file_name,
+                output_mode, reply_markup=actions_keyboard,
             )
         else:
             delivered = await _send_protocol_as_messages(
-                bot, chat_id, result.protocol_text
+                bot, chat_id, result.protocol_text, reply_markup=actions_keyboard
             )
 
         if not delivered:

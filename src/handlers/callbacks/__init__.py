@@ -3,6 +3,7 @@
 from aiogram import Router
 
 from .processing_callbacks import setup_processing_callbacks
+from .protocol_actions_callbacks import setup_protocol_actions_callbacks
 from .settings_callbacks import setup_settings_callbacks
 from .speaker_mapping_callbacks import setup_speaker_mapping_callbacks
 from .template_callbacks import setup_template_callbacks
@@ -17,4 +18,5 @@ def setup_callback_handlers(user_service, template_service, processing_service) 
     router.include_router(setup_settings_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_processing_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_speaker_mapping_callbacks(user_service, template_service, processing_service))
+    router.include_router(setup_protocol_actions_callbacks(user_service, template_service))
     return router

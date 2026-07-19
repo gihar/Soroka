@@ -141,7 +141,9 @@ class ProcessingService(BaseProcessingService):
                 processing_metrics.end_time = processing_metrics.start_time
                 metrics_collector.finish_processing_metrics(processing_metrics)
                 record_monitoring(True)
-                await self._save_processing_history(request, cached_result)
+                cached_result.history_id = await self._save_processing_history(
+                    request, cached_result
+                )
                 if progress_tracker:
                     await progress_tracker.complete_all()
 
@@ -177,7 +179,7 @@ class ProcessingService(BaseProcessingService):
 
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
-            await self._save_processing_history(request, result)
+            result.history_id = await self._save_processing_history(request, result)
             return result
 
         except Exception as e:

@@ -71,6 +71,10 @@ class ProcessingResult(BaseModel):
         default_factory=list,
         description="Предупреждения для пользователя (например, слабая совместимость шаблона)",
     )
+    history_id: Optional[int] = Field(
+        None,
+        description="ID записи истории обработки — для действий с готовым протоколом",
+    )
 
 
 class ProcessingHistory(BaseModel):
