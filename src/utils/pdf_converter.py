@@ -136,6 +136,19 @@ def _build_styles(font, font_bold):
         spaceAfter=1,
     ))
 
+    # Нумерованные пункты — с тем же отступом, что и маркированные:
+    # «1. …» не должен сливаться с обычными абзацами.
+    styles.add(ParagraphStyle(
+        name='NumberItem',
+        fontName=font,
+        fontSize=10,
+        textColor=COLOR_BODY,
+        leading=15,
+        leftIndent=12,
+        spaceBefore=1,
+        spaceAfter=1,
+    ))
+
     return styles
 
 
@@ -298,7 +311,7 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
 
         # Numbered list
         elif re.match(r'^\d+\.\s', stripped):
-            story.append(Paragraph(_format_inline(stripped), styles['Body']))
+            story.append(Paragraph(_format_inline(stripped), styles['NumberItem']))
 
         # Regular text
         else:

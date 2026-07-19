@@ -20,8 +20,12 @@ class ProcessingHistoryService:
     def __init__(self, user_service):
         self._user_service = user_service
 
-    async def save_processing_history(self, request, result) -> None:
-        """Сохранить информацию об успешной обработке в БД"""
+    async def save_processing_history(self, request, result):
+        """Сохранить информацию об успешной обработке в БД.
+
+        Возвращает id записи истории (или None) — по нему работают действия
+        с готовым протоколом (PDF, перегенерация).
+        """
         try:
             user = await self._user_service.get_user_by_telegram_id(request.user_id)
             if not user:
@@ -29,7 +33,7 @@ class ProcessingHistoryService:
                     f"Не удалось сохранить историю обработки: "
                     f"пользователь {request.user_id} не найден"
                 )
-                return
+                return None
 
             transcription_text = ""
             if getattr(result, "transcription_result", None):
@@ -39,7 +43,7 @@ class ProcessingHistoryService:
                     "",
                 ) or ""
 
-            await history_repo.save_processing_result(
+            return await history_repo.save_processing_result(
                 user_id=user.id,
                 file_name=request.file_name,
                 template_id=request.template_id,
@@ -49,6 +53,7 @@ class ProcessingHistoryService:
             )
         except Exception as err:
             logger.error(f"Ошибка при сохранении истории обработки: {err}")
+            return None
 
     @staticmethod
     async def calculate_file_hash(file_path: str) -> str:

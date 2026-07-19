@@ -49,14 +49,15 @@ def test_dict_fields_keep_typed_additional_properties():
         assert ap is not False
 
 
-def test_nested_defs_objects_are_closed():
-    """Nested submodels hoisted to $defs must also get additionalProperties:false."""
-    from src.models.llm_schemas import UNIFIED_PROTOCOL_SCHEMA
+@pytest.mark.parametrize("name,schema", _all_predefined_schemas())
+def test_nested_defs_objects_are_closed(name, schema):
+    """Nested submodels hoisted to $defs must also get additionalProperties:false.
 
-    defs = UNIFIED_PROTOCOL_SCHEMA["schema"].get("$defs", {})
-    assert defs, "expected at least one nested $defs entry (e.g. SelfReflectionSchema)"
+    Живые схемы сейчас плоские; инвариант удерживает get_json_schema от
+    регрессии, когда вложенные модели появятся (например, брифы)."""
+    defs = schema["schema"].get("$defs", {})
     for def_name, def_schema in defs.items():
         if def_schema.get("type") == "object":
             assert def_schema.get("additionalProperties") is False, (
-                f"$defs.{def_name}: nested object must set additionalProperties=false"
+                f"{name}.$defs.{def_name}: nested object must set additionalProperties=false"
             )

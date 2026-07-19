@@ -72,11 +72,13 @@ def test_templates_help_callback_sends_real_help():
     assert "templates_help_message" in src_text
 
 
-def test_creation_flow_uses_real_help_not_stale_list():
+def test_creation_flow_points_to_real_help_not_stale_list():
+    """Шаг создания компактен и ведёт к живой справке (v4: вместо полной
+    вставки справки — краткая подсказка + указатель на /templates)."""
     import src.handlers.template_handlers as th
 
     src_text = inspect.getsource(th)
-    assert "templates_help_message" in src_text
+    assert "Как устроены шаблоны" in src_text
     # стена из 18 переменных с несуществующими полями удалена
     assert "dialogue_analysis" not in src_text
 

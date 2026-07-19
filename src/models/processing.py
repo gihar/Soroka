@@ -67,6 +67,14 @@ class ProcessingResult(BaseModel):
     llm_provider_used: str = Field(..., description="Использованный LLM провайдер")
     llm_model_used: Optional[str] = Field(None, description="Использованная модель LLM")
     processing_duration: Optional[float] = Field(None, description="Время обработки в секундах")
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Предупреждения для пользователя (например, слабая совместимость шаблона)",
+    )
+    history_id: Optional[int] = Field(
+        None,
+        description="ID записи истории обработки — для действий с готовым протоколом",
+    )
 
 
 class ProcessingHistory(BaseModel):

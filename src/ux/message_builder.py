@@ -168,7 +168,7 @@ class MessageBuilder:
 
         duration = result.get("processing_duration")
         if duration:
-            lines.append(f"\u23F1 Время: {cls._format_duration(duration)}")
+            lines.append(f"\u23F1 Обработка: {cls._format_duration(duration)}")
 
         return "\n".join(lines)
 

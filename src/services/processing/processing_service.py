@@ -141,7 +141,9 @@ class ProcessingService(BaseProcessingService):
                 processing_metrics.end_time = processing_metrics.start_time
                 metrics_collector.finish_processing_metrics(processing_metrics)
                 record_monitoring(True)
-                await self._save_processing_history(request, cached_result)
+                cached_result.history_id = await self._save_processing_history(
+                    request, cached_result
+                )
                 if progress_tracker:
                     await progress_tracker.complete_all()
 
@@ -177,7 +179,7 @@ class ProcessingService(BaseProcessingService):
 
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
-            await self._save_processing_history(request, result)
+            result.history_id = await self._save_processing_history(request, result)
             return result
 
         except Exception as e:
@@ -237,8 +239,9 @@ class ProcessingService(BaseProcessingService):
         with PerformanceTimer("formatting", metrics_collector):
             processing_metrics.formatting_duration = 0.1
 
+            user_warnings: list = []
             protocol_text = self.formatter.format_protocol(
-                template, llm_result, transcription_result
+                template, llm_result, transcription_result, warnings=user_warnings
             )
 
             if request.speaker_mapping:
@@ -247,6 +250,16 @@ class ProcessingService(BaseProcessingService):
                     protocol_text, request.speaker_mapping
                 )
                 logger.info("Применена замена спикеров на имена участников")
+
+            # Оставшиеся метки диаризации не должны доехать до читателя:
+            # SPEAKER_N -> «Участник N», владельцу — пометка.
+            from src.utils.text_processing import humanize_speaker_labels
+            protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
+            if unmapped_count:
+                user_warnings.append(
+                    "ℹ️ Не всех говорящих удалось сопоставить с именами — "
+                    "в протоколе они обозначены как «Участник N»."
+                )
 
         # Очистка временного файла в фоне (только для внешних файлов)
         if request.is_external_file and temp_file_path:
@@ -265,6 +278,7 @@ class ProcessingService(BaseProcessingService):
             llm_provider_used=request.llm_provider,
             llm_model_used=llm_model_display_name,
             processing_duration=processing_metrics.total_duration,
+            warnings=user_warnings,
         )
 
     async def _process_file_optimized(

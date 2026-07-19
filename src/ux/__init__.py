@@ -11,7 +11,7 @@ from .feedback_system import (
 )
 from .message_builder import MessageBuilder
 from .progress_tracker import ProgressFactory, ProgressTracker
-from .quick_actions import CommandShortcuts, QuickActionsUI, UserGuidance, setup_quick_actions_handlers
+from .quick_actions import QuickActionsUI, setup_quick_actions_handlers
 
 __all__ = [
     "ProgressTracker",
@@ -23,7 +23,5 @@ __all__ = [
     "feedback_collector",
     "setup_feedback_handlers",
     "QuickActionsUI",
-    "CommandShortcuts",
-    "UserGuidance",
     "setup_quick_actions_handlers"
 ]
