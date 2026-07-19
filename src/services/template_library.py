@@ -5,7 +5,10 @@
 - шапка: название встречи ({{ meeting_title }} с фолбэком на тип), дата, участники;
 - порядок секций: решения -> задачи/сроки -> блокеры -> спец-секции типа встречи
   -> обсуждение -> следующие шаги;
-- эмодзи — только навигационные метки секций: 👥 ✅ 📌 ⚠️ 💬 📅;
+- эмодзи — только навигационные метки СКВОЗНЫХ секций (единый словарь:
+  📋 повестка/структура, 👥 участники, ✅ решения, 📌 задачи и сроки,
+  ⚠️ блокеры, 💡 ключевые выводы, 💬 обсуждение, ❓ вопросы, 📅 следующие
+  шаги); спец-секции типа встречи — осознанно без меток;
 - каждая секция обёрнута в {% if %}: пустая секция не оставляет заголовка;
 - канонический формат — Markdown; представление под канал (Telegram HTML,
   .md-файл, PDF) — забота src.services.protocol_render.
@@ -53,7 +56,7 @@ class TemplateLibrary:
             + _HEADER
             + """
 {% if agenda %}
-## Повестка дня
+## 📋 Повестка дня
 {{ agenda }}
 {% endif %}
 {% if decisions %}
@@ -69,7 +72,7 @@ class TemplateLibrary:
 {{ risks_and_blockers }}
 {% endif %}
 {% if key_points %}
-## Ключевые выводы
+## 💡 Ключевые выводы
 {{ key_points }}
 {% endif %}
 {% if discussion %}
@@ -77,7 +80,7 @@ class TemplateLibrary:
 {{ discussion }}
 {% endif %}
 {% if questions %}
-## Открытые вопросы
+## ❓ Открытые вопросы
 {{ questions }}
 {% endif %}
 {% if next_steps %}
@@ -109,7 +112,7 @@ class TemplateLibrary:
 {{ action_items }}
 {% endif %}
 {% if key_points %}
-## Ключевые выводы
+## 💡 Ключевые выводы
 {{ key_points }}
 {% endif %}
 {% if next_steps %}
@@ -133,7 +136,7 @@ class TemplateLibrary:
             + _HEADER
             + """
 {% if agenda %}
-## Повестка дня
+## 📋 Повестка дня
 {{ agenda }}
 {% endif %}
 {% if decisions %}
@@ -314,7 +317,7 @@ class TemplateLibrary:
 {{ learning_objectives }}
 {% endif %}
 {% if agenda %}
-## Структура лекции
+## 📋 Структура лекции
 {{ agenda }}
 {% endif %}
 {% if key_concepts %}
@@ -330,11 +333,11 @@ class TemplateLibrary:
 {{ examples_and_cases }}
 {% endif %}
 {% if questions_and_answers %}
-## Вопросы и ответы
+## ❓ Вопросы и ответы
 {{ questions_and_answers }}
 {% endif %}
 {% if key_points %}
-## Ключевые выводы
+## 💡 Ключевые выводы
 {{ key_points }}
 {% endif %}
 {% if homework %}

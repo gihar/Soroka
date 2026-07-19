@@ -274,12 +274,11 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             )
             feedback_collector.add_feedback(feedback)
             
-            # Благодарим пользователя
+            # Подтверждаем без фанфар: оценка — служебное действие
             rating_emoji = "⭐" * rating
             await safe_edit_text(
                 callback.message,
-                f"🙏 **Спасибо за оценку!**\n\n"
-                f"Ваша оценка: {rating}/5 {rating_emoji}\n\n",
+                f"Оценка записана: {rating}/5 {rating_emoji}",
                 parse_mode="Markdown"
             )
             
@@ -350,10 +349,9 @@ class QuickFeedbackManager:
                 ]
             ])
             
-            await safe_send_message(bot, 
+            await safe_send_message(bot,
                 chat_id,
-                "💬 **Как вам результат?**\n\n"
-                "Ваша оценка поможет улучшить качество работы бота!",
+                "Как вам протокол?",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -380,15 +378,18 @@ class QuickFeedbackManager:
                 self.feedback_collector.add_feedback(feedback)
                 
                 responses = {
-                    5: "🎉 Отлично! Рады, что вам понравилось!",
-                    3: "👌 Спасибо за оценку! Мы стараемся стать лучше.",
-                    1: "😔 Извините за неудобства. Мы работаем над улучшениями."
+                    5: "Спасибо, оценка записана.",
+                    3: "Спасибо, оценка записана.",
+                    1: (
+                        "Спасибо, оценка записана. Если с протоколом что-то "
+                        "не так — напишите в /feedback, разберёмся."
+                    ),
                 }
-                
+
                 await safe_edit_text(
                     callback.message,
-                    f"{responses.get(rating, 'Спасибо за оценку!')}\n\n"
-                    f"💡 Есть предложения? Используйте команду /feedback"
+                    f"{responses.get(rating, 'Спасибо, оценка записана.')}\n\n"
+                    f"Предложения — командой /feedback."
                 )
                 
             except Exception as e:
