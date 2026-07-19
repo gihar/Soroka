@@ -42,6 +42,7 @@ class TemplateLibrary:
     def _standard_protocol() -> Dict[str, Any]:
         return {
             "name": "Стандартный протокол встречи",
+            "category": "general",
             "description": "Базовый шаблон для оформления протокола встречи",
             "tags": ["general", "meeting"],
             "keywords": ["встреча", "протокол", "общий"],
@@ -89,6 +90,7 @@ class TemplateLibrary:
     def _brief_summary() -> Dict[str, Any]:
         return {
             "name": "Краткое резюме встречи",
+            "category": "general",
             "description": "Сокращенный формат для быстрого резюме",
             "tags": ["brief", "summary"],
             "keywords": ["резюме", "краткое", "summary"],
@@ -120,6 +122,7 @@ class TemplateLibrary:
     def _technical_meeting() -> Dict[str, Any]:
         return {
             "name": "Техническое совещание",
+            "category": "technical",
             "description": "Шаблон для технических встреч и code review с диаризацией",
             "tags": ["technical", "engineering", "code_review"],
             "keywords": ["техническое", "разработка", "код", "архитектура"],
@@ -172,6 +175,7 @@ class TemplateLibrary:
         return {
             "id": "od_protocol",
             "name": "Протокол ОД (Поручения)",
+            "category": "management",
             "description": "Специальный формат для протокола поручений руководителей (OD)",
             "tags": ["поручения", "од", "руководители", "протокол"],
             "keywords": ["од", "поручение", "задача", "срок", "ответственный"],
@@ -197,6 +201,7 @@ class TemplateLibrary:
     def _daily() -> Dict[str, Any]:
         return {
             "name": "Дейли",
+            "category": "general",
             "description": "Ежедневные короткие встречи команды",
             "tags": ["daily", "scrum"],
             "keywords": ["standup", "вчера", "сегодня", "блокеры", "ежедневно"],
@@ -231,7 +236,7 @@ class TemplateLibrary:
 {{ discussion }}
 {% endif %}
 {% if next_steps %}
-## 📅 Следующая встреча
+## 📅 Следующие шаги
 {{ next_steps }}
 {% endif %}""",
         }
@@ -240,6 +245,7 @@ class TemplateLibrary:
     def _retrospective() -> Dict[str, Any]:
         return {
             "name": "Ретроспектива спринта",
+            "category": "general",
             "description": "Ретроспектива спринта для улучшения процессов",
             "tags": ["retrospective", "agile", "improvement"],
             "keywords": ["ретроспектива", "что хорошо", "что улучшить", "действия", "retro"],
@@ -288,6 +294,7 @@ class TemplateLibrary:
         return {
             "id": "education_lecture",
             "name": "Лекция и презентация",
+            "category": "educational",
             "description": "Шаблон для лекций и презентаций с фокусом на структуре материала",
             "tags": ["лекция", "презентация", "теория", "концепции"],
             "keywords": [
@@ -339,7 +346,7 @@ class TemplateLibrary:
 {{ additional_materials }}
 {% endif %}
 {% if next_steps %}
-## 📅 Следующая лекция
+## 📅 Следующие шаги
 {{ next_steps }}
 {% endif %}""",
         }

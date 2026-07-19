@@ -16,7 +16,7 @@ from aiogram.types import (
 from loguru import logger
 
 from src.database import feedback_repo
-from src.utils.telegram_safe import safe_edit_text
+from src.utils.telegram_safe import safe_edit_text, safe_send_message
 
 
 @dataclass
@@ -350,7 +350,7 @@ class QuickFeedbackManager:
                 ]
             ])
             
-            await bot.send_message(
+            await safe_send_message(bot, 
                 chat_id,
                 "💬 **Как вам результат?**\n\n"
                 "Ваша оценка поможет улучшить качество работы бота!",

@@ -10,6 +10,7 @@ from loguru import logger
 
 from services.template_service import TemplateService
 from services.user_service import UserService
+from src.utils.telegram_safe import safe_answer
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 
@@ -35,7 +36,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             welcome_text = MessageBuilder.welcome_message()
             main_menu = QuickActionsUI.create_main_menu(message.from_user.id)
             
-            await message.answer(
+            await safe_answer(message, 
                 welcome_text,
                 reply_markup=main_menu,
                 parse_mode="Markdown"
@@ -51,7 +52,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         """Обработчик команды /help"""
         from ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
-        await message.answer(help_text, parse_mode="Markdown")
+        await safe_answer(message, help_text, parse_mode="Markdown")
     
     @router.message(Command("settings"))
     async def settings_handler(message: Message):
@@ -84,7 +85,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
 
             text += "Настройте бота под ваши предпочтения:"
 
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в settings_handler: {e}")
             await message.answer("❌ Произошла ошибка при загрузке настроек.")
@@ -136,10 +137,16 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 text="➕ Добавить шаблон",
                 callback_data="add_template"
             )])
+
+            # Справка: как устроены шаблоны (переменные, {% if %}, пример)
+            keyboard_buttons.append([InlineKeyboardButton(
+                text="ℹ️ Как устроены шаблоны",
+                callback_data="templates_help"
+            )])
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             
-            await message.answer(
+            await safe_answer(message, 
                 f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
@@ -156,7 +163,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         from ux.feedback_system import FeedbackUI
         
         keyboard = FeedbackUI.create_feedback_type_keyboard()
-        await message.answer(
+        await safe_answer(message, 
             "💬 **Обратная связь**\n\n"
             "Помогите нам улучшить бота! Выберите тип обратной связи:",
             reply_markup=keyboard,

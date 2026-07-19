@@ -49,6 +49,26 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             logger.error(f"Ошибка в view_template_category_callback: {e}")
             await callback.answer("❌ Ошибка при загрузке шаблонов")
 
+    @router.callback_query(F.data == "templates_help")
+    async def templates_help_callback(callback: CallbackQuery):
+        """Справка по устройству шаблонов: переменные, {% if %}, пример."""
+        try:
+            from src.ux.message_builder import MessageBuilder
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_templates")
+            ]])
+            await safe_edit_text(
+                callback.message,
+                MessageBuilder.templates_help_message(),
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+            await _safe_callback_answer(callback)
+        except Exception as e:
+            logger.error(f"Ошибка в templates_help_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Произошла ошибка")
+
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
         """Обработчик просмотра шаблона"""
@@ -126,7 +146,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 templates = await template_service.get_all_templates()
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
-                        text=f"{'⭐ ' if t.is_default else ''}{t.name}",
+                        text=t.name,
                         callback_data=f"view_template_{t.id}"
                     )] for t in templates
                 ] + [[InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_template")]])
@@ -259,9 +279,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
                 row = []
                 for template in sorted_templates:
-                    star = "⭐ " if template.is_default else ""
                     row.append(InlineKeyboardButton(
-                        text=f"{star}{template.name}",
+                        text=template.name,
                         callback_data=f"set_default_template_{template.id}"
                     ))
                     if len(row) == 2:

@@ -74,8 +74,16 @@ class ProtocolFormatter:
 
         # Если есть маппинг — используем Jinja2 для подстановки
         if isinstance(llm_result, dict):
+            # dict/list от LLM конвертируются в Markdown ДО рендера — иначе
+            # jinja подставит Python-repr вида «['пункт', 'пункт']».
             llm_result = {
-                key: _normalize_filler(value) for key, value in llm_result.items()
+                key: (
+                    value if isinstance(value, str)
+                    else self.convert_complex_to_markdown(value)
+                )
+                for key, value in (
+                    (k, _normalize_filler(v)) for k, v in llm_result.items()
+                )
             }
             logger.info("[DEBUG] Форматирование протокола с шаблоном")
             logger.info(f"[DEBUG] Тип шаблона: {type(template)}")

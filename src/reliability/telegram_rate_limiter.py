@@ -24,6 +24,31 @@ def is_non_retryable_telegram_error(error_message: str) -> bool:
     return any(marker in error_message for marker in _NON_RETRYABLE_MARKERS)
 
 
+def render_legacy_markdown(args: tuple, kwargs: dict) -> tuple[tuple, dict]:
+    """Канонический Markdown сервисного слоя → Telegram HTML на границе.
+
+    Legacy parse_mode="Markdown" не понимает **жирный** и ##-заголовки и падает
+    на спецсимволах; единственный проводной формат — HTML (см. ADR-0001).
+    Вызовы с parse_mode="Markdown" трактуются как «текст — канонический
+    Markdown»: текст рендерится здесь, до отправки. Текст приходит первым
+    позиционным аргументом (message.answer) либо в kwargs text/caption.
+    """
+    if kwargs.get("parse_mode") != "Markdown":
+        return args, kwargs
+
+    from src.services.protocol_render.telegram_html import markdown_to_telegram_html
+
+    kwargs = dict(kwargs)
+    kwargs["parse_mode"] = "HTML"
+    if isinstance(kwargs.get("text"), str):
+        kwargs["text"] = markdown_to_telegram_html(kwargs["text"])
+    elif args and isinstance(args[0], str):
+        args = (markdown_to_telegram_html(args[0]),) + args[1:]
+    if isinstance(kwargs.get("caption"), str):
+        kwargs["caption"] = markdown_to_telegram_html(kwargs["caption"])
+    return args, kwargs
+
+
 @dataclass
 class FloodControlState:
     """Состояние flood control"""
@@ -228,7 +253,9 @@ class TelegramRateLimiter:
                 f"Осталось {remaining:.0f} секунд."
             )
             return None
-        
+
+        args, kwargs = render_legacy_markdown(args, kwargs)
+
         for attempt in range(max_retries + 1):
             try:
                 # Проверяем rate limit
