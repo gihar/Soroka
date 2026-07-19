@@ -21,10 +21,27 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
     @router.callback_query(F.data.startswith("view_template_category_"))
     async def view_template_category_callback(callback: CallbackQuery):
-        """Show flat template list for viewing (backward-compat for category callbacks)"""
+        """Список шаблонов категории — кнопка категории фильтрует по-настоящему."""
         try:
+            category = callback.data.replace("view_template_category_", "")
             templates = await template_service.get_all_templates()
+            if category != "all":
+                templates = [
+                    t for t in templates
+                    if (t.category or "general") == category
+                ]
             templates = sort_templates_by_name(templates)
+
+            category_titles = {
+                "management": "👔 Управленческие",
+                "product": "🚀 Продуктовые",
+                "technical": "⚙️ Технические",
+                "educational": "🎓 Образовательные",
+                "general": "📋 Общие",
+                "sales": "💼 Продажи",
+                "all": "📝 Все шаблоны",
+            }
+            title = category_titles.get(category, f"📁 {category.title()}")
 
             keyboard_buttons = [
                 [InlineKeyboardButton(
@@ -39,7 +56,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             await safe_edit_text(callback.message,
-                f"📝 **Шаблоны** ({len(templates)})",
+                f"{title} ({len(templates)})",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )

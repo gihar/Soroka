@@ -107,12 +107,16 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             # Упрощенный сценарий: сразу переходим к содержимому шаблона
             await state.set_state(TemplateStates.waiting_for_content)
 
-            from src.ux.message_builder import MessageBuilder
-
             await safe_answer(message,
                 f"✅ Название сохранено: **{name}**\n\n"
-                + MessageBuilder.templates_help_message()
-                + "\n\nТеперь отправьте содержимое шаблона одним сообщением.",
+                "Отправьте содержимое шаблона одним сообщением: Markdown-разметка "
+                "и переменные в `{{ }}`.\n\n"
+                "Основные переменные: `meeting_title`, `date`, `participants`, "
+                "`decisions`, `action_items`, `risks_and_blockers`, `discussion`, "
+                "`next_steps`.\n"
+                "Оборачивайте секции в `{% if переменная %}` … `{% endif %}` — "
+                "пустая секция не попадёт в протокол.\n\n"
+                "Полная справка с примером: /templates → «Как устроены шаблоны».",
                 reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
             )
