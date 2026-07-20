@@ -16,6 +16,25 @@ from src.services.protocol_validator import protocol_validator
 from src.utils.template_sort import template_name_of
 
 
+def effective_stage1_outcome(
+    llm_result: Optional[Dict[str, Any]],
+    *,
+    speaker_mapping_fallback: Optional[Dict[str, str]] = None,
+    meeting_type_fallback: Optional[str] = None,
+) -> tuple[Optional[Dict[str, str]], Optional[str]]:
+    """Итоги ЭТАПА 1, фактически использованные генератором (сопоставление, тип).
+
+    Генератор кладёт их в ``_speaker_mapping``/``_meeting_type``; при пропуске
+    анализа берётся фолбэк (значения из запроса или сохранённые в истории). Единый
+    источник правды для основного пути и перегенерации — обе ветки капчерят одно и
+    то же, чтобы запись истории всегда несла реально использованные значения.
+    """
+    result = llm_result or {}
+    speaker_mapping = result.get('_speaker_mapping') or speaker_mapping_fallback
+    meeting_type = result.get('_meeting_type') or meeting_type_fallback
+    return speaker_mapping, meeting_type
+
+
 async def resolve_active_preset(app_settings_repo, preset_repo) -> Dict[str, Any]:
     """Return the currently active model preset.
 

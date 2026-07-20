@@ -292,6 +292,73 @@ async def test_regenerate_reuses_stored_mapping_and_type(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_regenerate_heals_history_from_llm_result(monkeypatch):
+    """Старая запись без сохранённого mapping: новая запись лечится итогом ЭТАПА 1.
+
+    Иначе следующая перегенерация (v3) снова прогонит анализ и разойдётся с v2 —
+    та же непоследовательность на уровень глубже. Поэтому effective-значения из
+    llm_result оседают в новой записи, а не NULL.
+    """
+    from src.services import protocol_actions
+
+    row = {
+        "id": 7,
+        "user_id": 42,
+        "file_name": "meeting.mp3",
+        "transcription_text": "полная расшифровка встречи",
+        "result_text": "# Старый протокол",
+        "speaker_mapping": None,  # старая запись — итогов анализа нет
+        "meeting_type": None,
+    }
+
+    import src.database as db_module
+
+    save_mock = AsyncMock(return_value=101)
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user", AsyncMock(return_value=row)
+    )
+    monkeypatch.setattr(db_module.history_repo, "save_processing_result", save_mock)
+
+    class FakeTemplateService:
+        async def get_template_by_id(self, _tid):
+            return SimpleNamespace(id=5, name="Дейли", content="# {{ meeting_title }}")
+
+    class FakeLLMGen:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def optimized_llm_generation(
+            self, transcription_result, template, request, metrics, meeting_type=None
+        ):
+            # ЭТАП 1 отработал заново — генератор вернул выведенные значения
+            return {
+                "meeting_title": "Планёрка",
+                "_speaker_mapping": {"SPEAKER_00": "Мария Иванова"},
+                "_meeting_type": "planning",
+            }
+
+    import src.services.processing.llm_generation as llm_gen_module
+
+    monkeypatch.setattr(llm_gen_module, "LLMGenerationService", FakeLLMGen)
+
+    async def fake_send_result(bot, chat_id, user_id, request, result, progress_tracker=None):
+        return True
+
+    monkeypatch.setattr(protocol_actions, "send_result_to_user", fake_send_result)
+
+    ok = await protocol_actions.regenerate_protocol(
+        bot=AsyncMock(), chat_id=1, telegram_user_id=1,
+        history_id=7, template_id=5,
+        user_service=SimpleNamespace(), template_service=FakeTemplateService(),
+    )
+
+    assert ok is True
+    save_kwargs = save_mock.await_args.kwargs
+    assert save_kwargs["speaker_mapping"] == {"SPEAKER_00": "Мария Иванова"}
+    assert save_kwargs["meeting_type"] == "planning"
+
+
+@pytest.mark.asyncio
 async def test_regenerate_refuses_without_transcription(monkeypatch):
     import src.database as db_module
     from src.services import protocol_actions

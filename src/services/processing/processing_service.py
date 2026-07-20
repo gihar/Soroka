@@ -31,7 +31,7 @@ from src.services.smart_template_selector import smart_selector
 from src.services.transcription_preprocessor import get_preprocessor
 from src.utils.telegram_safe import safe_send_message
 
-from .llm_generation import LLMGenerationService
+from .llm_generation import LLMGenerationService, effective_stage1_outcome
 from .processing_history import ProcessingHistoryService
 
 # Extracted modules
@@ -266,10 +266,11 @@ class ProcessingService(BaseProcessingService):
         # Итоги ЭТАПА 1, фактически использованные генератором: при пропуске
         # анализа их нет в llm_result — берём из запроса/аргумента. Сохраняются
         # в историю, чтобы перегенерация была консистентной (без нового анализа).
-        effective_speaker_mapping = (
-            llm_result.get('_speaker_mapping') or request.speaker_mapping
+        effective_speaker_mapping, effective_meeting_type = effective_stage1_outcome(
+            llm_result,
+            speaker_mapping_fallback=request.speaker_mapping,
+            meeting_type_fallback=meeting_type,
         )
-        effective_meeting_type = llm_result.get('_meeting_type') or meeting_type
 
         return ProcessingResult(
             transcription_result=transcription_result,

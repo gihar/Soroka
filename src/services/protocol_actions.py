@@ -88,7 +88,10 @@ async def regenerate_protocol(
     )
     transcription_result = TranscriptionResult(transcription=transcription_text)
 
-    from src.services.processing.llm_generation import LLMGenerationService
+    from src.services.processing.llm_generation import (
+        LLMGenerationService,
+        effective_stage1_outcome,
+    )
     from src.services.processing.protocol_formatter import ProtocolFormatter
 
     llm_gen = LLMGenerationService(user_service, template_service)
@@ -119,8 +122,17 @@ async def regenerate_protocol(
         warnings=warnings,
     )
 
+    # Итоги ЭТАПА 1, реально использованные генератором: сохранённые (если были)
+    # либо выведенные заново на старой записи. Оседают в новой записи, чтобы
+    # следующая перегенерация (v3) не разошлась с этой (v2) — история «лечится».
+    effective_speaker_mapping, effective_meeting_type = effective_stage1_outcome(
+        llm_result,
+        speaker_mapping_fallback=stored_speaker_mapping,
+        meeting_type_fallback=stored_meeting_type,
+    )
+
     # Новая запись истории: кнопки под новым протоколом работают по цепочке, а
-    # унаследованные тип/сопоставление держат следующую перегенерацию консистентной.
+    # использованные тип/сопоставление держат следующую перегенерацию консистентной.
     result.history_id = await history_repo.save_processing_result(
         user_id=row["user_id"],
         file_name=row["file_name"],
@@ -128,8 +140,8 @@ async def regenerate_protocol(
         llm_provider=request.llm_provider,
         transcription_text=transcription_text,
         result_text=protocol_text,
-        speaker_mapping=stored_speaker_mapping,
-        meeting_type=stored_meeting_type,
+        speaker_mapping=effective_speaker_mapping,
+        meeting_type=effective_meeting_type,
     )
 
     return await send_result_to_user(bot, chat_id, telegram_user_id, request, result)
