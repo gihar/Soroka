@@ -483,9 +483,3 @@ def _get_type_specific_instructions(meeting_type: str) -> str:
     }
 
     return instructions.get(meeting_type, "")
-
-
-# Keep for backward compatibility — delegates to merged function
-def _get_type_specific_formatting_instructions(meeting_type: str) -> str:
-    """Deprecated: merged into _get_type_specific_instructions."""
-    return ""

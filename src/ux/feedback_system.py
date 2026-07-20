@@ -16,7 +16,7 @@ from aiogram.types import (
 from loguru import logger
 
 from src.database import feedback_repo
-from src.utils.telegram_safe import safe_edit_text, safe_send_message
+from src.utils.telegram_safe import safe_edit_text
 
 
 @dataclass
@@ -322,94 +322,6 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             await callback.answer("❌ Ошибка при обработке")
     
     return router
-
-
-class QuickFeedbackManager:
-    """Менеджер быстрой обратной связи после обработки файлов"""
-    
-    def __init__(self, feedback_collector: FeedbackCollector):
-        self.feedback_collector = feedback_collector
-    
-    async def request_quick_feedback(self, chat_id: int, bot, 
-                                   protocol_result: Dict[str, Any]) -> None:
-        """Запросить быструю обратную связь после создания протокола"""
-        try:
-            # Создаем простую клавиатуру для быстрой оценки
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="👍", callback_data="quick_feedback_5"),
-                    InlineKeyboardButton(text="😐", callback_data="quick_feedback_3"),
-                    InlineKeyboardButton(text="👎", callback_data="quick_feedback_1")
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="📝 Подробная оценка", 
-                        callback_data="feedback_detailed"
-                    )
-                ]
-            ])
-            
-            await safe_send_message(bot,
-                chat_id,
-                "Как вам протокол?",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка запроса обратной связи: {e}")
-    
-    def create_feedback_handlers(self) -> Router:
-        """Создать обработчики быстрой обратной связи"""
-        router = Router()
-        
-        @router.callback_query(F.data.startswith("quick_feedback_"))
-        async def handle_quick_feedback(callback: CallbackQuery):
-            """Обработчик быстрой обратной связи"""
-            try:
-                rating = int(callback.data.split("_")[-1])
-                
-                feedback = FeedbackEntry(
-                    user_id=callback.from_user.id,
-                    timestamp=datetime.now(),
-                    rating=rating,
-                    feedback_type="protocol_quality"
-                )
-                self.feedback_collector.add_feedback(feedback)
-                
-                responses = {
-                    5: "Спасибо, оценка записана.",
-                    3: "Спасибо, оценка записана.",
-                    1: (
-                        "Спасибо, оценка записана. Если с протоколом что-то "
-                        "не так — напишите в /feedback, разберёмся."
-                    ),
-                }
-
-                await safe_edit_text(
-                    callback.message,
-                    f"{responses.get(rating, 'Спасибо, оценка записана.')}\n\n"
-                    f"Предложения — командой /feedback."
-                )
-                
-            except Exception as e:
-                logger.error(f"Ошибка быстрой обратной связи: {e}")
-                await callback.answer("❌ Ошибка при сохранении")
-        
-        @router.callback_query(F.data == "feedback_detailed")
-        async def handle_detailed_feedback(callback: CallbackQuery):
-            """Обработчик перехода к подробной обратной связи"""
-            keyboard = FeedbackUI.create_feedback_type_keyboard()
-            
-            await safe_edit_text(
-                callback.message,
-                "📋 **Подробная обратная связь**\n\n"
-                "Выберите, что именно вы хотели бы оценить:",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-        
-        return router
 
 
 # Глобальный экземпляр сборщика обратной связи
