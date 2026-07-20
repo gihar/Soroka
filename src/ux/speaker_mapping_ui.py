@@ -103,8 +103,14 @@ def format_mapping_message(
     Returns:
         Отформатированный текст сообщения в MarkdownV2
     """
-    # Экранируем статический текст для MarkdownV2
-    header_text = escape_markdown_v2("Проверьте сопоставление спикеров")
+    # Без списка участников карточка — общий экран именования спикеров (ADR-0002):
+    # копия смещается с «проверьте/подтвердите» на «назовите (по желанию)».
+    header = (
+        "Проверьте сопоставление спикеров"
+        if participants
+        else "Назовите спикеров (по желанию)"
+    )
+    header_text = escape_markdown_v2(header)
     lines = [f"🎭 *{header_text}*\n"]
 
     # Спикеры — в порядке их появления в диаризации
@@ -221,7 +227,14 @@ def create_mapping_keyboard(
             text="❌ Оставить без имени",
             callback_data=f"sm_select:{current_editing_speaker}:none:{user_id}"
         )])
-        
+
+        # Кнопка "Ввести имя вручную" — назвать спикера человеком, которого нет
+        # в списке участников (ADR-0002). Имя ловит FSM-состояние.
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="✏️ Ввести имя вручную",
+            callback_data=f"sm_custom:{current_editing_speaker}:{user_id}"
+        )])
+
         # Кнопки с участниками
         for idx, participant in enumerate(participants):
             participant_name = participant.get('name', '')
@@ -281,6 +294,23 @@ def create_mapping_keyboard(
         )])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+
+def create_name_prompt_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура под-вида ожидания имени: одна кнопка «Отмена».
+
+    Callback ``sm_cancel:{user_id}`` уже обрабатывается — возвращает к главному
+    виду карточки; хендлер отмены также очищает FSM-состояние ожидания имени.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="◀️ Отмена",
+        callback_data=f"sm_cancel:{user_id}"
+    )]])
+
+
+def format_name_prompt_message(speaker_id: str) -> str:
+    """Текст под-вида ожидания имени спикера (без Markdown-разметки)."""
+    return f"✏️ Отправьте имя для {speaker_id} сообщением"
 
 
 async def show_mapping_confirmation(

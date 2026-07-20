@@ -7,7 +7,7 @@
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from loguru import logger
 
@@ -30,6 +30,9 @@ class MappingSession:
     # Спикеры с доставленным фрагментом записи: их цитата уже в подписи
     # фрагмента, карточка сопоставления её не дублирует (в т.ч. при перерисовках).
     speakers_with_audio: Set[str] = field(default_factory=set)
+    # Сообщение-карточка сопоставления: ручной ввод имени перерисовывает её
+    # на месте (сообщение пользователя с именем — отдельное сообщение чата).
+    confirmation_message: Optional[Any] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
