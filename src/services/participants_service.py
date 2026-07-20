@@ -513,6 +513,45 @@ class ParticipantsService:
         
         return lookup, ambiguous_variants
     
+    def add_manual_participant(
+        self,
+        participants: Optional[List[Dict[str, str]]],
+        raw_name: str,
+    ) -> Tuple[Optional[List[Dict[str, str]]], Optional[str]]:
+        """Добавить участника с именем, введённым вручную в карточке.
+
+        Введённое имя нормализуется как участник из списка и становится
+        полноценным участником сессии (ADR-0002).
+
+        Args:
+            participants: Текущий список участников (None трактуется как пустой)
+            raw_name: Сырой текст имени, введённый пользователем
+
+        Returns:
+            Кортеж ``(new_list, display_name)``:
+            - при валидном новом имени — новый список (иммутабельно) с добавленным
+              участником и его отображаемое имя в формате «Имя Фамилия»;
+            - ``(None, None)`` — если имя невалидно (короче 2 символов после trim
+              или начинается с «/»).
+        """
+        trimmed = (raw_name or "").strip()
+        if len(trimmed) < 2 or trimmed.startswith("/"):
+            return None, None
+
+        current = participants or []
+
+        # Дедуп: если имя совпадает с уже имеющимся участником по нормализованным
+        # вариантам — переиспользуем его, не плодя дубль.
+        lookup, _ambiguous = self.build_name_lookup(current)
+        for variant in self.generate_name_variants(trimmed):
+            match = lookup.get(variant)
+            if match:
+                return current, match["display_name"]
+
+        display_name = self.convert_full_name_to_short(trimmed)
+        new_list = list(current) + [{"name": trimmed, "role": ""}]
+        return new_list, display_name
+
     def format_participants_for_llm(self, participants: List[Dict[str, str]]) -> str:
         """
         Форматирование списка участников для передачи в LLM в формате "Имя Фамилия"

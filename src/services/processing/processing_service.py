@@ -38,6 +38,16 @@ from .processing_history import ProcessingHistoryService
 from .protocol_formatter import ProtocolFormatter
 
 
+def _should_show_mapping_card(diarization: Any) -> bool:
+    """Показывать ли карточку сопоставления (ADR-0002).
+
+    Карточка появляется, когда диаризация нашла хотя бы одного спикера —
+    независимо от того, передан ли список участников и сопоставил ли кого-то
+    LLM. Именование спикеров вручную доступно даже без исходного списка.
+    """
+    return bool(diarization and len(diarization.speakers) >= 1)
+
+
 class ProcessingService(BaseProcessingService):
     """Сервис обработки с оптимизацией производительности"""
 
@@ -406,9 +416,11 @@ class ProcessingService(BaseProcessingService):
                 )
             request.template_id = template.id
 
-            # Обработка результатов speaker mapping
+            # Обработка результатов speaker mapping. Карточка показывается при
+            # диаризации с ≥ 1 спикером (ADR-0002) — даже с пустым авто-маппингом
+            # и без списка участников (там имена вводятся вручную).
             speaker_mapping, request_meeting_type = mapping_result
-            if speaker_mapping:
+            if _should_show_mapping_card(transcription_result.diarization):
                 if settings.enable_speaker_mapping_confirmation:
                     # task_id передаём ДО показа кнопок подтверждения, чтобы он
                     # был в сохранённом состоянии к моменту, когда пользователь
@@ -420,7 +432,7 @@ class ProcessingService(BaseProcessingService):
                     )
                     if pause_result is None:
                         return None
-                request.speaker_mapping = speaker_mapping
+                request.speaker_mapping = speaker_mapping or None
             else:
                 request.speaker_mapping = None
 
@@ -518,7 +530,7 @@ class ProcessingService(BaseProcessingService):
                     f"Не удалось отправить фрагменты записи спикеров: {preview_error}"
                 )
 
-            mapping_sessions.save(request.user_id, MappingSession(
+            session = MappingSession(
                 request=request,
                 transcription_result=transcription_result,
                 speaker_mapping=speaker_mapping,
@@ -528,15 +540,18 @@ class ProcessingService(BaseProcessingService):
                 task_id=task_id,
                 metrics=processing_metrics,
                 speakers_with_audio=speakers_with_audio,
-            ))
+            )
+            mapping_sessions.save(request.user_id, session)
 
             confirmation_message = await show_mapping_confirmation(
                 bot=progress_tracker.bot,
                 chat_id=progress_tracker.chat_id,
                 user_id=request.user_id,
                 speaker_mapping=speaker_mapping,
+                # Список может быть не передан: карточка всё равно показывается
+                # (ADR-0002), participants=[] — иначе клавиатура упадёт на None.
+                participants=request.participants_list or [],
                 diarization=transcription_result.diarization,
-                participants=request.participants_list,
                 unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
                 speakers_text=speakers_text,
                 speakers_with_audio=speakers_with_audio,
@@ -571,6 +586,9 @@ class ProcessingService(BaseProcessingService):
                 request.speaker_mapping = speaker_mapping
                 return True  # continue processing
             else:
+                # Ссылку на карточку кладём в сессию: ручной ввод имени
+                # перерисовывает её на месте (сообщение с именем — отдельное).
+                session.confirmation_message = confirmation_message
                 logger.info(
                     "Обработка приостановлена - ожидаю подтверждения от пользователя"
                 )
