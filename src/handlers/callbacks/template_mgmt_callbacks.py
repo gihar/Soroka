@@ -10,7 +10,8 @@ from loguru import logger
 
 from services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
-from src.utils.template_sort import sort_templates_by_name
+from src.utils.template_sort import category_label, sort_templates_by_name
+from src.ux.keyboards import build_template_picker
 
 from .helpers import _safe_callback_answer
 
@@ -32,16 +33,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ]
             templates = sort_templates_by_name(templates)
 
-            category_titles = {
-                "management": "👔 Управленческие",
-                "product": "🚀 Продуктовые",
-                "technical": "⚙️ Технические",
-                "educational": "🎓 Образовательные",
-                "general": "📋 Общие",
-                "sales": "💼 Продажи",
-                "all": "📝 Все шаблоны",
-            }
-            title = category_titles.get(category, f"📁 {category.title()}")
+            title = category_label(category)
 
             keyboard_buttons = [
                 [InlineKeyboardButton(
@@ -193,18 +185,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 category = template.category or 'general'
                 categories[category].append(template)
 
-            # Создаем клавиатуру с категориями
-            category_names = {
-                'management': '👔 Управленческие',
-                'product': '🚀 Продуктовые',
-                'educational': '📚 Учебные',
-                'technical': '⚙️ Технические',
-                'general': '📋 Общие',
-                'sales': '💼 Продажи'
-            }
-
-            # Порядок отображения категорий
-            category_order = ['management', 'product', 'educational', 'technical', 'sales', 'general']
+            # Порядок отображения категорий (только реально существующие)
+            category_order = ['management', 'educational', 'technical', 'general']
 
             keyboard_buttons = []
 
@@ -222,15 +204,14 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             # Добавляем категории
             for category, cat_templates in sorted_categories:
-                category_name = category_names.get(category, f'📁 {category.title()}')
                 keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{category_name} ({len(cat_templates)})",
+                    text=f"{category_label(category)} ({len(cat_templates)})",
                     callback_data=f"view_template_category_{category}"
                 )])
 
             # Добавляем кнопку "Все шаблоны"
             keyboard_buttons.append([InlineKeyboardButton(
-                text="📝 Все шаблоны",
+                text=category_label("all"),
                 callback_data="view_template_category_all"
             )])
 
@@ -281,42 +262,25 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                     reply_markup=keyboard
                 )
             else:
-                # Flat template list in 2 columns, no categories
-                keyboard_buttons = []
-
-                # Smart selection — full width
-                keyboard_buttons.append([InlineKeyboardButton(
-                    text="🤖 Умный выбор (рекомендуется)",
-                    callback_data="set_default_template_0"
-                )])
-
-                # Templates in 2-column grid
-                # Alphabetical order
-                sorted_templates = sort_templates_by_name(all_templates)
-
-                row = []
-                for template in sorted_templates:
-                    row.append(InlineKeyboardButton(
-                        text=template.name,
-                        callback_data=f"set_default_template_{template.id}"
-                    ))
-                    if len(row) == 2:
-                        keyboard_buttons.append(row)
-                        row = []
-                if row:
-                    keyboard_buttons.append(row)
-
-                # Footer buttons
-                keyboard_buttons.append([InlineKeyboardButton(
-                    text="🔄 Сбросить шаблон по умолчанию",
-                    callback_data="reset_default_template"
-                )])
-                keyboard_buttons.append([InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )])
-
-                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+                # Единый пикер: умный выбор сверху, сетка 2 колонки, футер снизу.
+                keyboard = build_template_picker(
+                    all_templates,
+                    lambda t: f"set_default_template_{t.id}",
+                    top_rows=[[InlineKeyboardButton(
+                        text="🤖 Умный выбор (рекомендуется)",
+                        callback_data="set_default_template_0",
+                    )]],
+                    bottom_rows=[
+                        [InlineKeyboardButton(
+                            text="🔄 Сбросить шаблон по умолчанию",
+                            callback_data="reset_default_template",
+                        )],
+                        [InlineKeyboardButton(
+                            text="⬅️ Назад к настройкам",
+                            callback_data="back_to_settings",
+                        )],
+                    ],
+                )
 
                 await safe_edit_text(callback.message,
                     "📝 **Шаблон по умолчанию**\n\n"
@@ -351,15 +315,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 # Если template_id = 0, это "Умный выбор"
                 if template_id == 0:
                     await safe_edit_text(callback.message,
-                        "✅ **Установлен режим: Умный выбор**\n\n"
-                        "🤖 ИИ будет автоматически подбирать подходящий шаблон "
-                        "на основе содержания каждой встречи.\n\n"
-                        "📊 Анализируется:\n"
-                        "• Тематика встречи\n"
-                        "• Ключевые слова\n"
-                        "• История использования\n\n"
-                        "Это рекомендуемый режим для большинства пользователей.\n\n"
-                        "💡 Вы можете в любое время вернуться к конкретному шаблону.",
+                        "**Шаблон по умолчанию: умный выбор**\n"
+                        "Подходящий шаблон подбирается по содержанию каждой встречи.",
                         reply_markup=keyboard,
                         parse_mode="Markdown"
                     )
@@ -368,10 +325,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                     template = await template_service.get_template_by_id(template_id)
 
                     await safe_edit_text(callback.message,
-                        f"✅ **Шаблон по умолчанию установлен!**\n\n"
-                        f"Теперь шаблон **{template.name}** будет использоваться автоматически "
-                        f"при обработке файлов.\n\n"
-                        f"Вы можете изменить это в любое время в настройках.",
+                        f"**Шаблон по умолчанию: {template.name}**\n"
+                        "Применяется автоматически при обработке записи.",
                         reply_markup=keyboard,
                         parse_mode="Markdown"
                     )
@@ -412,11 +367,8 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ])
 
                 await safe_edit_text(callback.message,
-                    "🔄 **Шаблон по умолчанию сброшен**\n\n"
-                    "Теперь бот будет спрашивать выбор шаблона при каждой обработке файла.\n\n"
-                    "💡 **Рекомендуем:** Установите '🤖 Умный выбор' для автоматического подбора "
-                    "подходящего шаблона на основе содержания встречи.\n\n"
-                    "Вы можете установить новый шаблон в любое время.",
+                    "**Шаблон по умолчанию сброшен**\n"
+                    "Перед обработкой бот будет спрашивать шаблон.",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
                 )
@@ -453,15 +405,6 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 category = template.category or 'general'
                 categories[category].append(template)
 
-            # Создаем клавиатуру с категориями
-            category_names = {
-                'management': '👔 Управленческие',
-                'product': '🚀 Продуктовые',
-                'technical': '⚙️ Технические',
-                'general': '📋 Общие',
-                'sales': '💼 Продажи'
-            }
-
             keyboard_buttons = []
 
             # Добавляем опцию "Умный выбор" первой
@@ -472,15 +415,14 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             # Добавляем категории
             for category, cat_templates in sorted(categories.items()):
-                category_name = category_names.get(category, f'📁 {category.title()}')
                 keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{category_name} ({len(cat_templates)})",
+                    text=f"{category_label(category)} ({len(cat_templates)})",
                     callback_data=f"quick_category_{category}"
                 )])
 
             # Добавляем кнопку "Все шаблоны"
             keyboard_buttons.append([InlineKeyboardButton(
-                text="📝 Все шаблоны",
+                text=category_label("all"),
                 callback_data="quick_category_all"
             )])
 

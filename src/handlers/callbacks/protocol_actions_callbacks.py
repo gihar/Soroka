@@ -5,11 +5,12 @@ history_id приходит из callback_data — принадлежность 
 """
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery
 from loguru import logger
 
 from src.utils.telegram_safe import safe_edit_text
-from src.utils.template_sort import sort_templates_by_name, template_name_of
+from src.utils.template_sort import template_name_of
+from src.ux.keyboards import build_template_picker
 
 from .helpers import _safe_callback_answer
 
@@ -104,6 +105,16 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             logger.error(f"Ошибка в protocol_regen_go_callback: {e}")
             await _safe_callback_answer(callback, "❌ Не удалось перегенерировать")
 
+    # Точное совпадение регистрируем раньше общего startswith("proto_regen_").
+    @router.callback_query(F.data == "proto_regen_cancel")
+    async def protocol_regen_cancel_callback(callback: CallbackQuery):
+        """Отмена выбора шаблона: убираем пикер, сообщаем об отмене."""
+        try:
+            await safe_edit_text(callback.message, "Перегенерация отменена.")
+        except Exception as e:
+            logger.error(f"Ошибка в protocol_regen_cancel_callback: {e}")
+        await _safe_callback_answer(callback)
+
     @router.callback_query(F.data.startswith("proto_regen_"))
     async def protocol_regen_callback(callback: CallbackQuery):
         """Выбор шаблона для перегенерации готового протокола."""
@@ -125,19 +136,15 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
                 )
                 return
 
-            templates = sort_templates_by_name(
-                await template_service.get_all_templates()
+            templates = await template_service.get_all_templates()
+            keyboard = build_template_picker(
+                templates,
+                lambda t: f"proto_regen_go_{history_id}_{t.id}",
+                cancel_callback="proto_regen_cancel",
             )
-            keyboard_rows = [
-                [InlineKeyboardButton(
-                    text=t.name,
-                    callback_data=f"proto_regen_go_{history_id}_{t.id}",
-                )]
-                for t in templates
-            ]
             await callback.message.answer(
                 "Каким шаблоном перегенерировать протокол?",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
+                reply_markup=keyboard,
             )
             await _safe_callback_answer(callback)
         except Exception as e:
