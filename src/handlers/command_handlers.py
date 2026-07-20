@@ -11,6 +11,7 @@ from loguru import logger
 from services.template_service import TemplateService
 from services.user_service import UserService
 from src.utils.telegram_safe import safe_answer
+from src.utils.template_sort import category_label
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 
@@ -106,29 +107,19 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             for template in templates:
                 category = template.category or 'general'
                 categories[category].append(template)
-            
-            # Создаем клавиатуру с категориями
-            category_names = {
-                'management': '👔 Управленческие',
-                'product': '🚀 Продуктовые',
-                'technical': '⚙️ Технические',
-                'general': '📋 Общие',
-                'sales': '💼 Продажи'
-            }
-            
+
             keyboard_buttons = []
-            
+
             # Добавляем категории
             for category, cat_templates in sorted(categories.items()):
-                category_name = category_names.get(category, f'📁 {category.title()}')
                 keyboard_buttons.append([InlineKeyboardButton(
-                    text=f"{category_name} ({len(cat_templates)})",
+                    text=f"{category_label(category)} ({len(cat_templates)})",
                     callback_data=f"view_template_category_{category}"
                 )])
-            
+
             # Добавляем кнопку "Все шаблоны"
             keyboard_buttons.append([InlineKeyboardButton(
-                text="📝 Все шаблоны",
+                text=category_label("all"),
                 callback_data="view_template_category_all"
             )])
             

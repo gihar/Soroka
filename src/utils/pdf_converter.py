@@ -236,48 +236,24 @@ def _format_inline(text):
     return safe
 
 
-def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
+def _markdown_to_story(markdown_text: str, styles) -> list:
+    """Разобрать Markdown протокола в список флоу-элементов ReportLab.
+
+    Пустая строка даёт вертикальный отступ, но подряд идущие пустые строки
+    (частый след пустых ``{% if %}``-секций) не копят Spacer друг на друга —
+    иначе в PDF появляются вертикальные дыры.
     """
-    Convert markdown protocol text to a professional business-style PDF.
-
-    Args:
-        markdown_text: protocol text in markdown format
-        output_path: path to the output PDF file
-    """
-    font, font_bold = _FONT_REGULAR, _FONT_BOLD
-    styles = _build_styles(font, font_bold)
-
-    # Document with header/footer
-    doc = BaseDocTemplate(
-        output_path,
-        pagesize=A4,
-        rightMargin=2 * cm,
-        leftMargin=2 * cm,
-        topMargin=2.2 * cm,
-        bottomMargin=2.2 * cm,
-    )
-
-    frame = Frame(
-        doc.leftMargin, doc.bottomMargin,
-        doc.width, doc.height,
-        id='main',
-    )
-
-    doc.addPageTemplates([
-        PageTemplate(id='default', frames=frame, onPage=_make_header_footer(font, font_bold)),
-    ])
-
-    # --- Parse markdown into story elements ---
-    story = []
-    lines = markdown_text.split('\n')
+    story: list = []
     first_heading_seen = False
 
-    for line in lines:
+    for line in markdown_text.split('\n'):
         stripped = line.strip()
 
-        # Empty line → small spacer
+        # Empty line → small spacer, но не стопкой: подряд идущие пустые строки
+        # схлопываются в один отступ.
         if not stripped:
-            story.append(Spacer(1, 2 * mm))
+            if not (story and isinstance(story[-1], Spacer)):
+                story.append(Spacer(1, 2 * mm))
             continue
 
         # Headings: check most-specific first (#### before ### before ## before #)
@@ -317,6 +293,41 @@ def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
         else:
             story.append(Paragraph(_format_inline(stripped), styles['Body']))
 
+    return story
+
+
+def convert_markdown_to_pdf(markdown_text: str, output_path: str) -> None:
+    """
+    Convert markdown protocol text to a professional business-style PDF.
+
+    Args:
+        markdown_text: protocol text in markdown format
+        output_path: path to the output PDF file
+    """
+    font, font_bold = _FONT_REGULAR, _FONT_BOLD
+    styles = _build_styles(font, font_bold)
+
+    # Document with header/footer
+    doc = BaseDocTemplate(
+        output_path,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2.2 * cm,
+        bottomMargin=2.2 * cm,
+    )
+
+    frame = Frame(
+        doc.leftMargin, doc.bottomMargin,
+        doc.width, doc.height,
+        id='main',
+    )
+
+    doc.addPageTemplates([
+        PageTemplate(id='default', frames=frame, onPage=_make_header_footer(font, font_bold)),
+    ])
+
+    story = _markdown_to_story(markdown_text, styles)
     doc.build(story)
 
 

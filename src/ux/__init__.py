@@ -5,7 +5,6 @@
 from .feedback_system import (
     FeedbackCollector,
     FeedbackUI,
-    QuickFeedbackManager,
     feedback_collector,
     setup_feedback_handlers,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "MessageBuilder",
     "FeedbackCollector",
     "FeedbackUI",
-    "QuickFeedbackManager",
     "feedback_collector",
     "setup_feedback_handlers",
     "QuickActionsUI",

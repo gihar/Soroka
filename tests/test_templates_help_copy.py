@@ -44,3 +44,20 @@ def test_help_example_follows_house_style():
     """Пример в справке — с шапкой meeting_title и условной секцией."""
     help_text = MessageBuilder.templates_help_message()
     assert "meeting_title" in help_text
+
+
+def test_help_example_guards_meta_lines():
+    """Дата/Участники в примере обёрнуты в {% if %} — как учит абзац выше.
+
+    Иначе пример сам демонстрирует анти-паттерн: «Дата: » висит над пустотой,
+    против которой справка предупреждает строкой выше.
+    """
+    help_text = MessageBuilder.templates_help_message()
+    assert "{% if date %}" in help_text
+    assert "{% if participants %}" in help_text
+    # Стиль как у системной шапки: жирная метка.
+    assert "**Дата:**" in help_text
+    assert "**Участники:**" in help_text
+    # Голой строки «Дата: {{ date }}» без охраны в примере не осталось.
+    assert "Дата: {{ date }}" not in help_text
+    assert "Участники: {{ participants }}" not in help_text

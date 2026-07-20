@@ -183,13 +183,7 @@ class EnhancedTelegramBot:
         
         feedback_router = setup_feedback_handlers(feedback_collector)
         self.dp.include_router(feedback_router)
-        
-        # Обработчики быстрой обратной связи
-        from ux.feedback_system import QuickFeedbackManager
-        quick_feedback_manager = QuickFeedbackManager(feedback_collector)
-        quick_feedback_router = quick_feedback_manager.create_feedback_handlers()
-        self.dp.include_router(quick_feedback_router)
-    
+
     def _setup_error_handling(self):
         """Настройка дополнительной обработки ошибок"""
         from aiogram.types import ErrorEvent

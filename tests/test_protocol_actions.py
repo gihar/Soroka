@@ -219,6 +219,146 @@ async def test_regenerate_uses_stored_transcription(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_regenerate_reuses_stored_mapping_and_type(monkeypatch):
+    """Сохранённые тип встречи и сопоставление уходят в LLM — анализ не гоняется.
+
+    Имена участников в перегенерации совпадают с уже отправленным протоколом, а
+    новая запись истории наследует те же значения — цепочка остаётся консистентной.
+    """
+    import json
+
+    from src.services import protocol_actions
+
+    row = {
+        "id": 7,
+        "user_id": 42,
+        "file_name": "meeting.mp3",
+        "transcription_text": "полная расшифровка встречи",
+        "result_text": "# Старый протокол",
+        "speaker_mapping": json.dumps({"SPEAKER_00": "Иван Петров"}, ensure_ascii=False),
+        "meeting_type": "daily",
+    }
+
+    import src.database as db_module
+
+    save_mock = AsyncMock(return_value=101)
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user", AsyncMock(return_value=row)
+    )
+    monkeypatch.setattr(db_module.history_repo, "save_processing_result", save_mock)
+
+    class FakeTemplateService:
+        async def get_template_by_id(self, _tid):
+            return SimpleNamespace(
+                id=5, name="Дейли", content="# {{ meeting_title }}",
+            )
+
+    captured = {}
+
+    class FakeLLMGen:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def optimized_llm_generation(
+            self, transcription_result, template, request, metrics, meeting_type=None
+        ):
+            captured["request_speaker_mapping"] = request.speaker_mapping
+            captured["meeting_type_arg"] = meeting_type
+            return {"meeting_title": "Планёрка"}
+
+    import src.services.processing.llm_generation as llm_gen_module
+
+    monkeypatch.setattr(llm_gen_module, "LLMGenerationService", FakeLLMGen)
+
+    async def fake_send_result(bot, chat_id, user_id, request, result, progress_tracker=None):
+        return True
+
+    monkeypatch.setattr(protocol_actions, "send_result_to_user", fake_send_result)
+
+    ok = await protocol_actions.regenerate_protocol(
+        bot=AsyncMock(), chat_id=1, telegram_user_id=1,
+        history_id=7, template_id=5,
+        user_service=SimpleNamespace(), template_service=FakeTemplateService(),
+    )
+
+    assert ok is True
+    # ЭТАП 1 пропущен: значения пришли в LLM-вызов из истории
+    assert captured["request_speaker_mapping"] == {"SPEAKER_00": "Иван Петров"}
+    assert captured["meeting_type_arg"] == "daily"
+    # Новая запись истории наследует те же значения
+    save_kwargs = save_mock.await_args.kwargs
+    assert save_kwargs["speaker_mapping"] == {"SPEAKER_00": "Иван Петров"}
+    assert save_kwargs["meeting_type"] == "daily"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_heals_history_from_llm_result(monkeypatch):
+    """Старая запись без сохранённого mapping: новая запись лечится итогом ЭТАПА 1.
+
+    Иначе следующая перегенерация (v3) снова прогонит анализ и разойдётся с v2 —
+    та же непоследовательность на уровень глубже. Поэтому effective-значения из
+    llm_result оседают в новой записи, а не NULL.
+    """
+    from src.services import protocol_actions
+
+    row = {
+        "id": 7,
+        "user_id": 42,
+        "file_name": "meeting.mp3",
+        "transcription_text": "полная расшифровка встречи",
+        "result_text": "# Старый протокол",
+        "speaker_mapping": None,  # старая запись — итогов анализа нет
+        "meeting_type": None,
+    }
+
+    import src.database as db_module
+
+    save_mock = AsyncMock(return_value=101)
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user", AsyncMock(return_value=row)
+    )
+    monkeypatch.setattr(db_module.history_repo, "save_processing_result", save_mock)
+
+    class FakeTemplateService:
+        async def get_template_by_id(self, _tid):
+            return SimpleNamespace(id=5, name="Дейли", content="# {{ meeting_title }}")
+
+    class FakeLLMGen:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def optimized_llm_generation(
+            self, transcription_result, template, request, metrics, meeting_type=None
+        ):
+            # ЭТАП 1 отработал заново — генератор вернул выведенные значения
+            return {
+                "meeting_title": "Планёрка",
+                "_speaker_mapping": {"SPEAKER_00": "Мария Иванова"},
+                "_meeting_type": "planning",
+            }
+
+    import src.services.processing.llm_generation as llm_gen_module
+
+    monkeypatch.setattr(llm_gen_module, "LLMGenerationService", FakeLLMGen)
+
+    async def fake_send_result(bot, chat_id, user_id, request, result, progress_tracker=None):
+        return True
+
+    monkeypatch.setattr(protocol_actions, "send_result_to_user", fake_send_result)
+
+    ok = await protocol_actions.regenerate_protocol(
+        bot=AsyncMock(), chat_id=1, telegram_user_id=1,
+        history_id=7, template_id=5,
+        user_service=SimpleNamespace(), template_service=FakeTemplateService(),
+    )
+
+    assert ok is True
+    save_kwargs = save_mock.await_args.kwargs
+    assert save_kwargs["speaker_mapping"] == {"SPEAKER_00": "Мария Иванова"}
+    assert save_kwargs["meeting_type"] == "planning"
+
+
+@pytest.mark.asyncio
 async def test_regenerate_refuses_without_transcription(monkeypatch):
     import src.database as db_module
     from src.services import protocol_actions
@@ -254,3 +394,89 @@ def test_callbacks_check_ownership():
     src_text = inspect.getsource(pac)
     assert "get_result_for_user" in src_text
     assert "from_user.id" in src_text
+
+
+# ---------------------------------------------------------------------------
+# Устойчивый разбор callback_data перегенерации
+# ---------------------------------------------------------------------------
+
+def _regen_go_handler(template_service=None):
+    from unittest.mock import MagicMock
+
+    import src.handlers.callbacks.protocol_actions_callbacks as pac
+
+    router = pac.setup_protocol_actions_callbacks(
+        user_service=MagicMock(), template_service=template_service or MagicMock()
+    )
+    handler = next(
+        h.callback for h in router.callback_query.handlers
+        if h.callback.__name__ == "protocol_regen_go_callback"
+    )
+    return pac, handler
+
+
+def _regen_callback(data: str):
+    return SimpleNamespace(
+        data=data,
+        message=SimpleNamespace(chat=SimpleNamespace(id=1)),
+        from_user=SimpleNamespace(id=1),
+        bot=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_regen_go_dispatches_valid_ids(monkeypatch):
+    class FakeTemplateService:
+        async def get_template_by_id(self, _tid):
+            return SimpleNamespace(id=5, name="Дейли")
+
+    pac, handler = _regen_go_handler(FakeTemplateService())
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+    monkeypatch.setattr(pac, "_safe_callback_answer", AsyncMock())
+
+    import src.services.protocol_actions as pa
+
+    captured = {}
+
+    async def fake_regen(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(pa, "regenerate_protocol", fake_regen)
+
+    await handler(_regen_callback("proto_regen_go_7_5"))
+
+    assert captured["history_id"] == 7
+    assert captured["template_id"] == 5
+
+
+@pytest.mark.asyncio
+async def test_regen_go_rejects_malformed_data_gracefully(monkeypatch):
+    """Нечисловой callback_data — вежливый отказ, а не серверная ошибка в логах."""
+    from loguru import logger
+
+    pac, handler = _regen_go_handler()
+
+    answers = []
+
+    async def fake_answer(callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+
+    import src.services.protocol_actions as pa
+
+    regen_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(pa, "regenerate_protocol", regen_mock)
+
+    errors = []
+    sink_id = logger.add(lambda m: errors.append(m.record["message"]), level="ERROR")
+    try:
+        await handler(_regen_callback("proto_regen_go_7_abc"))
+    finally:
+        logger.remove(sink_id)
+
+    regen_mock.assert_not_awaited()
+    assert answers and answers[-1]  # пользователь получил вежливый отказ
+    assert not any("protocol_regen_go_callback" in e for e in errors)

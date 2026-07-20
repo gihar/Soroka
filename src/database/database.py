@@ -70,6 +70,8 @@ class Database:
                     llm_provider TEXT,
                     transcription_text TEXT,
                     result_text TEXT,
+                    speaker_mapping TEXT,
+                    meeting_type TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users (id),
                     FOREIGN KEY (template_id) REFERENCES templates (id)
@@ -192,6 +194,22 @@ class Database:
                 if "duplicate column" not in str(exc).lower():
                     logger.error(f"Миграция updated_at не применилась: {exc}")
             
+            # Миграция: поля перегенерации в processing_history (nullable, без
+            # DEFAULT — NULL значит «данных нет», backfill не нужен). По ним
+            # перегенерация из истории пропускает ЭТАП 1 анализа. Дубликат
+            # колонки на уже мигрированной БД — норма, прочие ошибки логируем.
+            for _column in ("speaker_mapping", "meeting_type"):
+                try:
+                    await db.execute(
+                        f"ALTER TABLE processing_history ADD COLUMN {_column} TEXT"
+                    )
+                    logger.info(f"Добавлено поле {_column} в таблицу processing_history")
+                except Exception as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        logger.error(
+                            f"Миграция {_column} в processing_history не применилась: {exc}"
+                        )
+
             # Миграция: синхронизируем владельцев шаблонов (legacy created_by = telegram_id)
             await self._sync_template_owner_ids(db)
             
