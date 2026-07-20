@@ -502,9 +502,9 @@ async def test_confirmation_pause_defaults_participants_and_stores_card(monkeypa
     пауза происходит, ссылка на карточку кладётся в сессию для правки на месте."""
     import types
 
+    import src.utils.telegram_safe as ts
     import src.ux.speaker_audio_preview as preview
     import src.ux.speaker_mapping_ui as ui
-    import src.utils.telegram_safe as ts
     from src.services.processing.processing_service import ProcessingService
 
     captured = {}
