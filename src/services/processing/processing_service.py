@@ -263,6 +263,14 @@ class ProcessingService(BaseProcessingService):
 
         llm_model_display_name = await self.llm_gen.resolve_model_display_name()
 
+        # Итоги ЭТАПА 1, фактически использованные генератором: при пропуске
+        # анализа их нет в llm_result — берём из запроса/аргумента. Сохраняются
+        # в историю, чтобы перегенерация была консистентной (без нового анализа).
+        effective_speaker_mapping = (
+            llm_result.get('_speaker_mapping') or request.speaker_mapping
+        )
+        effective_meeting_type = llm_result.get('_meeting_type') or meeting_type
+
         return ProcessingResult(
             transcription_result=transcription_result,
             protocol_text=protocol_text,
@@ -275,6 +283,8 @@ class ProcessingService(BaseProcessingService):
             llm_model_used=llm_model_display_name,
             processing_duration=processing_metrics.total_duration,
             warnings=user_warnings,
+            meeting_type=effective_meeting_type,
+            speaker_mapping=effective_speaker_mapping,
         )
 
     async def _process_file_optimized(

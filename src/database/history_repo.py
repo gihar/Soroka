@@ -1,5 +1,13 @@
 """История обработки: свершившиеся результаты и статистика пользователя."""
+import json
 from typing import Any, Dict, Optional
+
+
+def _serialize_speaker_mapping(speaker_mapping: Optional[Dict[str, str]]) -> Optional[str]:
+    """Сопоставление спикеров → JSON-строка; пустое/None → NULL (не «{}» и не «null»)."""
+    if not speaker_mapping:
+        return None
+    return json.dumps(speaker_mapping, ensure_ascii=False)
 
 
 class HistoryRepository:
@@ -10,14 +18,24 @@ class HistoryRepository:
 
     async def save_processing_result(self, user_id: int, file_name: str, template_id: int,
                                      llm_provider: str, transcription_text: str,
-                                     result_text: str) -> Optional[int]:
-        """Save processing result to history. Returns the new row id."""
+                                     result_text: str,
+                                     speaker_mapping: Optional[Dict[str, str]] = None,
+                                     meeting_type: Optional[str] = None) -> Optional[int]:
+        """Save processing result to history. Returns the new row id.
+
+        ``speaker_mapping`` и ``meeting_type`` — итог ЭТАПА 1 анализа. Сохраняются,
+        чтобы перегенерация из истории пропускала анализ и держала имена участников
+        консистентными с уже отправленным протоколом. Пустые значения → NULL.
+        """
         async with self._db.connect() as db:
             cursor = await db.execute("""
                 INSERT INTO processing_history
-                (user_id, file_name, template_id, llm_provider, transcription_text, result_text)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, file_name, template_id, llm_provider, transcription_text, result_text))
+                (user_id, file_name, template_id, llm_provider, transcription_text,
+                 result_text, speaker_mapping, meeting_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, file_name, template_id, llm_provider, transcription_text,
+                  result_text, _serialize_speaker_mapping(speaker_mapping),
+                  meeting_type or None))
             await db.commit()
             return cursor.lastrowid
 
@@ -30,7 +48,8 @@ class HistoryRepository:
         async with self._db.connect() as db:
             cursor = await db.execute("""
                 SELECT ph.id, ph.user_id, ph.file_name, ph.template_id,
-                       ph.llm_provider, ph.transcription_text, ph.result_text
+                       ph.llm_provider, ph.transcription_text, ph.result_text,
+                       ph.speaker_mapping, ph.meeting_type
                 FROM processing_history ph
                 JOIN users u ON ph.user_id = u.id
                 WHERE ph.id = ? AND u.telegram_id = ?

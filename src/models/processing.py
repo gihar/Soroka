@@ -75,6 +75,14 @@ class ProcessingResult(BaseModel):
         None,
         description="ID записи истории обработки — для действий с готовым протоколом",
     )
+    meeting_type: Optional[str] = Field(
+        None,
+        description="Тип встречи (итог ЭТАПА 1) — для консистентной перегенерации из истории",
+    )
+    speaker_mapping: Optional[Dict[str, str]] = Field(
+        None,
+        description="Сопоставление спикеров (итог ЭТАПА 1) — для консистентной перегенерации",
+    )
 
 
 class ProcessingHistory(BaseModel):

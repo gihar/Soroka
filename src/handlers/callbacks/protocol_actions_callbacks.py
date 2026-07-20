@@ -61,10 +61,19 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
     @router.callback_query(F.data.startswith("proto_regen_go_"))
     async def protocol_regen_go_callback(callback: CallbackQuery):
         """Запуск перегенерации выбранным шаблоном."""
-        try:
-            _, _, _, history_id, template_id = callback.data.split("_")
-            history_id, template_id = int(history_id), int(template_id)
+        # callback_data приходит извне: разбираем ровно две числовые части и
+        # вежливо отказываем на мусоре, не поднимая исключение и не логируя как
+        # серверную ошибку.
+        parts = callback.data.removeprefix("proto_regen_go_").split("_")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            logger.warning(f"Перегенерация: неожиданный callback_data «{callback.data}»")
+            await _safe_callback_answer(
+                callback, "Кнопка устарела — отправьте запись ещё раз."
+            )
+            return
+        history_id, template_id = int(parts[0]), int(parts[1])
 
+        try:
             template = await template_service.get_template_by_id(template_id)
             template_name = template_name_of(template, default="выбранный шаблон")
             await safe_edit_text(

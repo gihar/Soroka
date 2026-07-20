@@ -50,6 +50,9 @@ class ProcessingHistoryService:
                 llm_provider=result.llm_provider_used,
                 transcription_text=transcription_text,
                 result_text=result.protocol_text or "",
+                # getattr: старый закешированный результат мог не иметь этих полей
+                speaker_mapping=getattr(result, "speaker_mapping", None),
+                meeting_type=getattr(result, "meeting_type", None),
             )
         except Exception as err:
             logger.error(f"Ошибка при сохранении истории обработки: {err}")
