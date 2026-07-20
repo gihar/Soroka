@@ -11,8 +11,8 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import Message, TelegramObject, User
 from loguru import logger
 
+from reliability.health_check import health_checker
 from src.exceptions import BotException
-from src.reliability.health_check import health_checker
 from src.reliability.rate_limiter import USER_REQUEST_LIMIT, RateLimitExceeded, global_rate_limiter
 
 
