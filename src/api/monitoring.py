@@ -7,9 +7,9 @@ from typing import Any, Dict
 
 from loguru import logger
 
-from reliability.health_check import health_checker
-from reliability.middleware import monitoring_middleware
-from reliability.rate_limiter import global_rate_limiter
+from src.reliability.health_check import health_checker
+from src.reliability.middleware import monitoring_middleware
+from src.reliability.rate_limiter import global_rate_limiter
 
 
 class MonitoringAPI:

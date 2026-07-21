@@ -8,8 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services.template_service import TemplateService
-from services.user_service import UserService
+from src.services.template_service import TemplateService
+from src.services.user_service import UserService
 from src.utils.telegram_safe import safe_answer
 from src.utils.template_sort import category_label
 
@@ -31,8 +31,8 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 last_name=message.from_user.last_name
             )
             
-            from ux.message_builder import MessageBuilder
-            from ux.quick_actions import QuickActionsUI
+            from src.ux.message_builder import MessageBuilder
+            from src.ux.quick_actions import QuickActionsUI
             
             welcome_text = MessageBuilder.welcome_message()
             main_menu = QuickActionsUI.create_main_menu(message.from_user.id)
@@ -51,7 +51,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
     @router.message(Command("help", "h"))
     async def help_handler(message: Message):
         """Обработчик команды /help"""
-        from ux.message_builder import MessageBuilder
+        from src.ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
         await safe_answer(message, help_text, parse_mode="Markdown")
     
@@ -151,7 +151,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
     @router.message(Command("feedback", "fb"))
     async def feedback_handler(message: Message):
         """Обработчик команды /feedback"""
-        from ux.feedback_system import FeedbackUI
+        from src.ux.feedback_system import FeedbackUI
         
         keyboard = FeedbackUI.create_feedback_type_keyboard()
         await safe_answer(message, 

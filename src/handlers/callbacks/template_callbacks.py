@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import ProcessingService, TemplateService, UserService
+from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import sort_templates_by_name
 
@@ -190,7 +190,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
     async def show_all_templates_callback(callback: CallbackQuery, state: FSMContext):
         """Обработчик показа всех шаблонов"""
         try:
-            from services import TemplateService
+            from src.services import TemplateService
             template_service_local = TemplateService()
 
             templates = await template_service_local.get_all_templates()
