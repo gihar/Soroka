@@ -13,11 +13,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from services import FileService, ProcessingService, TemplateService
-from services.url_service import URLService
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
 from src.exceptions.template import TemplateNotFoundError
 from src.handlers.record_state import register_new_record
+from src.services import FileService, ProcessingService, TemplateService
+from src.services.url_service import URLService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux.quick_actions import QuickActionsUI
 
@@ -42,7 +42,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             try:
                 file_service.validate_file(file_obj, content_type, file_name)
             except FileSizeError:
-                from ux.message_builder import MessageBuilder
+                from src.ux.message_builder import MessageBuilder
                 error_details = {
                     "type": "size",
                     "actual_size": getattr(file_obj, 'file_size', 0),
@@ -52,7 +52,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 await safe_answer(message, error_message, parse_mode="Markdown")
                 return
             except FileTypeError:
-                from ux.message_builder import MessageBuilder
+                from src.ux.message_builder import MessageBuilder
                 formats = file_service.get_supported_formats()
                 error_details = {
                     "type": "format",
@@ -63,7 +63,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                 await safe_answer(message, error_message, parse_mode="Markdown")
                 return
             except FileError as e:
-                from ux.message_builder import MessageBuilder
+                from src.ux.message_builder import MessageBuilder
                 error_message = MessageBuilder.error_message("validation", str(e))
                 await safe_answer(message, error_message, parse_mode="Markdown")
                 return
@@ -476,7 +476,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             logger.info(f"[DEBUG] Используем user_id={user_id} (message.chat.id) вместо message.from_user.id={message.from_user.id}")
 
         # Проверяем, есть ли у пользователя шаблон по умолчанию
-        from services import UserService
+        from src.services import UserService
         user_service = UserService()
         default_template_id = await user_service.get_user_default_template_id(user_id)
         logger.info(f"[DEBUG] get_user_default_template_id вернул: {default_template_id} для пользователя {user_id}")
@@ -628,7 +628,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 
             except FileSizeError:
                 from src.config import settings
-                from ux.message_builder import MessageBuilder
+                from src.ux.message_builder import MessageBuilder
                 
                 error_details = {
                     "type": "size",
@@ -639,7 +639,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await safe_edit_text(status_message, error_message, parse_mode="Markdown")
                 
             except FileTypeError:
-                from ux.message_builder import MessageBuilder
+                from src.ux.message_builder import MessageBuilder
                 
                 error_details = {
                     "type": "format",

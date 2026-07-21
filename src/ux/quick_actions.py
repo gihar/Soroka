@@ -259,8 +259,8 @@ def setup_quick_actions_handlers() -> Router:
         try:
             from datetime import datetime
 
-            from reliability.middleware import monitoring_middleware
             from src.database import history_repo
+            from src.reliability.middleware import monitoring_middleware
             
             # Получаем статистику пользователя из базы данных
             user_stats = await history_repo.get_user_stats(message.from_user.id)
@@ -334,14 +334,14 @@ def setup_quick_actions_handlers() -> Router:
     @router.message(F.text == "❓ Помощь")
     async def help_button_handler(message: Message):
         """Обработчик кнопки помощи"""
-        from ux.message_builder import MessageBuilder
+        from src.ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
         await safe_answer(message, help_text, parse_mode="Markdown")
     
     @router.message(F.text == "💬 Обратная связь")
     async def feedback_button_handler(message: Message):
         """Обработчик кнопки обратной связи"""
-        from ux.feedback_system import FeedbackUI
+        from src.ux.feedback_system import FeedbackUI
         keyboard = FeedbackUI.create_feedback_type_keyboard()
         await safe_answer(message, 
             "💬 **Обратная связь**\n\n"

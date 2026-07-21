@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import ProcessingService, TemplateService, UserService
+from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 
 
@@ -124,8 +124,8 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             from datetime import datetime
 
-            from reliability.middleware import monitoring_middleware
             from src.database import history_repo
+            from src.reliability.middleware import monitoring_middleware
 
             user_stats = await history_repo.get_user_stats(callback.from_user.id)
             system_stats = monitoring_middleware.get_stats()
@@ -190,7 +190,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         """Обработчик возврата к главному меню настроек"""
         try:
             from src.utils.admin_utils import is_admin as _is_admin
-            from ux.quick_actions import QuickActionsUI
+            from src.ux.quick_actions import QuickActionsUI
 
             keyboard = QuickActionsUI.create_settings_menu(
                 is_admin=_is_admin(callback.from_user.id)

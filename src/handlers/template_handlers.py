@@ -8,9 +8,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from exceptions import TemplateValidationError
-from models.template import TemplateCreate
-from services import TemplateService
+from src.exceptions import TemplateValidationError
+from src.models.template import TemplateCreate
+from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 
 
@@ -169,7 +169,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             data = await state.get_data()
             
             # Привязываем шаблон к внутреннему ID пользователя (а не Telegram ID)
-            from services import UserService
+            from src.services import UserService
             user_service = UserService()
             user = await user_service.get_or_create_user(
                 telegram_id=callback.from_user.id,

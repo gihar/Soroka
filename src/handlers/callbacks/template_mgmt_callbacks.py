@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
-from services import ProcessingService, TemplateService, UserService
+from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import category_label, sort_templates_by_name
 from src.ux.keyboards import build_template_picker

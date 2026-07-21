@@ -7,10 +7,10 @@ from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from api.monitoring import monitoring_api
-from reliability.health_check import health_checker
-from services.processing_service import ProcessingService
+from src.api.monitoring import monitoring_api
 from src.config import settings
+from src.reliability.health_check import health_checker
+from src.services.processing_service import ProcessingService
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 
@@ -335,7 +335,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             return
         
         try:
-            from performance import memory_optimizer, metrics_collector, performance_cache, task_pool
+            from src.performance import memory_optimizer, metrics_collector, performance_cache, task_pool
             
             # Собираем статистику
             cache_stats = performance_cache.get_stats()
@@ -384,7 +384,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             return
         
         try:
-            from performance import memory_optimizer, performance_cache
+            from src.performance import memory_optimizer, performance_cache
             
             status_msg = await message.answer("🔄 Выполняю оптимизацию...")
             
@@ -546,7 +546,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             return
         
         try:
-            from performance import memory_optimizer, metrics_collector, performance_cache, task_pool
+            from src.performance import memory_optimizer, metrics_collector, performance_cache, task_pool
             
             await callback.answer()
             await safe_edit_text(callback.message, "📊 Собираю данные о производительности...")

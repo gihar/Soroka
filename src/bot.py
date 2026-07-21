@@ -9,16 +9,17 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from loguru import logger
 
+from src.config import settings
+from src.database import db
+
 # Импорты надежности
-from reliability import health_checker
-from reliability.middleware import (
+from src.reliability import health_checker
+from src.reliability.middleware import (
     error_handling_middleware,
     health_check_middleware,
     monitoring_middleware,
     rate_limiting_middleware,
 )
-from src.config import settings
-from src.database import db
 
 # Импорты OOM защиты
 try:
@@ -38,10 +39,15 @@ except ImportError:
     logger.warning("Cleanup Service недоступна")
 
 # Импорты новой архитектуры
-from handlers import setup_callback_handlers, setup_command_handlers, setup_message_handlers, setup_template_handlers
-from handlers.admin_handlers import setup_admin_handlers
-from handlers.participants_handlers import setup_participants_handlers
-from services import FileService, ProcessingService, TemplateService, UserService
+from src.handlers import (
+    setup_callback_handlers,
+    setup_command_handlers,
+    setup_message_handlers,
+    setup_template_handlers,
+)
+from src.handlers.admin_handlers import setup_admin_handlers
+from src.handlers.participants_handlers import setup_participants_handlers
+from src.services import FileService, ProcessingService, TemplateService, UserService
 
 
 class EnhancedTelegramBot:
@@ -154,7 +160,7 @@ class EnhancedTelegramBot:
         self.dp.include_router(command_router)
         
         # UX обработчики - быстрые действия (ДОЛЖНЫ БЫТЬ РАНЬШЕ message_handlers!)
-        from ux import feedback_collector, setup_feedback_handlers, setup_quick_actions_handlers
+        from src.ux import feedback_collector, setup_feedback_handlers, setup_quick_actions_handlers
         
         quick_actions_router = setup_quick_actions_handlers()
         self.dp.include_router(quick_actions_router)
@@ -235,8 +241,8 @@ class EnhancedTelegramBot:
             
             # 4. Инициализируем систему обратной связи и метрик
             try:
-                from performance.metrics import metrics_collector
-                from ux import feedback_collector
+                from src.performance.metrics import metrics_collector
+                from src.ux import feedback_collector
                 
                 await feedback_collector.initialize()
                 logger.info("Система обратной связи инициализирована")

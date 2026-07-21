@@ -4,20 +4,14 @@ Enhanced Telegram Bot - Точка входа в приложение
 """
 
 import asyncio
-import os
 import shutil
 import ssl
-import sys
 
 from loguru import logger
 
-from src.config import settings
-
-# Добавляем src в путь для импортов
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
-
 # Импортируем финальную оптимизированную версию бота
 from src.bot import main_enhanced as main
+from src.config import settings
 from src.utils.logging_utils import setup_logging
 
 try:

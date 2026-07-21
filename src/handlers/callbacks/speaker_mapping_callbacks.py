@@ -14,8 +14,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
-from services import ProcessingService, TemplateService, UserService
 from src.handlers.participants_states import SpeakerNameInput
+from src.services import ProcessingService, TemplateService, UserService
 from src.services.mapping_session import MappingSession, mapping_sessions
 from src.services.participants_service import participants_service
 from src.utils.telegram_safe import safe_edit_text
