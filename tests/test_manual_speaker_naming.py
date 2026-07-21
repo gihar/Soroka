@@ -216,6 +216,7 @@ async def test_sm_custom_enters_name_waiting_state(monkeypatch):
         request_custom_speaker_name,
     )
     from src.handlers.participants_states import SpeakerNameInput
+    from src.ux.speaker_mapping_callback_data import SmCustom
 
     edited = []
 
@@ -231,7 +232,7 @@ async def test_sm_custom_enters_name_waiting_state(monkeypatch):
     message = _FakeMessage(user_id=42)
     callback = _FakeCallback("sm_custom:SPEAKER_1:42", user_id=42, message=message)
 
-    await request_custom_speaker_name(callback, state)
+    await request_custom_speaker_name(callback, SmCustom.unpack(callback.data), state)
 
     assert await state.get_state() == SpeakerNameInput.waiting
     data = await state.get_data()
@@ -253,6 +254,7 @@ async def test_sm_cancel_clears_name_waiting_state(monkeypatch):
         speaker_mapping_cancel_callback,
     )
     from src.handlers.participants_states import SpeakerNameInput
+    from src.ux.speaker_mapping_callback_data import SmCancel
 
     async def fake_edit(message, text, **kwargs):
         return True
@@ -267,7 +269,7 @@ async def test_sm_cancel_clears_name_waiting_state(monkeypatch):
 
     callback = _FakeCallback("sm_cancel:42", user_id=42, message=_FakeMessage(42))
 
-    await speaker_mapping_cancel_callback(callback, state)
+    await speaker_mapping_cancel_callback(callback, SmCancel.unpack(callback.data), state)
 
     assert await state.get_state() is None
 

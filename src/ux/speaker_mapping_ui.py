@@ -11,6 +11,14 @@ from loguru import logger
 from src.models.diarization import Diarization
 from src.utils.message_utils import escape_markdown_v2
 from src.utils.telegram_safe import safe_send_message
+from src.ux.speaker_mapping_callback_data import (
+    SmCancel,
+    SmChange,
+    SmConfirm,
+    SmCustom,
+    SmSelect,
+    SmSkip,
+)
 
 
 def _speaker_order(diarization: Optional[Diarization]) -> List[str]:
@@ -225,14 +233,20 @@ def create_mapping_keyboard(
         # Кнопка "Оставить без имени"
         keyboard_buttons.append([InlineKeyboardButton(
             text="❌ Оставить без имени",
-            callback_data=f"sm_select:{current_editing_speaker}:none:{user_id}"
+            callback_data=SmSelect(
+                speaker_id=current_editing_speaker,
+                participant_idx="none",
+                user_id=user_id,
+            ).pack()
         )])
 
         # Кнопка "Ввести имя вручную" — назвать спикера человеком, которого нет
         # в списке участников (ADR-0002). Имя ловит FSM-состояние.
         keyboard_buttons.append([InlineKeyboardButton(
             text="✏️ Ввести имя вручную",
-            callback_data=f"sm_custom:{current_editing_speaker}:{user_id}"
+            callback_data=SmCustom(
+                speaker_id=current_editing_speaker, user_id=user_id
+            ).pack()
         )])
 
         # Кнопки с участниками
@@ -251,13 +265,17 @@ def create_mapping_keyboard(
             
             keyboard_buttons.append([InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"sm_select:{current_editing_speaker}:{idx}:{user_id}"
+                callback_data=SmSelect(
+                    speaker_id=current_editing_speaker,
+                    participant_idx=str(idx),
+                    user_id=user_id,
+                ).pack()
             )])
-        
+
         # Кнопка "Назад"
         keyboard_buttons.append([InlineKeyboardButton(
             text="◀️ Назад",
-            callback_data=f"sm_cancel:{user_id}"
+            callback_data=SmCancel(user_id=user_id).pack()
         )])
         
     else:
@@ -277,20 +295,22 @@ def create_mapping_keyboard(
             
             keyboard_buttons.append([InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"sm_change:{speaker_id}:{user_id}"
+                callback_data=SmChange(
+                    speaker_id=speaker_id, user_id=user_id
+                ).pack()
             )])
-        
+
         # Разделитель и основные действия
         keyboard_buttons.append([])  # Пустая строка для разделения
-        
+
         keyboard_buttons.append([InlineKeyboardButton(
             text="✅ Подтвердить и продолжить",
-            callback_data=f"sm_confirm:{user_id}"
+            callback_data=SmConfirm(user_id=user_id).pack()
         )])
-        
+
         keyboard_buttons.append([InlineKeyboardButton(
             text="❌ Пропустить сопоставление",
-            callback_data=f"sm_skip:{user_id}"
+            callback_data=SmSkip(user_id=user_id).pack()
         )])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
@@ -304,7 +324,7 @@ def create_name_prompt_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
         text="◀️ Отмена",
-        callback_data=f"sm_cancel:{user_id}"
+        callback_data=SmCancel(user_id=user_id).pack()
     )]])
 
 
