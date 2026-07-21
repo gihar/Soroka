@@ -31,7 +31,8 @@ from src.services.smart_template_selector import smart_selector
 from src.services.transcription_preprocessor import get_preprocessor
 from src.utils.telegram_safe import safe_send_message
 
-from .llm_generation import LLMGenerationService, effective_stage1_outcome
+from .completion import CompletionDeps, complete_processing, deliver_cached
+from .llm_generation import LLMGenerationService
 from .processing_history import ProcessingHistoryService
 
 # Extracted modules
@@ -66,20 +67,40 @@ class ProcessingService(BaseProcessingService):
         self.history = ProcessingHistoryService(user_service=self.user_service)
 
     # ------------------------------------------------------------------
-    # Thin delegations to ProcessingHistoryService (used across the orchestrator)
+    # Единый хвост «Завершение обработки» (ADR-0003)
     # ------------------------------------------------------------------
 
-    async def _save_processing_history(self, request, result):
-        return await self.history.save_processing_history(request, result)
+    def _completion_deps(self) -> CompletionDeps:
+        """Зависимости единого хвоста: генерация, форматирование, история."""
+        return CompletionDeps(
+            llm_gen=self.llm_gen,
+            formatter=self.formatter,
+            history=self.history,
+        )
 
-    async def _calculate_file_hash(self, file_path):
-        return await self.history.calculate_file_hash(file_path)
+    def _delivery_for(self, request, progress_tracker):
+        """Колбэк доставки готового результата пользователю.
 
-    async def _cleanup_temp_file(self, file_path):
-        return await self.history.cleanup_temp_file(file_path)
+        Канал берётся из progress_tracker (bot/chat_id), адресат — из запроса.
+        Без трекера доставлять некуда → False (в проде трекер всегда есть:
+        обработку запускает воркер очереди).
+        """
+        async def deliver(result) -> bool:
+            if progress_tracker is None:
+                logger.warning("Доставка невозможна: нет progress_tracker")
+                return False
+            from src.services.result_sender import send_result_to_user
 
-    def _generate_result_cache_key(self, request, file_hash):
-        return self.history.generate_result_cache_key(request, file_hash)
+            return await send_result_to_user(
+                bot=progress_tracker.bot,
+                chat_id=progress_tracker.chat_id,
+                user_id=request.user_id,
+                request=request,
+                result=result,
+                progress_tracker=progress_tracker,
+            )
+
+        return deliver
 
     # ------------------------------------------------------------------
     # Orchestration
@@ -134,11 +155,11 @@ class ProcessingService(BaseProcessingService):
                 cache_check_only = True
 
             # Шаг 2: Вычисляем хеш файла
-            file_hash = await self._calculate_file_hash(temp_file_path)
+            file_hash = await self.history.calculate_file_hash(temp_file_path)
             logger.debug(f"Вычислен хеш файла: {file_hash}")
 
             # Шаг 3: Генерируем ключ кеша с хешем
-            cache_key = self._generate_result_cache_key(request, file_hash)
+            cache_key = self.history.generate_result_cache_key(request, file_hash)
 
             # Шаг 4: Проверяем кэш полного результата
             cached_result = await performance_cache.get(cache_key)
@@ -151,16 +172,22 @@ class ProcessingService(BaseProcessingService):
                 processing_metrics.end_time = processing_metrics.start_time
                 metrics_collector.finish_processing_metrics(processing_metrics)
                 record_monitoring(True)
-                cached_result.history_id = await self._save_processing_history(
-                    request, cached_result
-                )
                 if progress_tracker:
                     await progress_tracker.complete_all()
 
                 if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
-                    await self._cleanup_temp_file(temp_file_path)
+                    await self.history.cleanup_temp_file(temp_file_path)
 
-                return cached_result
+                # Кеш-хит доставляется и учитывается тем же хвостом: свежая запись
+                # истории (её id даёт кнопки), доставка, статус задачи (ADR-0003).
+                outcome = await deliver_cached(
+                    cached_result,
+                    request=request,
+                    deps=self._completion_deps(),
+                    delivery=self._delivery_for(request, progress_tracker),
+                    task_id=task_id,
+                )
+                return outcome.result
 
             logger.info(
                 f"Кеш не найден для {request.file_name} (file_hash: {file_hash}), "
@@ -168,7 +195,8 @@ class ProcessingService(BaseProcessingService):
             )
             cache_check_only = False
 
-            # Шаг 5: Оптимизированная обработка
+            # Шаг 5: обработка + единый хвост «Завершение обработки» (кеш, история,
+            # доставка, статус задачи) — внутри _process_file_optimized.
             result = await self._process_file_optimized(
                 request, processing_metrics, progress_tracker, temp_file_path,
                 cache_key=cache_key, task_id=task_id,
@@ -178,18 +206,8 @@ class ProcessingService(BaseProcessingService):
                 logger.info("Обработка приостановлена - ожидаю подтверждения от пользователя")
                 return None
 
-            # Шаг 6: Кэшируем результат
-            await performance_cache.set(
-                cache_key, result,
-                cache_type="processing_result",
-            )
-            logger.info(
-                f"Результат закеширован для {request.file_name} (file_hash: {file_hash})"
-            )
-
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
-            result.history_id = await self._save_processing_history(request, result)
             return result
 
         except Exception as e:
@@ -197,7 +215,7 @@ class ProcessingService(BaseProcessingService):
             metrics_collector.finish_processing_metrics(processing_metrics, e)
             record_monitoring(False)
             if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
-                await self._cleanup_temp_file(temp_file_path)
+                await self.history.cleanup_temp_file(temp_file_path)
             raise
 
     def _log_request_diagnostics(self, request: ProcessingRequest) -> None:
@@ -215,88 +233,6 @@ class ProcessingService(BaseProcessingService):
         logger.info(f"  meeting_date: {request.meeting_date}")
         logger.info(f"  meeting_time: {request.meeting_time}")
         logger.info(f"  speaker_mapping: {request.speaker_mapping}")
-
-    async def _finalize_protocol(
-        self,
-        request: ProcessingRequest,
-        transcription_result: Any,
-        template: Any,
-        processing_metrics,
-        meeting_type: Optional[str] = None,
-        temp_file_path: Optional[str] = None,
-    ) -> ProcessingResult:
-        """Общий «хвост» пайплайна.
-
-        Генерация LLM → форматирование → замена спикеров → имя модели →
-        сборка ``ProcessingResult``. Вызывается и из основного пути
-        (``_process_file_optimized``), и из пути возобновления
-        (``continue_processing_after_mapping_confirmation``), чтобы две ветки
-        не могли разойтись.
-        """
-        # Этап 3: Анализ и генерация
-        llm_result = await self.llm_gen.optimized_llm_generation(
-            transcription_result, template, request, processing_metrics,
-            meeting_type=meeting_type,
-        )
-        if llm_result is None:
-            raise ProcessingError(
-                "LLM вернул пустой результат",
-                request.file_name,
-                "llm_empty_result",
-            )
-
-        # Форматирование
-        with PerformanceTimer("formatting", metrics_collector):
-            processing_metrics.formatting_duration = 0.1
-
-            user_warnings: list = []
-            protocol_text = self.formatter.format_protocol(
-                template, llm_result, transcription_result, warnings=user_warnings
-            )
-
-            if request.speaker_mapping:
-                from src.utils.text_processing import replace_speakers_in_text
-                protocol_text = replace_speakers_in_text(
-                    protocol_text, request.speaker_mapping
-                )
-                logger.info("Применена замена спикеров на имена участников")
-
-            # Оставшиеся метки диаризации не должны доехать до читателя.
-            from src.utils.text_processing import humanize_speaker_labels_for_reader
-            protocol_text = humanize_speaker_labels_for_reader(
-                protocol_text, user_warnings
-            )
-
-        # Очистка временного файла в фоне (только для внешних файлов)
-        if request.is_external_file and temp_file_path:
-            asyncio.create_task(self.history.cleanup_temp_file(temp_file_path))
-
-        llm_model_display_name = await self.llm_gen.resolve_model_display_name()
-
-        # Итоги ЭТАПА 1, фактически использованные генератором: при пропуске
-        # анализа их нет в llm_result — берём из запроса/аргумента. Сохраняются
-        # в историю, чтобы перегенерация была консистентной (без нового анализа).
-        effective_speaker_mapping, effective_meeting_type = effective_stage1_outcome(
-            llm_result,
-            speaker_mapping_fallback=request.speaker_mapping,
-            meeting_type_fallback=meeting_type,
-        )
-
-        return ProcessingResult(
-            transcription_result=transcription_result,
-            protocol_text=protocol_text,
-            template_used=(
-                template.model_dump()
-                if hasattr(template, 'model_dump')
-                else template.__dict__
-            ),
-            llm_provider_used=request.llm_provider,
-            llm_model_used=llm_model_display_name,
-            processing_duration=processing_metrics.total_duration,
-            warnings=user_warnings,
-            meeting_type=effective_meeting_type,
-            speaker_mapping=effective_speaker_mapping,
-        )
 
     async def _process_file_optimized(
         self,
@@ -429,6 +365,7 @@ class ProcessingService(BaseProcessingService):
                         request, transcription_result, speaker_mapping,
                         request_meeting_type, temp_file_path, processing_metrics,
                         progress_tracker, cache_key=cache_key, task_id=task_id,
+                        template=template,
                     )
                     if pause_result is None:
                         return None
@@ -436,23 +373,29 @@ class ProcessingService(BaseProcessingService):
             else:
                 request.speaker_mapping = None
 
-            # Этап 3: Анализ, генерация, форматирование и сборка результата
+            # Этап 3: анализ, генерация, сборка и единый хвост «Завершение
+            # обработки» (страховка спикеров → кеш → история → доставка → статус).
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
 
-            return await self._finalize_protocol(
+            outcome = await complete_processing(
                 request=request,
                 transcription_result=transcription_result,
                 template=template,
-                processing_metrics=processing_metrics,
                 meeting_type=request_meeting_type,
+                deps=self._completion_deps(),
+                delivery=self._delivery_for(request, progress_tracker),
+                cache_key=cache_key,
+                task_id=task_id,
+                metrics=processing_metrics,
                 temp_file_path=temp_file_path,
             )
+            return outcome.result
 
     async def _handle_speaker_mapping_confirmation(
         self, request, transcription_result, speaker_mapping,
         meeting_type, temp_file_path, processing_metrics, progress_tracker,
-        cache_key=None, task_id=None,
+        cache_key=None, task_id=None, template=None,
     ):
         """Handle speaker mapping confirmation UI.
 
@@ -539,6 +482,7 @@ class ProcessingService(BaseProcessingService):
                 cache_key=cache_key,
                 task_id=task_id,
                 metrics=processing_metrics,
+                template=template,
                 speakers_with_audio=speakers_with_audio,
             )
             mapping_sessions.save(request.user_id, session)
@@ -633,85 +577,57 @@ class ProcessingService(BaseProcessingService):
             request = session.request
             request.speaker_mapping = confirmed_mapping
             transcription_result = session.transcription_result
-            processing_metrics = session.metrics
-            meeting_type = session.meeting_type
-            temp_file_path = session.temp_file_path
-            cache_key = session.cache_key
 
-            logger.info(f"Сессия восстановлена: тип встречи = {meeting_type}")
+            logger.info(f"Сессия восстановлена: тип встречи = {session.meeting_type}")
 
             progress_tracker = await ProgressFactory.create_file_processing_tracker(
                 bot=bot,
                 chat_id=chat_id,
             )
 
-            # Выбор шаблона (метод сам обрабатывает оба случая: задан/не задан)
-            template = await self._suggest_template_if_needed(
-                request, transcription_result, progress_tracker
-            )
-            if not template:
-                raise ProcessingError(
-                    "Не удалось выбрать шаблон",
-                    request.file_name,
-                    "template_selection",
-                )
+            # Шаблон выбран в основном пути ДО паузы — берём его из сессии, не
+            # выбирая заново (выбор шаблона один раз, ADR-0003).
+            template = session.template
             request.template_id = template.id
 
-            # Общий «хвост» пайплайна — тот же, что и в основном пути.
             if progress_tracker:
                 await progress_tracker.start_stage("analysis")
             logger.info(f"Начинаем генерацию протокола для пользователя {user_id}")
 
-            result = await self._finalize_protocol(
+            async def deliver(result) -> bool:
+                return await send_result_to_user(
+                    bot=bot,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    request=request,
+                    result=result,
+                    progress_tracker=progress_tracker,
+                )
+
+            # Единый хвост «Завершение обработки»: генерация → страховка спикеров →
+            # кеш (безусловный, ADR-0003) → история (всегда, до доставки —
+            # history_id даёт кнопки под протоколом) → доставка → статус задачи.
+            outcome = await complete_processing(
                 request=request,
                 transcription_result=transcription_result,
                 template=template,
-                processing_metrics=processing_metrics,
-                meeting_type=meeting_type,
-                temp_file_path=temp_file_path,
+                meeting_type=session.meeting_type,
+                deps=self._completion_deps(),
+                delivery=deliver,
+                cache_key=session.cache_key,
+                task_id=task_id,
+                metrics=session.metrics,
+                temp_file_path=session.temp_file_path,
             )
 
-            # Доставка результата — общий путь (без фейковой задачи очереди).
-            delivered = await send_result_to_user(
-                bot=bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                request=request,
-                result=result,
-                progress_tracker=progress_tracker,
-            )
-
-            # История фиксирует факт генерации протокола независимо от доставки.
-            await self._save_processing_history(request, result)
-
-            if delivered:
-                # Кешируем результат ТОЛЬКО при успешной доставке — иначе повторная
-                # загрузка того же файла попадёт в кеш и не будет переотправлена.
-                # cache_key сохранён при паузе (см. P3).
-                if cache_key:
-                    try:
-                        await performance_cache.set(
-                            cache_key, result, cache_type="processing_result",
-                        )
-                    except Exception as cache_error:
-                        logger.warning(f"Не удалось закешировать результат: {cache_error}")
-                # Закрываем задачу очереди, ранее поставленную на паузу.
-                await self._mark_queue_task(task_id, "completed")
+            if outcome.delivered:
                 logger.info(f"Обработка успешно завершена для пользователя {user_id}")
             else:
-                # Протокол сгенерирован, но доставка не удалась: не помечаем
-                # completed и не кешируем. Пользователь уже получил уведомление об
-                # ошибке; повторная загрузка файла попадёт в кеши транскрипции/LLM,
-                # так что генерация не повторится впустую.
-                await self._mark_queue_task(
-                    task_id, "failed",
-                    error_message="Не удалось доставить результат пользователю",
-                )
                 logger.warning(
                     f"Протокол сгенерирован, но не доставлен пользователю {user_id}"
                 )
 
-            return result
+            return outcome.result
 
         except Exception as e:
             await self._handle_resume_failure(e, user_id, chat_id, bot, task_id)
@@ -904,7 +820,7 @@ class ProcessingService(BaseProcessingService):
     ) -> Any:
         """Оптимизированная транскрипция с кэшированием и предобработкой"""
 
-        file_hash = await self._calculate_file_hash(file_path)
+        file_hash = await self.history.calculate_file_hash(file_path)
         cache_key = f"transcription:{file_hash}:{request.language}"
 
         cached_transcription = await performance_cache.get(cache_key)

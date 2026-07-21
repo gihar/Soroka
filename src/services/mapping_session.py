@@ -27,6 +27,9 @@ class MappingSession:
     cache_key: Optional[str]
     task_id: Optional[str]
     metrics: ProcessingMetrics
+    # Шаблон, выбранный в основном пути ДО паузы: возобновление берёт его как
+    # есть, не выбирая заново (выбор шаблона — один раз, ADR-0003).
+    template: Any = None
     # Спикеры с доставленным фрагментом записи: их цитата уже в подписи
     # фрагмента, карточка сопоставления её не дублирует (в т.ч. при перерисовках).
     speakers_with_audio: Set[str] = field(default_factory=set)

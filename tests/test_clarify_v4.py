@@ -39,20 +39,25 @@ def test_humanize_leaves_clean_text_untouched():
 
 
 def test_pipeline_humanizes_and_warns():
+    """Основной путь причёсывает метки спикеров — через единый хвост (ADR-0003)."""
     import inspect
 
-    import src.services.processing.processing_service as ps
+    import src.services.processing.completion as completion
 
-    src_text = inspect.getsource(ps)
-    assert "humanize_speaker_labels" in src_text
+    assert "humanize_speaker_labels" in inspect.getsource(completion)
 
 
 def test_regeneration_humanizes_too():
+    """Перегенерация причёсывает метки спикеров — через единый хвост (ADR-0003)."""
     import inspect
 
+    import src.services.processing.completion as completion
     import src.services.protocol_actions as pa
 
-    assert "humanize_speaker_labels" in inspect.getsource(pa)
+    # Регенерация делегирует единому хвосту…
+    assert "complete_processing" in inspect.getsource(pa)
+    # …а он причёсывает оставшиеся метки спикеров.
+    assert "humanize_speaker_labels" in inspect.getsource(completion)
 
 
 # ---------------------------------------------------------------------------

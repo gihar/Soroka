@@ -193,6 +193,9 @@ async def test_regenerate_uses_stored_transcription(monkeypatch):
                 ),
             }
 
+        async def resolve_model_display_name(self):
+            return "GPT"
+
     import src.services.processing.llm_generation as llm_gen_module
 
     monkeypatch.setattr(llm_gen_module, "LLMGenerationService", FakeLLMGen)
@@ -266,6 +269,9 @@ async def test_regenerate_reuses_stored_mapping_and_type(monkeypatch):
             captured["meeting_type_arg"] = meeting_type
             return {"meeting_title": "Планёрка"}
 
+        async def resolve_model_display_name(self):
+            return "GPT"
+
     import src.services.processing.llm_generation as llm_gen_module
 
     monkeypatch.setattr(llm_gen_module, "LLMGenerationService", FakeLLMGen)
@@ -336,6 +342,9 @@ async def test_regenerate_heals_history_from_llm_result(monkeypatch):
                 "_speaker_mapping": {"SPEAKER_00": "Мария Иванова"},
                 "_meeting_type": "planning",
             }
+
+        async def resolve_model_display_name(self):
+            return "GPT"
 
     import src.services.processing.llm_generation as llm_gen_module
 
