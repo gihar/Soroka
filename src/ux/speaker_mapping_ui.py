@@ -9,8 +9,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from src.models.diarization import Diarization
-from src.utils.message_utils import escape_markdown_v2
-from src.utils.telegram_safe import safe_send_message
+from src.ux.card_content import MappingCard, PlainCard, SpeakerRow
+from src.ux.card_sender import edit_card, send_card
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
@@ -88,29 +88,36 @@ def extract_speaker_quotes(
     return result
 
 
-def format_mapping_message(
+def build_mapping_card(
     speaker_mapping: Dict[str, str],
     diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
     speakers_with_audio: Optional[Set[str]] = None
-) -> str:
+) -> MappingCard:
     """
-    Форматировать сообщение с информацией о сопоставлении спикеров
+    Собрать семантическое содержимое Карточки сопоставления (ADR-0005).
+
+    Возвращает MappingCard — заголовок и строки спикеров с цитатами; разметку
+    (Telegram HTML) и plain-страховку добавляет отправитель карточек. Экранированием
+    и параллельными копиями текста эта функция больше не занимается.
 
     Args:
         speaker_mapping: Словарь {speaker_id: participant_name}
         diarization: Диаризация
         participants: Список участников
-        unmapped_speakers: Список несопоставленных спикеров
+        unmapped_speakers: Список несопоставленных спикеров (не влияет на состав строк)
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         speakers_with_audio: Спикеры с доставленным фрагментом записи — их цитата
             уже в подписи фрагмента, в карточке не дублируется
 
     Returns:
-        Отформатированный текст сообщения в MarkdownV2
+        MappingCard с заголовком и строками спикеров в порядке их появления
     """
+    # Импортируем сервис для преобразования имен
+    from src.services.participants_service import participants_service
+
     # Без списка участников карточка — общий экран именования спикеров (ADR-0002):
     # копия смещается с «проверьте/подтвердите» на «назовите (по желанию)».
     header = (
@@ -118,89 +125,30 @@ def format_mapping_message(
         if participants
         else "Назовите спикеров (по желанию)"
     )
-    header_text = escape_markdown_v2(header)
-    lines = [f"🎭 *{header_text}*\n"]
 
+    rows: List[SpeakerRow] = []
     # Спикеры — в порядке их появления в диаризации
-    all_speakers = _speaker_order(diarization)
-
-    # Экранируем статический текст
-    not_defined_text = escape_markdown_v2("Не определен")
-    
-    # Импортируем сервис для преобразования имен
-    from src.services.participants_service import participants_service
-
-    for speaker_id in all_speakers:
+    for speaker_id in _speaker_order(diarization):
         participant_name = speaker_mapping.get(speaker_id)
-
-        # Экранируем speaker_id для MarkdownV2
-        escaped_speaker_id = escape_markdown_v2(speaker_id)
-
-        if participant_name:
-            # Сопоставлен - преобразуем в короткую форму и экранируем имя участника для MarkdownV2
-            short_name = participants_service.convert_full_name_to_short(participant_name)
-            escaped_participant_name = escape_markdown_v2(short_name)
-            lines.append(f"*{escaped_speaker_id}* → {escaped_participant_name} ✓")
-        else:
-            # Не сопоставлен - экранируем текст
-            lines.append(f"*{escaped_speaker_id}* → {not_defined_text} ❓")
+        display_name = (
+            participants_service.convert_full_name_to_short(participant_name)
+            if participant_name
+            else None
+        )
 
         # Цитата спикера показывается один раз: если фрагмент записи доставлен,
         # она уже в его подписи — в карточке не дублируем.
+        quote = None
         if not (speakers_with_audio and speaker_id in speakers_with_audio):
-            quote = extract_speaker_quotes(diarization, speaker_id, speakers_text=speakers_text)
-            if quote:
-                # Экранируем цитату для MarkdownV2
-                escaped_quote = escape_markdown_v2(quote)
-                # Экранируем кавычки для MarkdownV2 (кавычки - специальный символ)
-                lines.append(f"  \\\"{escaped_quote}\\\"")
-        lines.append("")
-    
-    # Экранируем разделитель (дефисы нужно экранировать в MarkdownV2)
-    separator = escape_markdown_v2("────────────────────────")
-    lines.append(separator)
-    
-    return "\n".join(lines)
+            quote = extract_speaker_quotes(
+                diarization, speaker_id, speakers_text=speakers_text
+            )
 
+        rows.append(
+            SpeakerRow(speaker_id=speaker_id, display_name=display_name, quote=quote)
+        )
 
-def _format_simple_mapping_message(
-    speaker_mapping: Dict[str, str],
-    diarization: Optional[Diarization],
-    unmapped_speakers: Optional[List[str]] = None
-) -> str:
-    """
-    Форматировать упрощенное сообщение без Markdown разметки (fallback)
-
-    Args:
-        speaker_mapping: Словарь {speaker_id: participant_name}
-        diarization: Диаризация
-        unmapped_speakers: Список несопоставленных спикеров
-
-    Returns:
-        Простой текст без Markdown разметки
-    """
-    lines = ["🎭 Проверьте сопоставление спикеров\n"]
-
-    # Спикеры — в порядке их появления в диаризации
-    all_speakers = _speaker_order(diarization)
-
-    # Импортируем сервис для преобразования имен
-    from src.services.participants_service import participants_service
-    
-    for speaker_id in all_speakers:
-        participant_name = speaker_mapping.get(speaker_id)
-        
-        if participant_name:
-            # Преобразуем в короткую форму перед отображением
-            short_name = participants_service.convert_full_name_to_short(participant_name)
-            lines.append(f"{speaker_id} → {short_name} ✓")
-        else:
-            lines.append(f"{speaker_id} → Не определен ❓")
-    
-    lines.append("\n────────────────────────")
-    lines.append("\nИспользуйте кнопки ниже для подтверждения или изменения сопоставления.")
-    
-    return "\n".join(lines)
+    return MappingCard(header=header, rows=tuple(rows))
 
 
 def create_mapping_keyboard(
@@ -328,9 +276,13 @@ def create_name_prompt_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )]])
 
 
-def format_name_prompt_message(speaker_id: str) -> str:
-    """Текст под-вида ожидания имени спикера (без Markdown-разметки)."""
-    return f"✏️ Отправьте имя для {speaker_id} сообщением"
+def format_name_prompt_message(speaker_id: str) -> PlainCard:
+    """Содержимое под-вида ожидания имени спикера (ADR-0005): простой экран.
+
+    Возвращает PlainCard — тот же отправитель карточек доставит его как обычный
+    текст (HTML лишь экранирует, разметки в подсказке нет).
+    """
+    return PlainCard(text=f"✏️ Отправьте имя для {speaker_id} сообщением")
 
 
 async def show_mapping_confirmation(
@@ -344,118 +296,33 @@ async def show_mapping_confirmation(
     speakers_text: Optional[Dict[str, str]] = None,
     speakers_with_audio: Optional[Set[str]] = None
 ) -> Optional[Message]:
-    """
-    Показать UI для подтверждения сопоставления спикеров
+    """Показать Карточку сопоставления новым сообщением (ADR-0005).
 
-    Args:
-        bot: Экземпляр бота
-        chat_id: ID чата
-        user_id: ID пользователя
-        speaker_mapping: Текущее сопоставление
-        diarization: Диаризация
-        participants: Список участников
-        unmapped_speakers: Список несопоставленных спикеров
-        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        speakers_with_audio: Спикеры с доставленным фрагментом записи (без цитат в карточке)
+    Адаптер над отправителем карточек: собирает семантическое содержимое и
+    клавиатуру, доставку (HTML → при неудаче plain-страховка) выполняет
+    ``send_card``.
 
     Returns:
         Отправленное сообщение или None при ошибке
     """
-    try:
-        # Формируем текст сообщения
-        message_text = format_mapping_message(
-            speaker_mapping,
-            diarization,
-            participants,
-            unmapped_speakers,
-            speakers_text=speakers_text,
-            speakers_with_audio=speakers_with_audio
-        )
-        
-        # Создаем клавиатуру
-        keyboard = create_mapping_keyboard(
-            speaker_mapping,
-            diarization,
-            participants,
-            user_id
-        )
-        
-        # Отправляем сообщение с MarkdownV2
-        message = await safe_send_message(
-            bot=bot,
-            chat_id=chat_id,
-            text=message_text,
-            parse_mode="MarkdownV2",
-            reply_markup=keyboard
-        )
-        
-        if message is None:
-            # Если отправка с MarkdownV2 не удалась, пробуем без parse_mode
-            logger.warning(f"Не удалось отправить UI с MarkdownV2 разметкой для пользователя {user_id}, пробую без разметки")
-            
-            # Создаем упрощенную версию без Markdown разметки
-            simple_text = _format_simple_mapping_message(
-                speaker_mapping,
-                diarization,
-                unmapped_speakers
-            )
-            
-            try:
-                message = await safe_send_message(
-                    bot=bot,
-                    chat_id=chat_id,
-                    text=simple_text,
-                    parse_mode=None,  # Без разметки
-                    reply_markup=keyboard
-                )
-                
-                if message:
-                    logger.info(f"UI подтверждения сопоставления отправлен пользователю {user_id} без Markdown разметки")
-                    return message
-                else:
-                    logger.error(f"Не удалось отправить упрощенную версию UI для пользователя {user_id}")
-                    return None
-                    
-            except Exception as fallback_error:
-                logger.error(f"Ошибка при отправке упрощенной версии UI: {fallback_error}", exc_info=True)
-                return None
-        else:
-            logger.info(f"UI подтверждения сопоставления отправлен пользователю {user_id}")
-            return message
-        
-    except Exception as e:
-        logger.error(f"Ошибка при показе UI подтверждения сопоставления: {e}", exc_info=True)
-        
-        # Пробуем fallback без разметки
-        try:
-            simple_text = _format_simple_mapping_message(
-                speaker_mapping,
-                diarization,
-                unmapped_speakers
-            )
-            
-            keyboard = create_mapping_keyboard(
-                speaker_mapping,
-                diarization,
-                participants,
-                user_id
-            )
-            
-            message = await safe_send_message(
-                bot=bot,
-                chat_id=chat_id,
-                text=simple_text,
-                parse_mode=None,
-                reply_markup=keyboard
-            )
-            
-            if message:
-                logger.info(f"UI отправлен с fallback методом для пользователя {user_id}")
-                return message
-        except Exception as fallback_error:
-            logger.error(f"Fallback также не удался: {fallback_error}", exc_info=True)
-        
-        return None
+    content = build_mapping_card(
+        speaker_mapping,
+        diarization,
+        participants,
+        unmapped_speakers,
+        speakers_text=speakers_text,
+        speakers_with_audio=speakers_with_audio,
+    )
+    keyboard = create_mapping_keyboard(
+        speaker_mapping, diarization, participants, user_id
+    )
+
+    message = await send_card(bot, chat_id, content, keyboard)
+    if message is None:
+        logger.error(f"Не удалось показать карточку сопоставления пользователю {user_id}")
+    else:
+        logger.info(f"Карточка сопоставления показана пользователю {user_id}")
+    return message
 
 
 async def update_mapping_message(
@@ -469,53 +336,32 @@ async def update_mapping_message(
     speakers_text: Optional[Dict[str, str]] = None,
     speakers_with_audio: Optional[Set[str]] = None
 ) -> bool:
-    """
-    Обновить сообщение с сопоставлением
+    """Перерисовать Карточку сопоставления на месте (ADR-0005).
 
-    Args:
-        message: Сообщение для обновления
-        speaker_mapping: Обновленное сопоставление
-        diarization: Диаризация
-        participants: Список участников
-        user_id: ID пользователя
-        current_editing_speaker: ID спикера, для которого показываем выбор
-        unmapped_speakers: Список несопоставленных спикеров
-        speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
-        speakers_with_audio: Спикеры с доставленным фрагментом записи (без цитат в карточке)
+    Адаптер над отправителем карточек: тот же единый контракт доставки, что и при
+    первичном показе (HTML → при неудаче plain-страховка).
 
     Returns:
-        True если успешно, False при ошибке
+        True если сообщение обновлено, False при ошибке
     """
-    try:
-        from src.utils.telegram_safe import safe_edit_text
+    content = build_mapping_card(
+        speaker_mapping,
+        diarization,
+        participants,
+        unmapped_speakers,
+        speakers_text=speakers_text,
+        speakers_with_audio=speakers_with_audio,
+    )
+    keyboard = create_mapping_keyboard(
+        speaker_mapping,
+        diarization,
+        participants,
+        user_id,
+        current_editing_speaker,
+    )
 
-        message_text = format_mapping_message(
-            speaker_mapping,
-            diarization,
-            participants,
-            unmapped_speakers,
-            speakers_text=speakers_text,
-            speakers_with_audio=speakers_with_audio
-        )
-        
-        keyboard = create_mapping_keyboard(
-            speaker_mapping,
-            diarization,
-            participants,
-            user_id,
-            current_editing_speaker
-        )
-        
-        await safe_edit_text(
-            message,
-            message_text,
-            parse_mode="MarkdownV2",
-            reply_markup=keyboard
-        )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении сообщения сопоставления: {e}", exc_info=True)
-        return False
+    edited = await edit_card(message, content, keyboard)
+    if edited is None:
+        logger.error(f"Не удалось перерисовать карточку сопоставления для пользователя {user_id}")
+    return edited is not None
 

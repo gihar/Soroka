@@ -20,10 +20,18 @@ _CODE_RE = re.compile(r"`([^`]+)`")
 _FENCE_RE = re.compile(r"^\s*```")
 
 
+def escape_telegram_html(text: str) -> str:
+    """Экранировать текст для parse_mode="HTML": только «&», «<» и «>».
+
+    Единственная таблица экранирования Telegram HTML на весь бот (ADR-0005):
+    и тело протокола, и интерактивные экраны берут её отсюда, а не плодят копии.
+    """
+    return html.escape(text, quote=False)
+
+
 def _render_inline(text: str) -> str:
     """Экранировать HTML и преобразовать инлайн-разметку одной строки."""
-    escaped = html.escape(text, quote=False)
-    with_code = _CODE_RE.sub(r"<code>\1</code>", escaped)
+    with_code = _CODE_RE.sub(r"<code>\1</code>", escape_telegram_html(text))
     return _BOLD_RE.sub(r"<b>\1</b>", with_code)
 
 

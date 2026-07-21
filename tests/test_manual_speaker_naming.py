@@ -211,7 +211,7 @@ def _clean_sessions():
 async def test_sm_custom_enters_name_waiting_state(monkeypatch):
     """sm_custom переводит в FSM-ожидание имени с данными спикера и рисует
     подсказку «отправьте имя» с кнопкой отмены."""
-    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+    import src.utils.telegram_safe as ts
     from src.handlers.callbacks.speaker_mapping_callbacks import (
         request_custom_speaker_name,
     )
@@ -224,7 +224,9 @@ async def test_sm_custom_enters_name_waiting_state(monkeypatch):
         edited.append((text, kwargs.get("reply_markup")))
         return True
 
-    monkeypatch.setattr(cb, "safe_edit_text", fake_edit)
+    # Под-вид ожидания имени доставляется отправителем карточек (ADR-0005),
+    # поэтому шов — telegram_safe.safe_edit_text.
+    monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
 
     mapping_sessions.save(42, _make_session(participants=[{"name": "Иван Петров"}]))
 
@@ -464,23 +466,23 @@ def test_should_show_mapping_card_false_without_speakers():
 
 def test_card_header_shifts_to_naming_without_participants():
     """Без списка участников заголовок смещается на «назовите спикеров»."""
-    from src.ux.speaker_mapping_ui import format_mapping_message
+    from src.ux.speaker_mapping_ui import build_mapping_card
 
-    text = format_mapping_message({}, _diarization_two_speakers(), participants=[])
+    card = build_mapping_card({}, _diarization_two_speakers(), participants=[])
 
-    assert "Назовите спикеров" in text
-    assert "Проверьте сопоставление" not in text
+    assert "Назовите спикеров" in card.header
+    assert "Проверьте сопоставление" not in card.header
 
 
 def test_card_header_confirms_with_participants():
     """Со списком участников заголовок остаётся про проверку сопоставления."""
-    from src.ux.speaker_mapping_ui import format_mapping_message
+    from src.ux.speaker_mapping_ui import build_mapping_card
 
-    text = format_mapping_message(
+    card = build_mapping_card(
         {}, _diarization_two_speakers(), participants=[{"name": "Иван Петров"}]
     )
 
-    assert "Проверьте сопоставление" in text
+    assert "Проверьте сопоставление" in card.header
 
 
 def test_subview_keyboard_survives_empty_participants():

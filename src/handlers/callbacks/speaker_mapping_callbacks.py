@@ -19,6 +19,7 @@ from src.services import ProcessingService, TemplateService, UserService
 from src.services.mapping_session import MappingSession, mapping_sessions
 from src.services.participants_service import participants_service
 from src.utils.telegram_safe import safe_edit_text
+from src.ux.card_sender import edit_card
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
@@ -138,11 +139,11 @@ async def request_custom_speaker_name(
     await state.set_state(SpeakerNameInput.waiting)
     await state.update_data(speaker_id=speaker_id, user_id=user_id)
 
-    await safe_edit_text(
+    # Под-вид ожидания имени идёт тем же отправителем карточек (ADR-0005).
+    await edit_card(
         callback.message,
         format_name_prompt_message(speaker_id),
-        parse_mode=None,
-        reply_markup=create_name_prompt_keyboard(user_id),
+        create_name_prompt_keyboard(user_id),
     )
 
 

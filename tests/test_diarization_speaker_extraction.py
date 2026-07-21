@@ -12,11 +12,10 @@
   вход не мутируется.
 
 Проверяем через две публичные функции — `create_mapping_keyboard` (порядок
-кнопок) и `format_mapping_message` (порядок в тексте).
+кнопок) и `build_mapping_card` (порядок строк карточки).
 """
 
 import os
-import re
 import sys
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +25,7 @@ sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
 from src.models.diarization import Diarization, Segment  # noqa: E402
-from src.ux.speaker_mapping_ui import create_mapping_keyboard, format_mapping_message  # noqa: E402
+from src.ux.speaker_mapping_ui import build_mapping_card, create_mapping_keyboard  # noqa: E402
 
 
 def _diar(*speakers):
@@ -74,15 +73,18 @@ def test_native_labels_keep_appearance_order():
     assert _change_button_speakers(keyboard) == ["S2", "S1"]
 
 
-def test_format_mapping_message_orders_speakers_by_appearance():
-    """Тот же порядок появления виден и в тексте карточки сопоставления."""
+def test_build_mapping_card_orders_speakers_by_appearance():
+    """Тот же порядок появления виден и в строках карточки сопоставления.
+
+    По ADR-0005 карточка — семантическое содержимое: проверяем порядок строк
+    спикеров, а не экранированный текст.
+    """
     diarization = _diar("SPEAKER_2", "SPEAKER_10", "SPEAKER_1")
 
-    text = format_mapping_message({}, diarization, [])
+    card = build_mapping_card({}, diarization, [])
 
-    # В MarkdownV2 подчёркивание экранировано: SPEAKER\_N.
-    order = re.findall(r"SPEAKER\\_\d+", text)
-    assert order == ["SPEAKER\\_2", "SPEAKER\\_10", "SPEAKER\\_1"]
+    order = [row.speaker_id for row in card.rows]
+    assert order == ["SPEAKER_2", "SPEAKER_10", "SPEAKER_1"]
 
 
 def test_diarization_not_mutated_by_rendering():
