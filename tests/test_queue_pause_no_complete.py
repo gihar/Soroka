@@ -79,22 +79,15 @@ async def test_completed_task_still_completes_tracker(monkeypatch):
 
     class FakeService:
         async def process_file(self, request, progress_tracker, task_id=None):
-            return SimpleNamespace()  # обычный результат (не пауза)
+            # Обычный результат (не пауза). Доставку и статус задачи проставляет
+            # единый хвост ВНУТРИ process_file (ADR-0003) — воркер их не трогает.
+            return SimpleNamespace()
 
     monkeypatch.setattr(ps_mod, "ProcessingService", FakeService)
-
-    async def fake_send(*a, **k):
-        return True
 
     manager = TaskQueueManager.__new__(TaskQueueManager)
     manager.bot = SimpleNamespace()
     manager.tasks = {}
-    manager._send_result_to_user = fake_send
-
-    async def fake_update_status(*a, **k):
-        return None
-
-    manager._update_task_status = fake_update_status
 
     task = SimpleNamespace(
         task_id="t2", chat_id=1, message_id=None, request=SimpleNamespace()

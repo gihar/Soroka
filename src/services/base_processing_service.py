@@ -2,8 +2,6 @@
 Базовый сервис обработки файлов
 """
 
-from typing import Any, Dict
-
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.reliability import get_circuit_breaker, get_fallback_manager
 from src.services.file_service import FileService
@@ -28,14 +26,3 @@ class BaseProcessingService:
     async def process_file(self, request: ProcessingRequest) -> ProcessingResult:
         """Базовая обработка файла - должна быть переопределена"""
         raise NotImplementedError("Метод должен быть переопределен в наследнике")
-    
-    def _get_template_variables(self) -> Dict[str, Any]:
-        """Получить переменные для шаблона"""
-        return {
-            "participants": [],
-            "decisions": [],
-            "action_items": [],
-            "topics": [],
-            "next_meeting": "",
-            "summary": ""
-        }

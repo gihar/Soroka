@@ -181,7 +181,9 @@ async def _run_preprocessing(monkeypatch, result):
     import src.services.processing.processing_service as pss
 
     service = pss.ProcessingService.__new__(pss.ProcessingService)
-    service._calculate_file_hash = AsyncMock(return_value="hash")
+    service.history = types.SimpleNamespace(
+        calculate_file_hash=AsyncMock(return_value="hash")
+    )
     service._run_transcription_async = AsyncMock(return_value=result)
 
     class _Cache:
