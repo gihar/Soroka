@@ -36,6 +36,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
+                    text=f"{'✅ ' if current == 'docx' else ''}📝 В файл Word",
+                    callback_data="set_protocol_output_docx"
+                )],
+                [InlineKeyboardButton(
                     text="⬅️ Назад к настройкам",
                     callback_data="back_to_settings"
                 )]
@@ -46,7 +50,8 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 "Выберите, как отправлять готовый протокол:\n"
                 "• 💬 В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
                 "• 📎 В файл md — протокол отправляется как прикрепленный файл (.md)\n"
-                "• 📄 В файл pdf — протокол отправляется как прикрепленный файл (.pdf)",
+                "• 📄 В файл pdf — протокол отправляется как прикрепленный файл (.pdf)\n"
+                "• 📝 В файл Word — протокол приходит документом Word (.docx)",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -55,7 +60,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.error(f"Ошибка в settings_protocol_output_callback: {e}")
             await callback.answer("❌ Произошла ошибка при загрузке настроек")
 
-    @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file", "set_protocol_output_pdf"}))
+    @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file", "set_protocol_output_pdf", "set_protocol_output_docx"}))
     async def set_protocol_output_mode_callback(callback: CallbackQuery):
         """Установка режима вывода протокола"""
         try:
@@ -65,6 +70,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             elif callback.data.endswith('pdf'):
                 mode = 'pdf'
                 mode_text = "📄 В файл pdf"
+            elif callback.data.endswith('docx'):
+                mode = 'docx'
+                mode_text = "📝 В файл Word"
             else:
                 mode = 'file'
                 mode_text = "📎 В файл md"

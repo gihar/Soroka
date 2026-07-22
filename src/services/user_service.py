@@ -67,7 +67,7 @@ class UserService:
             raise UserCreationError(user_data.telegram_id, str(e))
 
     async def update_user_protocol_output_preference(self, telegram_id: int, mode: Optional[str]) -> User:
-        """Обновить режим вывода протокола пользователя ('messages' или 'file')"""
+        """Обновить режим вывода протокола ('messages' / 'file' / 'pdf' / 'docx')"""
         try:
             user = await self.get_user_by_telegram_id(telegram_id)
             if not user:

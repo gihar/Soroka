@@ -243,8 +243,8 @@ async def send_result_to_user(
     """Send a finished processing result to the user.
 
     Handles the summary message and the protocol body, respecting the user's
-    ``protocol_output_mode`` (messages / file / pdf). Errors are reported to the
-    user and the progress tracker but never re-raised — delivery is best-effort.
+    ``protocol_output_mode`` (messages / file / pdf / docx). Errors are reported to
+    the user and the progress tracker but never re-raised — delivery is best-effort.
 
     Returns ``True`` only when the protocol BODY was delivered, ``False`` when it
     was not (empty protocol, or the body send raised). Callers use this to avoid
@@ -282,7 +282,7 @@ async def send_result_to_user(
         actions_keyboard = _protocol_actions_keyboard(
             getattr(result, "history_id", None), output_mode
         )
-        if output_mode in ("file", "pdf"):
+        if output_mode in ("file", "pdf", "docx"):
             delivered = await send_protocol_file(
                 bot, chat_id, result.protocol_text, request.file_name,
                 output_mode, reply_markup=actions_keyboard,
