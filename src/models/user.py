@@ -19,7 +19,7 @@ class UserBase(BaseModel):
     default_template_id: Optional[int] = Field(None, description="ID шаблона по умолчанию")
     protocol_output_mode: Optional[str] = Field(
         None,
-        description="Режим вывода протокола: 'messages' (в сообщения) или 'file' (в файл)"
+        description="Режим вывода протокола: 'messages', 'file' (.md), 'pdf' или 'docx' (Word)"
     )
     saved_participants: Optional[str] = Field(None, description="Сохраненный список участников в JSON")
 
