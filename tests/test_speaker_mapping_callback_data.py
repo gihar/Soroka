@@ -87,3 +87,12 @@ def test_sm_skip_wire_format_roundtrip():
     """``sm_skip:{user_id}`` — пропуск сопоставления."""
     assert SmSkip(user_id=42).pack() == "sm_skip:42"
     assert SmSkip.unpack("sm_skip:42").user_id == 42
+
+
+def test_sm_skip_confirm_wire_format_roundtrip():
+    """``sm_skipok:{user_id}`` — подтверждённый пустой пропуск (новый префикс,
+    отдельный от ``sm_skip``, чтобы кнопки не спутались)."""
+    from src.ux.speaker_mapping_callback_data import SmSkipConfirm
+
+    assert SmSkipConfirm(user_id=42).pack() == "sm_skipok:42"
+    assert SmSkipConfirm.unpack("sm_skipok:42").user_id == 42

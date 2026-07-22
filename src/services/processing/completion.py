@@ -13,6 +13,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
@@ -24,10 +25,15 @@ from src.performance.cache_system import performance_cache
 from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.utils.text_processing import (
     humanize_speaker_labels_for_reader,
+    normalize_hyphens,
     replace_speakers_in_text,
 )
 
-from .llm_generation import effective_stage1_outcome
+from .llm_generation import (
+    effective_stage1_outcome,
+    with_protocol_date_fallback,
+    with_protocol_title_fallback,
+)
 
 # Доставка: способ донести готовый результат до пользователя. Возвращает True,
 # только если тело протокола доставлено (см. result_sender.send_result_to_user).
@@ -172,6 +178,26 @@ async def _assemble_result(
             "llm_empty_result",
         )
 
+    # Реквизиты пересылки «наверх»: непустая дата и осмысленный титул. LLM почти
+    # не извлекает дату из аудио и часто не называет встречу — детерминированные
+    # фолбэки (meeting_date из запроса, иначе момент обработки) до рендера, чтобы
+    # шапка `{% if date %}` не пряталась пустой, а титул не падал в безликое
+    # «Резюме встречи». Единый момент обработки на оба поля — источник согласован.
+    # Здесь — единственный шов всех путей генерации (основной, возобновление,
+    # перегенерация), поэтому реквизиты гарантированы каждому.
+    if isinstance(llm_result, dict):
+        processing_moment = datetime.now()
+        llm_result = with_protocol_date_fallback(
+            llm_result,
+            meeting_date=request.meeting_date,
+            processing_moment=processing_moment,
+        )
+        llm_result = with_protocol_title_fallback(
+            llm_result,
+            meeting_date=request.meeting_date,
+            processing_moment=processing_moment,
+        )
+
     with PerformanceTimer("formatting", metrics_collector):
         if metrics is not None:
             metrics.formatting_duration = 0.1
@@ -192,6 +218,10 @@ async def _assemble_result(
         protocol_text = humanize_speaker_labels_for_reader(
             protocol_text, user_warnings
         )
+
+        # Детерминированная нормализация: неразрывный дефис к обычному, чтобы
+        # «15‑минутки» не соседствовали с обычным дефисом в одном тексте.
+        protocol_text = normalize_hyphens(protocol_text)
 
     # Очистка временного файла в фоне (только для внешних файлов).
     if request.is_external_file and temp_file_path:

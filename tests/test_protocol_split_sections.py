@@ -15,7 +15,7 @@ def _section(title: str, lines: int, line_text: str = "строка обсужд
 def test_short_protocol_is_single_message():
     md = "# Дейли\n\n## ✅ Решения\n- запускаем"
     parts = render_protocol_messages(md)
-    assert parts == ["<b>Дейли</b>\n\n<b>✅ Решения</b>\n• запускаем"]
+    assert parts == ["<b><u>Дейли</u></b>\n\n<b>✅ Решения</b>\n• запускаем"]
 
 
 def test_parts_respect_max_length():
@@ -76,7 +76,7 @@ def test_parts_after_first_start_with_meeting_title():
     assert len(parts) > 1
     for part in parts[1:]:
         lines = part.splitlines()
-        assert lines[0] == "<b>Планёрка продукта</b>"
+        assert lines[0] == "<b><u>Планёрка продукта</u></b>"
         assert lines[1] == "<b>Дата:</b> 20 мая"
     assert all(len(p) <= 1000 for p in parts)
 
@@ -86,13 +86,13 @@ def test_title_header_without_date_line():
     parts = render_protocol_messages(md, max_length=1000)
     assert len(parts) > 1
     for part in parts[1:]:
-        assert part.splitlines()[0] == "<b>Планёрка продукта</b>"
+        assert part.splitlines()[0] == "<b><u>Планёрка продукта</u></b>"
 
 
 def test_title_not_duplicated_in_first_part():
     md = _long_protocol("# Планёрка продукта")
     parts = render_protocol_messages(md, max_length=1000)
-    assert parts[0].count("<b>Планёрка продукта</b>") == 1
+    assert parts[0].count("<b><u>Планёрка продукта</u></b>") == 1
 
 
 def test_protocol_without_title_splits_without_header():
@@ -108,12 +108,23 @@ def test_overlong_title_is_truncated_in_part_header():
     assert len(parts) > 1
     header_line = parts[1].splitlines()[0]
     assert len(header_line) <= 140
-    assert header_line.endswith("…</b>")
+    assert header_line.endswith("…</u></b>")
 
 
 # ---------------------------------------------------------------------------
 # Резерв балансировки покрывает худший случай: перенос внутри <b><code>
 # ---------------------------------------------------------------------------
+
+def test_underline_title_stays_balanced_when_split():
+    # H1-титул рендерится как <b><u>…</u></b>; вынужденный перенос длинного
+    # титула не должен осиротить <u> на границе части (как и <b>).
+    md = "# " + "Очень длинное название встречи " * 300 + "\n\n## 💬 Обсуждение\n- пункт"
+    parts = render_protocol_messages(md, max_length=1000)
+    assert len(parts) > 1
+    for part in parts:
+        assert part.count("<u>") == part.count("</u>")
+        assert part.count("<b>") == part.count("</b>")
+
 
 def test_nested_bold_code_wrap_stays_within_limit():
     md = "# П\n\n## 💬 Обсуждение\n**`" + "х" * 3000 + "`**"

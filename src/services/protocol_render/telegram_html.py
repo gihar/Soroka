@@ -42,7 +42,14 @@ def _render_line(line: str) -> str | None:
 
     heading = _HEADING_RE.match(line)
     if heading:
-        return f"<b>{_render_inline(heading.group(2).strip())}</b>"
+        hashes, content = heading.groups()
+        rendered = _render_inline(content.strip())
+        # Telegram HTML не даёт размеров шрифта: титул (H1) отличаем от секций
+        # (H2+) подчёркиванием поверх жирного — сдержанный «титульный» приём,
+        # секции остаются просто жирными и держатся на эмодзи-якорях.
+        if len(hashes) == 1:
+            return f"<b><u>{rendered}</u></b>"
+        return f"<b>{rendered}</b>"
 
     bullet = _BULLET_RE.match(line)
     if bullet:

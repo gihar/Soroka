@@ -27,10 +27,13 @@ from src.ux.speaker_mapping_callback_data import (
     SmCustom,
     SmSelect,
     SmSkip,
+    SmSkipConfirm,
 )
 from src.ux.speaker_mapping_ui import (
     create_name_prompt_keyboard,
+    create_skip_confirm_keyboard,
     format_name_prompt_message,
+    format_skip_confirm_message,
     update_mapping_message,
 )
 
@@ -45,6 +48,78 @@ _PROCESSING_ERROR_TEXT = (
     "❌ Произошла ошибка при продолжении обработки.\n\n"
     "Пожалуйста, попробуйте начать обработку заново."
 )
+
+
+_SKIP_CONTINUED_TEXT = (
+    "⏭️ **Сопоставление пропущено**\n\n"
+    "⏳ Продолжаю генерацию протокола без замены имен спикеров..."
+)
+
+
+def _skip_needs_confirmation(session: MappingSession) -> bool:
+    """Стоит ли перед пропуском переспросить.
+
+    Трение оправдано только когда цена пропуска видна: быстрый прогон без
+    переданного списка участников, где ни один спикер не назван — все уйдут в
+    протокол метками «Участник N» молча (кейс 356). Если список передавали или
+    хоть кто-то назван — пропуск продолжается сразу, без лишнего шага.
+    """
+    has_participants = bool(session.request.participants_list)
+    has_any_name = bool(session.speaker_mapping)
+    return not has_participants and not has_any_name
+
+
+async def _finish_skip(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: MappingSession,
+    processing_service: ProcessingService,
+) -> None:
+    """Финал пустого пропуска: правка сообщения, очистка FSM, генерация без имён.
+
+    Общий хвост прямого пропуска без трения и подтверждённого пропуска
+    (``sm_skipok``). Сессия уже изъята вызывающим (take) — здесь только продолжаем
+    обработку с пустым сопоставлением.
+    """
+    await safe_edit_text(
+        callback.message, _SKIP_CONTINUED_TEXT, parse_mode="Markdown"
+    )
+    await state.clear()
+    await processing_service.continue_processing_after_mapping_confirmation(
+        session=session,
+        confirmed_mapping={},
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+    )
+
+
+async def _skip_or_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    user_id: int,
+    session: MappingSession,
+    processing_service: ProcessingService,
+) -> None:
+    """Тело ``sm_skip``: развилка пропуска.
+
+    Цена пропуска видна (пустой прогон без списка, никто не назван) → показываем
+    под-вид подтверждения тем же отправителем карточек, сессию НЕ изымаем (peek):
+    продолжение — только после явного «Да, продолжить». Цены нет → продолжаем
+    сразу; атомарный take даёт защиту двойного тапа — второй тап получит None и
+    тихо выйдет.
+    """
+    if _skip_needs_confirmation(session):
+        await edit_card(
+            callback.message,
+            format_skip_confirm_message(),
+            create_skip_confirm_keyboard(user_id),
+        )
+        return
+
+    taken = mapping_sessions.take(user_id)
+    if taken is None:
+        return
+    await _finish_skip(callback, state, taken, processing_service)
 
 
 def card_handler(
@@ -355,33 +430,37 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         )
 
     @router.callback_query(SmSkip.filter())
+    @card_handler(session="peek", on_error="edit")
+    async def speaker_mapping_skip_callback(
+        callback: CallbackQuery, callback_data: SmSkip, state: FSMContext,
+        user_id: int, session: MappingSession,
+    ):
+        """sm_skip: развилка пропуска — подтверждение пустого прогона либо
+        продолжение без имён.
+
+        Сессию не изымаем до финала (peek); атомарный take выполняет
+        ``_skip_or_confirm`` при продолжении без трения (защита двойного тапа).
+        Тост не обещаем: под-вид подтверждения не должен выглядеть как «продолжаю».
+        """
+        await _skip_or_confirm(
+            callback, state, user_id, session, processing_service
+        )
+
+    @router.callback_query(SmSkipConfirm.filter())
     @card_handler(
         session="take",
         answer_text="⏳ Продолжаю обработку без сопоставления...",
         on_error="edit",
     )
-    async def speaker_mapping_skip_callback(
-        callback: CallbackQuery, callback_data: SmSkip, state: FSMContext,
+    async def speaker_mapping_skip_confirm_callback(
+        callback: CallbackQuery, callback_data: SmSkipConfirm, state: FSMContext,
         user_id: int, session: MappingSession,
     ):
-        """sm_skip: пропустить сопоставление и продолжить без замены имён."""
-        # Обновляем сообщение
-        await safe_edit_text(
-            callback.message,
-            "⏭️ **Сопоставление пропущено**\n\n"
-            "⏳ Продолжаю генерацию протокола без замены имен спикеров...",
-            parse_mode="Markdown"
-        )
+        """sm_skipok: подтверждённый пустой пропуск — продолжить без имён.
 
-        # Очищаем состояние FSM
-        await state.clear()
-
-        # Продолжаем обработку с пустым mapping
-        await processing_service.continue_processing_after_mapping_confirmation(
-            session=session,
-            confirmed_mapping={},
-            bot=callback.bot,
-            chat_id=callback.message.chat.id
-        )
+        Каркас атомарно изъял сессию (take): повторный тап получит None и не
+        запустит второе возобновление.
+        """
+        await _finish_skip(callback, state, session, processing_service)
 
     return router

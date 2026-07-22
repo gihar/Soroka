@@ -23,7 +23,7 @@ async def test_messages_mode_sends_html(monkeypatch):
 
     assert len(sent) == 1
     assert sent[0]["parse_mode"] == "HTML"
-    assert sent[0]["text"] == "<b>Дейли</b>\n\n<b>✅ Решения</b>\n• запускаем"
+    assert sent[0]["text"] == "<b><u>Дейли</u></b>\n\n<b>✅ Решения</b>\n• запускаем"
 
 
 @pytest.mark.asyncio

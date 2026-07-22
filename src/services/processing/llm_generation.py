@@ -5,6 +5,7 @@ Extracted from ProcessingService to isolate LLM interaction logic.
 """
 
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -13,7 +14,51 @@ from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
 from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.services.protocol_validator import protocol_validator
+from src.utils.date_format import format_russian_date, format_russian_day_month
 from src.utils.template_sort import template_name_of
+
+
+def with_protocol_date_fallback(
+    protocol_data: Dict[str, Any],
+    *,
+    meeting_date: Optional[str],
+    processing_moment: datetime,
+) -> Dict[str, Any]:
+    """Гарантировать непустое поле ``date`` — базовый реквизит пересылки «наверх».
+
+    LLM почти никогда не извлекает дату из аудио, а шапка честно прячет пустое
+    поле (`{% if date %}`), так что протокол уходит без даты. Фолбэк
+    детерминированный (не промптовый): уже заполненный LLM ``date`` не трогаем;
+    иначе берём явную ``meeting_date`` из запроса, а при её отсутствии — дату
+    обработки в русском формате. Возвращает новый словарь (без мутации входного).
+    """
+    existing = protocol_data.get("date")
+    if isinstance(existing, str) and existing.strip():
+        return protocol_data
+    fallback = (meeting_date or "").strip() or format_russian_date(processing_moment)
+    return {**protocol_data, "date": fallback}
+
+
+def with_protocol_title_fallback(
+    protocol_data: Dict[str, Any],
+    *,
+    meeting_date: Optional[str],
+    processing_moment: datetime,
+) -> Dict[str, Any]:
+    """Осмысленный фолбэк-титула вместо безликого «Резюме встречи».
+
+    Когда LLM не смог назвать встречу, Jinja-фолбэк шаблона даёт родовой титул
+    («Резюме встречи»), непересылаемый «наверх». Детерминированный фолбэк из
+    того же источника даты, что и ``with_protocol_date_fallback``: явный титул
+    LLM не трогаем; иначе «Встреча <дата>» — по ``meeting_date`` из запроса
+    (как есть), а при её отсутствии — по дате обработки («Встреча 22 июля»).
+    Возвращает новый словарь (без мутации входного).
+    """
+    existing = protocol_data.get("meeting_title")
+    if isinstance(existing, str) and existing.strip():
+        return protocol_data
+    day = (meeting_date or "").strip() or format_russian_day_month(processing_moment)
+    return {**protocol_data, "meeting_title": f"Встреча {day}"}
 
 
 def effective_stage1_outcome(
