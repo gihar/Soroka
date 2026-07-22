@@ -60,6 +60,36 @@ def _keyboard_datas(markup) -> set:
 
 
 # ---------------------------------------------------------------------------
+# Матрица кнопок формата: PDF и Word рядом, уже доставленный формат скрыт
+# ---------------------------------------------------------------------------
+
+def _rows_datas(markup):
+    return [[btn.callback_data for btn in row] for row in markup.inline_keyboard]
+
+
+def test_messages_mode_offers_pdf_and_word_side_by_side():
+    kb = result_sender._protocol_actions_keyboard(7, "messages")
+    rows = _rows_datas(kb)
+    # PDF и Word — в одном ряду (рядом), перегенерация — отдельной строкой.
+    assert rows[0] == ["proto_pdf_7", "proto_docx_7"]
+    assert ["proto_regen_7"] in rows
+
+
+def test_pdf_mode_hides_pdf_keeps_word():
+    datas = _keyboard_datas(result_sender._protocol_actions_keyboard(9, "pdf"))
+    assert datas == {"proto_docx_9", "proto_regen_9"}
+
+
+def test_docx_mode_hides_word_keeps_pdf():
+    datas = _keyboard_datas(result_sender._protocol_actions_keyboard(9, "docx"))
+    assert datas == {"proto_pdf_9", "proto_regen_9"}
+
+
+def test_no_keyboard_without_history_id():
+    assert result_sender._protocol_actions_keyboard(None, "messages") is None
+
+
+# ---------------------------------------------------------------------------
 # Кнопки действий под доставленным протоколом
 # ---------------------------------------------------------------------------
 
@@ -85,8 +115,10 @@ async def test_last_part_carries_action_buttons(monkeypatch):
     assert ok is True
     parts = [k for k in sent if "Часть" in k.get("text", "")]
     assert len(parts) > 1
-    # кнопки только на последней части — под документом
-    assert _keyboard_datas(parts[-1].get("reply_markup")) == {"proto_pdf_7", "proto_regen_7"}
+    # кнопки только на последней части — под документом (PDF + Word + перегенерация)
+    assert _keyboard_datas(parts[-1].get("reply_markup")) == {
+        "proto_pdf_7", "proto_docx_7", "proto_regen_7"
+    }
     for part in parts[:-1]:
         assert part.get("reply_markup") is None
 
@@ -111,7 +143,7 @@ async def test_no_buttons_without_history_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pdf_document_offers_only_regen(monkeypatch):
+async def test_pdf_document_offers_word_and_regen(monkeypatch):
     documents = []
 
     async def fake_send_message(bot, chat_id, **kwargs):
@@ -141,7 +173,8 @@ async def test_pdf_document_offers_only_regen(monkeypatch):
     assert ok is True
     assert len(documents) == 1
     datas = _keyboard_datas(documents[0].get("reply_markup"))
-    assert datas == {"proto_regen_9"}  # PDF уже в руках — предлагать его снова незачем
+    # PDF уже в руках — его не предлагаем снова, но Word ещё можно получить.
+    assert datas == {"proto_docx_9", "proto_regen_9"}
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +436,92 @@ def test_callbacks_check_ownership():
     src_text = inspect.getsource(pac)
     assert "get_result_for_user" in src_text
     assert "from_user.id" in src_text
+
+
+def _actions_handler(name: str):
+    from unittest.mock import MagicMock
+
+    import src.handlers.callbacks.protocol_actions_callbacks as pac
+
+    router = pac.setup_protocol_actions_callbacks(
+        user_service=MagicMock(), template_service=MagicMock()
+    )
+    handler = next(
+        h.callback for h in router.callback_query.handlers
+        if h.callback.__name__ == name
+    )
+    return pac, handler
+
+
+@pytest.mark.asyncio
+async def test_docx_callback_sends_word_from_history(monkeypatch):
+    pac, handler = _actions_handler("protocol_docx_callback")
+    monkeypatch.setattr(pac, "_safe_callback_answer", AsyncMock())
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value={
+            "result_text": "# Планёрка\n\n## ✅ Решения\n1. ок",
+            "file_name": "meeting.mp3",
+        }),
+    )
+
+    import src.services.result_sender as rs
+
+    captured = {}
+
+    async def fake_send(bot, chat_id, protocol_text, source_file_name, output_mode):
+        captured.update(mode=output_mode, text=protocol_text)
+        return True
+
+    monkeypatch.setattr(rs, "send_protocol_file", fake_send)
+
+    cb = SimpleNamespace(
+        data="proto_docx_7",
+        from_user=SimpleNamespace(id=1),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1), answer=AsyncMock()),
+        bot=AsyncMock(),
+    )
+    await handler(cb)
+
+    assert captured["mode"] == "docx"
+    assert captured["text"].startswith("# Планёрка")
+
+
+@pytest.mark.asyncio
+async def test_docx_callback_refuses_foreign_history(monkeypatch):
+    pac, handler = _actions_handler("protocol_docx_callback")
+    answers = []
+
+    async def fake_answer(callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+
+    import src.database as db_module
+
+    # Чужой/очищенный id → репозиторий не отдаёт запись.
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user", AsyncMock(return_value=None)
+    )
+
+    import src.services.result_sender as rs
+
+    send_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(rs, "send_protocol_file", send_mock)
+
+    cb = SimpleNamespace(
+        data="proto_docx_7",
+        from_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1), answer=AsyncMock()),
+        bot=AsyncMock(),
+    )
+    await handler(cb)
+
+    send_mock.assert_not_awaited()
+    assert answers and answers[-1]  # вежливый отказ, а не тишина
 
 
 # ---------------------------------------------------------------------------

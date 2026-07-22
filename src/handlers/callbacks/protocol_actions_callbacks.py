@@ -1,4 +1,4 @@
-"""Колбэки действий с готовым протоколом: «📄 PDF» и «🔁 Другой шаблон».
+"""Колбэки действий с готовым протоколом: «📄 PDF», «📝 Word» и «🔁 Другой шаблон».
 
 history_id приходит из callback_data — принадлежность записи пользователю
 проверяется в репозитории (get_result_for_user), чужой id получает отказ.
@@ -57,6 +57,41 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
         except Exception as e:
             logger.error(f"Ошибка в protocol_pdf_callback: {e}")
             await _safe_callback_answer(callback, "❌ Не удалось подготовить PDF")
+
+    @router.callback_query(F.data.startswith("proto_docx_"))
+    async def protocol_docx_callback(callback: CallbackQuery):
+        """Word (.docx) из сохранённого текста протокола — без повторной обработки."""
+        try:
+            from src.database import history_repo
+
+            history_id = _history_id_from(callback.data)
+            row = await history_repo.get_result_for_user(
+                history_id, callback.from_user.id
+            )
+            if not row or not (row.get("result_text") or "").strip():
+                await _safe_callback_answer(
+                    callback, "Протокол не найден — возможно, история очищена."
+                )
+                return
+
+            await _safe_callback_answer(callback, "Готовлю Word…")
+
+            from src.services.result_sender import send_protocol_file
+
+            sent = await send_protocol_file(
+                callback.bot,
+                callback.message.chat.id,
+                row["result_text"],
+                row["file_name"],
+                "docx",
+            )
+            if not sent:
+                await callback.message.answer(
+                    "❌ Не удалось отправить Word. Попробуйте ещё раз."
+                )
+        except Exception as e:
+            logger.error(f"Ошибка в protocol_docx_callback: {e}")
+            await _safe_callback_answer(callback, "❌ Не удалось подготовить Word")
 
     # «go» регистрируется раньше общего proto_regen_: startswith пересекаются.
     @router.callback_query(F.data.startswith("proto_regen_go_"))
