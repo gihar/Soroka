@@ -79,19 +79,27 @@ async def _send_summary_message(bot, chat_id: int, result_message: str) -> None:
 
 
 def _protocol_actions_keyboard(history_id, output_mode: str):
-    """Кнопки под доставленным протоколом: PDF и перегенерация из истории.
+    """Кнопки под доставленным протоколом: PDF, Word и перегенерация из истории.
 
-    Доставка — не конец разговора: PDF рендерится из готового текста,
-    перегенерация не требует повторной транскрипции. Без записи истории
-    кнопкам не на что ссылаться — клавиатуры нет.
+    Доставка — не конец разговора: PDF/Word рендерятся из готового текста,
+    перегенерация не требует повторной транскрипции. Уже доставленный формат
+    файла не предлагаем повторно (PDF скрыт в режиме pdf, Word — в docx). Без
+    записи истории кнопкам не на что ссылаться — клавиатуры нет.
     """
     if not history_id:
         return None
     rows = []
+    file_row = []
     if output_mode != "pdf":
-        rows.append([InlineKeyboardButton(
+        file_row.append(InlineKeyboardButton(
             text="📄 PDF", callback_data=f"proto_pdf_{history_id}"
-        )])
+        ))
+    if output_mode != "docx":
+        file_row.append(InlineKeyboardButton(
+            text="📝 Word", callback_data=f"proto_docx_{history_id}"
+        ))
+    if file_row:
+        rows.append(file_row)
     rows.append([InlineKeyboardButton(
         text="🔁 Другой шаблон", callback_data=f"proto_regen_{history_id}"
     )])
@@ -123,12 +131,14 @@ def _protocol_file_name(protocol_text: str, source_file_name: str) -> str:
 async def send_protocol_file(bot, chat_id: int, protocol_text: str,
                              source_file_name: str, output_mode: str,
                              reply_markup=None) -> bool:
-    """Render and send the protocol as a downloadable ``.md``/``.pdf`` document.
+    """Render and send the protocol as a downloadable ``.md``/``.pdf``/``.docx``.
 
-    Reusable outside the delivery pipeline (e.g. the «📄 PDF» action on an
-    already delivered protocol). Returns ``True`` only when delivered.
+    Reusable outside the delivery pipeline (e.g. the «📄 PDF» / «📝 Word» actions
+    on an already delivered protocol). Word/PDF render failures degrade to the
+    canonical ``.md`` rather than dropping the delivery. Returns ``True`` only
+    when delivered.
     """
-    suffix = ".pdf" if output_mode == "pdf" else ".md"
+    suffix = {"pdf": ".pdf", "docx": ".docx"}.get(output_mode, ".md")
     safe_name = _protocol_file_name(protocol_text, source_file_name)
 
     if output_mode == "pdf":
@@ -141,6 +151,27 @@ async def send_protocol_file(bot, chat_id: int, protocol_text: str,
             logger.error(f"Ошибка конвертации в PDF: {e}")
             # Fall back to a markdown file when PDF conversion fails. The temp
             # file may already be gone — cleanup must not kill the fallback.
+            with contextlib.suppress(OSError):
+                os.remove(temp_path)
+            suffix = ".md"
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=suffix, delete=False, encoding="utf-8"
+            ) as md_file:
+                temp_path = md_file.name
+                md_file.write(protocol_text)
+    elif output_mode == "docx":
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as docx_file:
+            temp_path = docx_file.name
+        try:
+            from src.services.protocol_render.docx_renderer import (
+                convert_protocol_to_docx_async,
+            )
+            data = await convert_protocol_to_docx_async(protocol_text)
+            with open(temp_path, "wb") as docx_out:
+                docx_out.write(data)
+        except Exception as e:
+            logger.error(f"Ошибка конвертации в Word: {e}")
+            # Как и у PDF: сбой рендера не глотаем — уходит канонический .md.
             with contextlib.suppress(OSError):
                 os.remove(temp_path)
             suffix = ".md"
