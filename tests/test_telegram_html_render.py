@@ -8,12 +8,25 @@ Telegram parse_mode="Markdown" (legacy) не поддерживает #-заго
 from src.services.protocol_render.telegram_html import markdown_to_telegram_html
 
 
-def test_h1_heading_becomes_bold_line():
-    assert markdown_to_telegram_html("# Дейли") == "<b>Дейли</b>"
+def test_h1_heading_becomes_bold_underlined_title():
+    assert markdown_to_telegram_html("# Дейли") == "<b><u>Дейли</u></b>"
 
 
 def test_h2_heading_becomes_bold_line():
     assert markdown_to_telegram_html("## ✅ Решения") == "<b>✅ Решения</b>"
+
+
+def test_h1_title_stronger_than_h2_sections():
+    """Титул (H1) — жирный + подчёркивание, секции (H2) — только жирный.
+
+    В Telegram нет размеров шрифта; эмодзи-якоря делают секции заметными, и
+    без различения титул визуально слабее секций. Подчёркивание — сдержанный
+    «титульный» приём (спокойные заголовки), а не украшение.
+    """
+    title = markdown_to_telegram_html("# Планёрка команды")
+    section = markdown_to_telegram_html("## ✅ Решения")
+    assert title == "<b><u>Планёрка команды</u></b>"
+    assert "<u>" not in section
 
 
 def test_h3_heading_becomes_bold_line():
@@ -63,7 +76,7 @@ def test_horizontal_rule_dropped():
 
 def test_multiline_document():
     md = "# Протокол\n\n## ✅ Решения\n- запускаем\n\n**Итог:** ок"
-    expected = "<b>Протокол</b>\n\n<b>✅ Решения</b>\n• запускаем\n\n<b>Итог:</b> ок"
+    expected = "<b><u>Протокол</u></b>\n\n<b>✅ Решения</b>\n• запускаем\n\n<b>Итог:</b> ок"
     assert markdown_to_telegram_html(md) == expected
 
 

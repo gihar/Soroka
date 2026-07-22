@@ -485,6 +485,30 @@ def test_card_header_confirms_with_participants():
     assert "Проверьте сопоставление" in card.header
 
 
+def test_card_hints_consequence_when_speaker_unmapped():
+    """Есть несопоставленный спикер → карточка несёт подсказку-следствие: читателю
+    видно, что неназванные уйдут в протокол метками «Участник N» (nudge)."""
+    from src.ux.speaker_mapping_ui import build_mapping_card
+
+    card = build_mapping_card({}, _diarization_two_speakers(), participants=[])
+
+    assert card.hint is not None
+    assert "Участник" in card.hint
+
+
+def test_card_no_hint_when_all_speakers_named():
+    """Все спикеры названы → подсказки-следствия нет (лишней строки внизу не будет)."""
+    from src.ux.speaker_mapping_ui import build_mapping_card
+
+    card = build_mapping_card(
+        {"SPEAKER_1": "Иван Петров", "SPEAKER_2": "Мария Сидорова"},
+        _diarization_two_speakers(),
+        participants=[{"name": "Иван Петров"}, {"name": "Мария Сидорова"}],
+    )
+
+    assert card.hint is None
+
+
 def test_subview_keyboard_survives_empty_participants():
     """Под-вид выбора участника не падает при пустом списке (enumerate([]))."""
     keyboard = create_mapping_keyboard(
@@ -498,6 +522,264 @@ def test_subview_keyboard_survives_empty_participants():
     # Есть «Оставить без имени» и «Ввести имя вручную», без кнопок участников
     assert "sm_select:SPEAKER_1:none:42" in callbacks
     assert "sm_custom:SPEAKER_1:42" in callbacks
+
+
+# ---------------------------------------------------------------------------
+# G. Подтверждение пустого пропуска — трение только когда цена видна
+# ---------------------------------------------------------------------------
+
+
+def test_skip_needs_confirmation_when_empty_quick_run():
+    """Быстрый прогон без списка, никто не назван → у пропуска есть цена: все
+    спикеры уйдут метками «Участник N», поэтому просим подтвердить."""
+    from src.handlers.callbacks.speaker_mapping_callbacks import (
+        _skip_needs_confirmation,
+    )
+
+    session = _make_session(participants=None, speaker_mapping={})
+
+    assert _skip_needs_confirmation(session) is True
+
+
+def test_skip_no_confirmation_when_someone_named():
+    """Хоть один спикер назван → пропуск без трения: цена не в пустоте."""
+    from src.handlers.callbacks.speaker_mapping_callbacks import (
+        _skip_needs_confirmation,
+    )
+
+    session = _make_session(
+        participants=None, speaker_mapping={"SPEAKER_1": "Иван"}
+    )
+
+    assert _skip_needs_confirmation(session) is False
+
+
+def test_skip_no_confirmation_when_participants_passed():
+    """Список участников передавали → пропуск без трения (осознанный путь)."""
+    from src.handlers.callbacks.speaker_mapping_callbacks import (
+        _skip_needs_confirmation,
+    )
+
+    session = _make_session(
+        participants=[{"name": "Иван Петров"}], speaker_mapping={}
+    )
+
+    assert _skip_needs_confirmation(session) is False
+
+
+def test_skip_confirm_message_names_the_cost():
+    """Экран подтверждения пропуска называет цену: спикеры останутся «Участник N»,
+    и переспрашивает «Продолжить?»."""
+    from src.ux.speaker_mapping_ui import format_skip_confirm_message
+
+    text = format_skip_confirm_message().to_plain()
+
+    assert "Участник" in text
+    assert "Продолжить" in text
+
+
+def test_skip_confirm_keyboard_offers_continue_and_naming():
+    """Клавиатура подтверждения — две кнопки: «Да, продолжить» (sm_skipok) и
+    «Назвать спикеров» (возврат к карточке через sm_cancel)."""
+    from src.ux.speaker_mapping_ui import create_skip_confirm_keyboard
+
+    rows = create_skip_confirm_keyboard(user_id=42).inline_keyboard
+
+    continue_button = rows[0][0]
+    naming_button = rows[1][0]
+
+    assert continue_button.callback_data == "sm_skipok:42"
+    assert naming_button.callback_data == "sm_cancel:42"
+    assert "продолж" in continue_button.text.lower()
+    assert "назв" in naming_button.text.lower()
+
+
+def _registered_handler(router, cbdata_cls):
+    """Найти зарегистрированный callback-хендлер по классу CallbackData-фильтра."""
+    for handler in router.callback_query.handlers:
+        for flt in handler.filters:
+            if getattr(flt.callback, "callback_data", None) is cbdata_cls:
+                return handler.callback
+    raise AssertionError(f"нет хендлера для {cbdata_cls.__name__}")
+
+
+@pytest.mark.asyncio
+async def test_registered_sm_skip_peeks_and_shows_subview(monkeypatch):
+    """Зарегистрированный sm_skip на пустом прогоне: показывает под-вид
+    подтверждения, а каркас НЕ изымает сессию (peek) — цена ещё не оплачена."""
+    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+    from src.ux.speaker_mapping_callback_data import SmSkip
+
+    shown = []
+
+    async def fake_edit_card(message, content, keyboard):
+        shown.append(content)
+        return True
+
+    monkeypatch.setattr(cb, "edit_card", fake_edit_card)
+
+    continued = []
+
+    async def fake_continue(**kwargs):
+        continued.append(kwargs)
+
+    processing_service = SimpleNamespace(
+        continue_processing_after_mapping_confirmation=fake_continue
+    )
+    router = cb.setup_speaker_mapping_callbacks(
+        SimpleNamespace(), SimpleNamespace(), processing_service
+    )
+    handler = _registered_handler(router, SmSkip)
+
+    mapping_sessions.save(42, _make_session(participants=None, speaker_mapping={}))
+    callback = _FakeCallback("sm_skip:42", user_id=42, message=_FakeMessage(42))
+
+    await handler(callback, SmSkip(user_id=42), _FakeState())
+
+    assert shown and "Участник" in shown[-1].to_plain()
+    assert mapping_sessions.peek(42) is not None  # peek не изъял
+    assert continued == []
+
+
+@pytest.mark.asyncio
+async def test_registered_sm_skip_confirm_takes_and_continues(monkeypatch):
+    """Зарегистрированный sm_skipok: каркас изымает сессию (take) и продолжает
+    обработку с пустым mapping — двойной тап получит None."""
+    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+    from src.ux.speaker_mapping_callback_data import SmSkipConfirm
+
+    async def fake_edit_text(message, text, **kwargs):
+        return True
+
+    monkeypatch.setattr(cb, "safe_edit_text", fake_edit_text)
+
+    continued = []
+
+    async def fake_continue(**kwargs):
+        continued.append(kwargs)
+
+    processing_service = SimpleNamespace(
+        continue_processing_after_mapping_confirmation=fake_continue
+    )
+    router = cb.setup_speaker_mapping_callbacks(
+        SimpleNamespace(), SimpleNamespace(), processing_service
+    )
+    handler = _registered_handler(router, SmSkipConfirm)
+
+    mapping_sessions.save(42, _make_session(participants=None, speaker_mapping={}))
+    callback = _FakeCallback("sm_skipok:42", user_id=42, message=_FakeMessage(42))
+
+    await handler(callback, SmSkipConfirm(user_id=42), _FakeState())
+
+    assert continued[-1]["confirmed_mapping"] == {}
+    assert mapping_sessions.peek(42) is None  # take изъял
+
+
+@pytest.mark.asyncio
+async def test_finish_skip_continues_with_empty_mapping(monkeypatch):
+    """Финал пропуска: правит сообщение, чистит FSM и продолжает обработку с
+    пустым mapping (имена не заменяются)."""
+    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+
+    async def fake_edit_text(message, text, **kwargs):
+        return True
+
+    monkeypatch.setattr(cb, "safe_edit_text", fake_edit_text)
+
+    continued = []
+
+    async def fake_continue(**kwargs):
+        continued.append(kwargs)
+
+    processing_service = SimpleNamespace(
+        continue_processing_after_mapping_confirmation=fake_continue
+    )
+
+    session = _make_session(participants=None, speaker_mapping={})
+    callback = _FakeCallback("sm_skipok:42", user_id=42, message=_FakeMessage(42))
+    state = _FakeState()
+    await state.set_state("some-state")
+
+    await cb._finish_skip(callback, state, session, processing_service)
+
+    assert continued[-1]["confirmed_mapping"] == {}
+    assert continued[-1]["session"] is session
+    assert await state.get_state() is None
+
+
+@pytest.mark.asyncio
+async def test_skip_or_confirm_shows_subview_and_keeps_session(monkeypatch):
+    """Пустой прогон: пропуск показывает под-вид подтверждения и НЕ изымает
+    сессию — продолжение только после явного «Да, продолжить»."""
+    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+
+    shown = []
+
+    async def fake_edit_card(message, content, keyboard):
+        shown.append((content, keyboard))
+        return True
+
+    monkeypatch.setattr(cb, "edit_card", fake_edit_card)
+
+    continued = []
+
+    async def fake_continue(**kwargs):
+        continued.append(kwargs)
+
+    processing_service = SimpleNamespace(
+        continue_processing_after_mapping_confirmation=fake_continue
+    )
+
+    session = _make_session(participants=None, speaker_mapping={})
+    mapping_sessions.save(42, session)
+
+    callback = _FakeCallback("sm_skip:42", user_id=42, message=_FakeMessage(42))
+
+    await cb._skip_or_confirm(callback, _FakeState(), 42, session, processing_service)
+
+    content, keyboard = shown[-1]
+    assert "Участник" in content.to_plain()
+    assert keyboard.inline_keyboard[0][0].callback_data == "sm_skipok:42"
+    assert mapping_sessions.peek(42) is session  # сессия не изъята
+    assert continued == []  # продолжения нет
+
+
+@pytest.mark.asyncio
+async def test_skip_or_confirm_continues_without_friction(monkeypatch):
+    """Кто-то назван / список был → пропуск продолжает сразу: пустой mapping,
+    сессия изъята (take, защита двойного тапа), под-вида нет."""
+    import src.handlers.callbacks.speaker_mapping_callbacks as cb
+
+    async def fake_edit_text(message, text, **kwargs):
+        return True
+
+    async def fake_edit_card(*args, **kwargs):
+        raise AssertionError("под-вида подтверждения быть не должно")
+
+    monkeypatch.setattr(cb, "safe_edit_text", fake_edit_text)
+    monkeypatch.setattr(cb, "edit_card", fake_edit_card)
+
+    continued = []
+
+    async def fake_continue(**kwargs):
+        continued.append(kwargs)
+
+    processing_service = SimpleNamespace(
+        continue_processing_after_mapping_confirmation=fake_continue
+    )
+
+    session = _make_session(
+        participants=None, speaker_mapping={"SPEAKER_1": "Иван"}
+    )
+    mapping_sessions.save(42, session)
+
+    callback = _FakeCallback("sm_skip:42", user_id=42, message=_FakeMessage(42))
+
+    await cb._skip_or_confirm(callback, _FakeState(), 42, session, processing_service)
+
+    assert continued[-1]["confirmed_mapping"] == {}
+    assert continued[-1]["session"] is session
+    assert mapping_sessions.peek(42) is None  # take изъял
 
 
 @pytest.mark.asyncio

@@ -65,9 +65,11 @@ def test_numbered_sections_instruct_numbering_not_bullets():
 
 def test_numbered_sections_keep_content_requirements():
     # Формат сменился, но содержательные требования на месте.
-    assert "Ответственный" in FIELD_SPECIFIC_RULES["action_items"]
+    # Ответственный по-прежнему фиксируется — канон подписи «Отв.:» (v6).
+    assert "Отв.:" in FIELD_SPECIFIC_RULES["action_items"]
     assert "Обоснование" in FIELD_SPECIFIC_RULES["architecture_decisions"]
-    assert "РЕШЕНО" in FIELD_SPECIFIC_RULES["decisions"]
+    # decisions отбирает только утверждённое (капс-словарь «РЕШЕНО» снят, v6).
+    assert "утвердили" in FIELD_SPECIFIC_RULES["decisions"]
     assert "митигаци" in FIELD_SPECIFIC_RULES["risks_and_blockers"]
 
 

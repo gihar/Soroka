@@ -52,3 +52,15 @@ class SmSkip(CallbackData, prefix="sm_skip"):
     """Пропуск сопоставления: ``sm_skip:{user_id}``."""
 
     user_id: int
+
+
+class SmSkipConfirm(CallbackData, prefix="sm_skipok"):
+    """Подтверждённый пустой пропуск: ``sm_skipok:{user_id}``.
+
+    Кнопка «Да, продолжить» из под-вида подтверждения пропуска. Отдельный
+    префикс, а не ``sm_skip``: у ``sm_skip`` теперь роль развилки (показать
+    подтверждение либо продолжить), а финальное продолжение без имён — это
+    ``sm_skipok`` с атомарным изъятием сессии.
+    """
+
+    user_id: int

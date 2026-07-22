@@ -39,14 +39,18 @@ class SpeakerRow:
 
 @dataclass(frozen=True)
 class MappingCard:
-    """Карточка сопоставления: заголовок и строки спикеров.
+    """Карточка сопоставления: заголовок, строки спикеров и опциональная подсказка.
 
     Заголовок ветвится вызывающим (ADR-0002): «Проверьте сопоставление» при
     наличии списка участников, «Назовите спикеров (по желанию)» без него.
+    ``hint`` — необязательная строка-следствие внизу карточки (nudge о том, что
+    неназванные спикеры уйдут метками); задаёт её вызывающий, только когда есть
+    несопоставленные спикеры. Пустая подсказка строк не добавляет.
     """
 
     header: str
     rows: tuple[SpeakerRow, ...] = ()
+    hint: Optional[str] = None
 
     def to_html(self) -> str:
         """Разметка Telegram HTML: жирные заголовок и спикеры, цитаты в кавычках."""
@@ -60,6 +64,8 @@ class MappingCard:
             if row.quote:
                 lines.append(f'  "{escape_telegram_html(row.quote)}"')
             lines.append("")
+        if self.hint:
+            lines.append(f"<i>{escape_telegram_html(self.hint)}</i>")
         lines.append(_SEPARATOR)
         return "\n".join(lines)
 
@@ -74,6 +80,8 @@ class MappingCard:
             if row.quote:
                 lines.append(f'  "{row.quote}"')
             lines.append("")
+        if self.hint:
+            lines.append(self.hint)
         lines.append(_SEPARATOR)
         return "\n".join(lines)
 

@@ -18,7 +18,13 @@ from src.ux.speaker_mapping_callback_data import (
     SmCustom,
     SmSelect,
     SmSkip,
+    SmSkipConfirm,
 )
+
+# Подсказка-следствие внизу карточки: показывается, только когда в карточке есть
+# несопоставленные спикеры. Одна строка, без назидательности — читателю видно,
+# во что превратятся неназванные спикеры в готовом протоколе.
+_UNMAPPED_HINT = "Неназванные спикеры попадут в протокол как «Участник N»"
 
 
 def _speaker_order(diarization: Optional[Diarization]) -> List[str]:
@@ -148,7 +154,10 @@ def build_mapping_card(
             SpeakerRow(speaker_id=speaker_id, display_name=display_name, quote=quote)
         )
 
-    return MappingCard(header=header, rows=tuple(rows))
+    # Есть хоть один несопоставленный спикер → подсказываем следствие (nudge).
+    hint = _UNMAPPED_HINT if any(r.display_name is None for r in rows) else None
+
+    return MappingCard(header=header, rows=tuple(rows), hint=hint)
 
 
 def create_mapping_keyboard(
@@ -274,6 +283,36 @@ def create_name_prompt_keyboard(user_id: int) -> InlineKeyboardMarkup:
         text="◀️ Отмена",
         callback_data=SmCancel(user_id=user_id).pack()
     )]])
+
+
+def format_skip_confirm_message() -> PlainCard:
+    """Содержимое под-вида подтверждения пустого пропуска (ADR-0005): простой экран.
+
+    Называет цену одной строкой и переспрашивает — без назидательности. Тот же
+    отправитель карточек доставит его как обычный текст.
+    """
+    return PlainCard(
+        text="⚠️ Спикеры останутся метками «Участник N». Продолжить?"
+    )
+
+
+def create_skip_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура под-вида подтверждения пропуска: две кнопки.
+
+    «Да, продолжить» (``sm_skipok``) — финальное продолжение без имён; «Назвать
+    спикеров» возвращает к основному виду карточки тем же ``sm_cancel``, что и
+    прочие возвраты (оттуда доступен ручной ввод имени).
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, продолжить",
+            callback_data=SmSkipConfirm(user_id=user_id).pack(),
+        )],
+        [InlineKeyboardButton(
+            text="✏️ Назвать спикеров",
+            callback_data=SmCancel(user_id=user_id).pack(),
+        )],
+    ])
 
 
 def format_name_prompt_message(speaker_id: str) -> PlainCard:
