@@ -65,6 +65,8 @@ class SynologyShareResolver:
         token = await self._fetch_sharing_token(base, link_id, key)
         file_object = await self._fetch_file_object(base, link_id, key)
 
+        self._check_file_object(file_object)
+
         file_id = file_object.get("file_id")
         filename = file_object.get("name")
         if not file_id or not filename:
@@ -112,6 +114,25 @@ class SynologyShareResolver:
         except json.JSONDecodeError as e:
             raise FileError(f"Не удалось разобрать данные файла Synology Drive: {e}")
         return file_object
+
+    def _check_file_object(self, file_object: dict) -> None:
+        """Понятные ошибки для ссылок, по которым скачать не выйдет."""
+        if (file_object.get("adv_shared_info") or {}).get("has_password"):
+            raise FileError(
+                "Ссылка Synology Drive защищена паролем. "
+                "Создайте публичную ссылку без пароля и пришлите её."
+            )
+        if file_object.get("type") == "dir":
+            raise FileError(
+                "Ссылка Synology Drive ведёт на папку. "
+                "Пришлите ссылку на файл записи."
+            )
+        capabilities = file_object.get("capabilities") or {}
+        if file_object.get("disable_download") or capabilities.get("can_download") is False:
+            raise FileError(
+                "Владелец запретил скачивание по этой ссылке Synology Drive. "
+                "Попросите ссылку с разрешённым скачиванием."
+            )
 
     def _build_download_url(
         self, base: str, link_id: str, filename: str, file_id: str, token: str

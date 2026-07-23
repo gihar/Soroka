@@ -136,7 +136,40 @@ class TestSupportedServicesCopy:
         assert "Synology" in MessageBuilder.help_message()
 
 
+def make_session_with_file_object(**overrides):
+    """Сессия happy path, но с изменёнными полями объекта файла в Shard-ответе."""
+    import json as _json
+
+    file_object = {
+        "file_id": FILE_ID,
+        "name": FILENAME,
+        "content_type": "video",
+        "type": "file",
+        "adv_shared_info": {"has_password": False},
+        "disable_download": False,
+        "capabilities": {"can_download": True},
+    }
+    file_object.update(overrides)
+    body = (
+        "window.getDriveShareMode=function(){return 'public';}\n"
+        "window.getDriveFile=function(){return " + _json.dumps(file_object) + "};\n"
+    )
+    return FakeSession(routes=[
+        ("GET", "api=SYNO.SynologyDrive.Shard", FakeResponse(body=body)),
+        ("GET", SHARE_KEY, FakeResponse(
+            body="<html>...</html>",
+            cookies={f"drive-sharing-{SHARE_KEY}": TOKEN},
+        )),
+        ("HEAD", "method=download", FakeResponse(headers={
+            "content-length": str(FILE_SIZE),
+            "content-disposition": f'attachment; filename="{FILENAME}"',
+        })),
+    ])
+
+
 class TestSynologyResolverErrors:
+    """Понятные ошибки для «неудобных» ссылок (issue #93)."""
+
     @pytest.mark.anyio
     async def test_page_without_token_cookie_raises_clear_error(self):
         from src.exceptions.file import FileError
@@ -147,6 +180,52 @@ class TestSynologyResolverErrors:
         resolver = SynologyShareResolver(session)
 
         with pytest.raises(FileError, match="токен"):
+            await resolver.get_file_info(SHARE_URL)
+
+    @pytest.mark.anyio
+    async def test_password_protected_link_gets_specific_message(self):
+        from src.exceptions.file import FileError
+
+        session = make_session_with_file_object(adv_shared_info={"has_password": True})
+        resolver = SynologyShareResolver(session)
+
+        with pytest.raises(FileError, match="без пароля"):
+            await resolver.get_file_info(SHARE_URL)
+
+    @pytest.mark.anyio
+    async def test_folder_link_asks_for_file_link(self):
+        from src.exceptions.file import FileError
+
+        session = make_session_with_file_object(type="dir", content_type="dir")
+        resolver = SynologyShareResolver(session)
+
+        with pytest.raises(FileError, match="ссылку на файл"):
+            await resolver.get_file_info(SHARE_URL)
+
+    @pytest.mark.anyio
+    async def test_download_forbidden_by_owner_gets_specific_message(self):
+        from src.exceptions.file import FileError
+
+        for overrides in (
+            {"disable_download": True},
+            {"capabilities": {"can_download": False}},
+        ):
+            session = make_session_with_file_object(**overrides)
+            resolver = SynologyShareResolver(session)
+
+            with pytest.raises(FileError, match="запретил скачивание"):
+                await resolver.get_file_info(SHARE_URL)
+
+    @pytest.mark.anyio
+    async def test_unavailable_page_gets_clear_error_not_traceback(self):
+        from src.exceptions.file import FileError
+
+        session = FakeSession(routes=[
+            ("GET", SHARE_KEY, FakeResponse(status=404, body="Not Found")),
+        ])
+        resolver = SynologyShareResolver(session)
+
+        with pytest.raises(FileError, match="недоступна"):
             await resolver.get_file_info(SHARE_URL)
 
 
