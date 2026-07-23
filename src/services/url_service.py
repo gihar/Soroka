@@ -53,7 +53,9 @@ class URLService:
         
         self.session = aiohttp.ClientSession(
             connector=connector,
-            timeout=aiohttp.ClientTimeout(total=300),  # 5 минут таймаут
+            # Без общего предела: файл на гигабайты не скачать за фиксированное
+            # время, а зависшие соединение/чтение обрываются своими таймаутами.
+            timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60),
             headers={'User-Agent': 'Mozilla/5.0 (compatible; SorokaBot/1.0)'}
         )
         return self
