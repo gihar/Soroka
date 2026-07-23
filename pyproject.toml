@@ -36,3 +36,6 @@ asyncio_mode = "auto"
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "live_synology: живой тест против реального NAS (нужна SYNOLOGY_LIVE_SHARE_URL)",
+]

@@ -16,16 +16,6 @@ FILE_ID = "859447920087318451"
 FILENAME = "video1127291797.mp4"
 FILE_SIZE = 35853577
 
-SHARD_BODY = (
-    'window.getDriveShareMode=function(){return \'public\';}\n'
-    'window.getDriveFile=function(){return {"file_id":"' + FILE_ID + '",'
-    '"name":"' + FILENAME + '","content_type":"video","type":"file",'
-    '"adv_shared_info":{"has_password":false},"disable_download":false,'
-    '"capabilities":{"can_download":true}}};\n'
-    'window.getDriveTexts=function(){return {"action":{"download":"Скачать"}};}'
-)
-
-
 class FakeResponse:
     def __init__(self, status=200, headers=None, body="", cookies=None):
         self.status = status
@@ -67,17 +57,7 @@ class FakeSession:
 
 
 def make_happy_session():
-    return FakeSession(routes=[
-        ("GET", "api=SYNO.SynologyDrive.Shard", FakeResponse(body=SHARD_BODY)),
-        ("GET", SHARE_KEY, FakeResponse(
-            body="<html>...</html>",
-            cookies={f"drive-sharing-{SHARE_KEY}": TOKEN},
-        )),
-        ("HEAD", "method=download", FakeResponse(headers={
-            "content-length": str(FILE_SIZE),
-            "content-disposition": f'attachment; filename="{FILENAME}"',
-        })),
-    ])
+    return make_session_with_file_object()
 
 
 class TestSynologyShareResolver:
