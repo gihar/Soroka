@@ -121,7 +121,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             if not _contains_url(text):
                 await safe_answer(
                     message,
-                    "📎 Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск для обработки.\n\n"
+                    "📎 Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск/Synology Drive для обработки.\n\n"
                     "Поддерживаемые форматы:\n"
                     "🎵 Аудио: MP3, WAV, M4A, OGG\n"
                     "🎬 Видео: MP4, AVI, MOV, MKV"
@@ -581,7 +581,8 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     "❌ Данный тип ссылки не поддерживается.\n\n"
                     "Поддерживаются только:\n"
                     "• Google Drive (drive.google.com)\n"
-                    "• Яндекс.Диск (disk.yandex.ru, yadi.sk)"
+                    "• Яндекс.Диск (disk.yandex.ru, yadi.sk)\n"
+                    "• Synology Drive (публичная ссылка вида https://<хост>/d/s/...)"
                 )
                 return
             

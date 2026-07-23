@@ -13,6 +13,7 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions.file import FileError, FileSizeError, FileTypeError
+from src.services.synology_link import SynologyShareResolver, is_synology_share_url
 
 
 class URLService:
@@ -64,7 +65,11 @@ class URLService:
     
     def is_supported_url(self, url: str) -> bool:
         """Проверить, поддерживается ли данный URL"""
-        return self._is_google_drive_url(url) or self._is_yandex_disk_url(url)
+        return (
+            self._is_google_drive_url(url)
+            or self._is_yandex_disk_url(url)
+            or is_synology_share_url(url)
+        )
     
     def _is_google_drive_url(self, url: str) -> bool:
         """Проверить, является ли URL ссылкой на Google Drive"""
@@ -158,6 +163,8 @@ class URLService:
                 return await self._get_google_drive_file_info(url)
             elif self._is_yandex_disk_url(url):
                 return await self._get_yandex_disk_file_info(url)
+            elif is_synology_share_url(url):
+                return await SynologyShareResolver(self.session).get_file_info(url)
             else:
                 raise FileError("Неподдерживаемый тип ссылки")
         
