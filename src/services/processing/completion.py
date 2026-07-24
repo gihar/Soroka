@@ -26,6 +26,7 @@ from src.performance.metrics import PerformanceTimer, metrics_collector
 from src.utils.text_processing import (
     humanize_speaker_labels_for_reader,
     normalize_hyphens,
+    normalize_list_markers,
     replace_speakers_in_text,
 )
 
@@ -220,8 +221,11 @@ async def _assemble_result(
         )
 
         # Детерминированная нормализация: неразрывный дефис к обычному, чтобы
-        # «15‑минутки» не соседствовали с обычным дефисом в одном тексте.
+        # «15‑минутки» не соседствовали с обычным дефисом в одном тексте;
+        # маркер буллета перед номером («- 1. …») снимается — иначе каждый
+        # канал рендерит буллет И литеральный номер разом.
         protocol_text = normalize_hyphens(protocol_text)
+        protocol_text = normalize_list_markers(protocol_text)
 
     # Очистка временного файла в фоне (только для внешних файлов).
     if request.is_external_file and temp_file_path:

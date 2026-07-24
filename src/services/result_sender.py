@@ -20,6 +20,7 @@ from loguru import logger
 from src.models.processing import ProcessingRequest, ProcessingResult
 from src.services.protocol_render import render_protocol_messages
 from src.utils.telegram_safe import safe_send_document, safe_send_message
+from src.utils.text_processing import normalize_list_markers
 
 MAX_MESSAGE_LENGTH = 4000
 # Запас под префикс «<i>Часть N/M</i>\n» у многочастных протоколов.
@@ -138,6 +139,9 @@ async def send_protocol_file(bot, chat_id: int, protocol_text: str,
     canonical ``.md`` rather than dropping the delivery. Returns ``True`` only
     when delivered.
     """
+    # Протоколы из истории могли быть сохранены до нормализации «- 1. …» —
+    # перерендер кнопками PDF/Word не должен воспроизводить двойной маркер.
+    protocol_text = normalize_list_markers(protocol_text)
     suffix = {"pdf": ".pdf", "docx": ".docx"}.get(output_mode, ".md")
     safe_name = _protocol_file_name(protocol_text, source_file_name)
 
