@@ -13,6 +13,7 @@ from src.services.protocol_render.telegram_html import (
     _render_line,
     markdown_to_telegram_html,
 )
+from src.utils.text_processing import normalize_list_markers
 
 _CONTINUATION_MARK = " (продолжение)"
 _SECTION_HEADING_RE = re.compile(r"^##\s+")
@@ -171,7 +172,12 @@ def _balance_tags(parts: list[str]) -> list[str]:
 
 
 def render_protocol_messages(markdown_text: str, max_length: int = 4000) -> list[str]:
-    """Отрендерить протокол в Telegram HTML и разбить на сообщения по секциям."""
+    """Отрендерить протокол в Telegram HTML и разбить на сообщения по секциям.
+
+    Вход нормализуется: протоколы из истории могли быть сохранены с двойным
+    маркером «- 1. …» — чат не должен показывать «• 1.».
+    """
+    markdown_text = normalize_list_markers(markdown_text)
     html_text = markdown_to_telegram_html(markdown_text)
     if len(html_text) <= max_length:
         return [html_text] if html_text else []
