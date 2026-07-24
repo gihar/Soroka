@@ -210,6 +210,25 @@ async def test_tap_then_text_names_the_tapped_speaker(_patch_card_render):
     assert session.editing_speaker is None  # применили — вышли из под-вида
 
 
+@pytest.mark.asyncio
+async def test_trailing_comma_not_part_of_subview_name(_patch_card_render):
+    """«Иван,» — один кусок для проверки «одно имя», но участник — «Иван» без
+    запятой: применяется разобранное имя, а не сырой текст сообщения."""
+    session = _make_session(participants=None, speaker_mapping={}, user_id=42)
+    session.confirmation_message = _FakeMessage(42)
+    mapping_sessions.save(42, session)
+    router = _mapping_router()
+
+    await _open_subview(router, 42, "SPEAKER_1")
+    message = _FakeMessage(42, text="Иван,")
+    state = _make_fsm(42)
+
+    await _deliver_message([router], message, state)
+
+    assert session.speaker_mapping["SPEAKER_1"] == "Иван"
+    assert [p["name"] for p in session.request.participants_list] == ["Иван"]
+
+
 # ---------------------------------------------------------------------------
 # Заголовок под-вида называет спикера и приглашает печатать (обе вариации)
 # ---------------------------------------------------------------------------

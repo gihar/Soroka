@@ -242,16 +242,6 @@ async def _redraw_main_card_after_naming(
     )
 
 
-def _looks_like_multiple_names(text: str) -> bool:
-    """Несколько имён (разделители — запятая или перенос строки) в одном сообщении.
-
-    Под-вид ждёт ровно одно имя для одного спикера; пачку имён принимает общий
-    вид карточки. Разбор разделителей — единый (``parse_manual_names``); здесь
-    лишь считаем непустые куски: их два и больше.
-    """
-    return len(participants_service.parse_manual_names(text)) >= 2
-
-
 def _unnamed_speakers(session: MappingSession) -> list[str]:
     """Неназванные спикеры в порядке их появления в записи (как строки карточки)."""
     diarization = session.transcription_result.diarization
@@ -269,15 +259,18 @@ async def _apply_subview_name(
     карточка перерисована главным видом.
     """
     speaker_id = session.editing_speaker
-    if _looks_like_multiple_names(message.text):
+    names = participants_service.parse_manual_names(message.text)
+    if len(names) >= 2:
         await message.answer(
             f"Здесь ждём одно имя — для {speaker_id}. Несколько имён можно "
             "отправить из общего вида карточки (◀️ Назад)."
         )
         return
 
+    # Применяем разобранное имя, а не сырой текст: «Иван,» — один кусок для
+    # проверки выше, но запятая не должна стать частью имени участника.
     new_list, display_name = participants_service.add_manual_participant(
-        session.request.participants_list, message.text
+        session.request.participants_list, names[0] if names else ""
     )
     if new_list is None:
         await message.answer(
