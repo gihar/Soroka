@@ -56,6 +56,26 @@ def normalize_list_markers(text: str) -> str:
     return "\n".join(lines)
 
 
+def squeeze_blank_lines(text: str) -> str:
+    """Схлопнуть подряд идущие пустые строки до одной («\\n\\n\\n+» → «\\n\\n»).
+
+    Пустые Jinja-ветки шапки оставляют лишние пустые строки перед первым
+    заголовком (живой протокол 365). Детерминированный финальный проход;
+    содержимое ```-фенсов не трогается.
+    """
+    out: list[str] = []
+    in_code = False
+    for line in text.split("\n"):
+        if _FENCE_RE.match(line):
+            in_code = not in_code
+            out.append(line)
+            continue
+        if not in_code and not line.strip() and out and not out[-1].strip():
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def humanize_speaker_labels(text: str) -> Tuple[str, int]:
     """Заменить оставшиеся метки SPEAKER_N на «Участник N».
 

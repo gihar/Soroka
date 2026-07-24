@@ -30,13 +30,14 @@ def test_shared_sections_carry_labels():
 
 
 def test_core_labels_unchanged():
+    # «📅 Следующие шаги» удалена из Стандартного осознанно (критика v8):
+    # секция пересказывала «Задачи и сроки» парафразом в живых прогонах.
     standard = next(
         t for t in TemplateLibrary().get_all_templates()
         if t["name"] == "Стандартный протокол встречи"
     )
     for heading in ("## ✅ Решения", "## 📌 Задачи и сроки",
-                    "## ⚠️ Блокеры и риски", "## 💬 Обсуждение",
-                    "## 📅 Следующие шаги"):
+                    "## ⚠️ Блокеры и риски", "## 💬 Обсуждение"):
         assert heading in standard["content"]
 
 

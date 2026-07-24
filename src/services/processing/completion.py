@@ -28,6 +28,7 @@ from src.utils.text_processing import (
     normalize_hyphens,
     normalize_list_markers,
     replace_speakers_in_text,
+    squeeze_blank_lines,
 )
 
 from .llm_generation import (
@@ -226,6 +227,8 @@ async def _assemble_result(
         # канал рендерит буллет И литеральный номер разом.
         protocol_text = normalize_hyphens(protocol_text)
         protocol_text = normalize_list_markers(protocol_text)
+        # Пустые Jinja-ветки шапки оставляют лишние пустые строки (живой 365).
+        protocol_text = squeeze_blank_lines(protocol_text)
 
     # Очистка временного файла в фоне (только для внешних файлов).
     if request.is_external_file and temp_file_path:
