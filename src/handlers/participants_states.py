@@ -24,11 +24,6 @@ class SpeakerMappingStates(StatesGroup):
     waiting_confirmation = State()  # Ожидание подтверждения сопоставления
 
 
-class SpeakerNameInput(StatesGroup):
-    """Состояние ожидания имени спикера, введённого вручную в карточке"""
-    waiting = State()  # Ожидание сообщения с именем для спикера
-
-
 class ProtocolInfoState(StatesGroup):
     """Состояния для ввода дополнительной информации о протоколе"""
     waiting_agenda = State()  # Ожидание ввода повестки встречи
