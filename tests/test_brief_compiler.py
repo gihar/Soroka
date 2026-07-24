@@ -126,7 +126,6 @@ def test_protocol_data_standard_has_exact_keys():
         "key_points",
         "discussion",
         "questions",
-        "next_steps",
     }
 
 

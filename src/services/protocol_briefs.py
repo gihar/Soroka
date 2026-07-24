@@ -52,6 +52,9 @@ def _section(key: str, heading: str, *, empty_text: str | None = None) -> BriefS
     )
 
 
+# Критика v8: next_steps убран из Стандартного и Краткого резюме — в 100%
+# живых status-прогонов секция пересказывала «Задачи и сроки» парафразом
+# (дословных дублей 0, additive-правило бессильно). Сроки живут внутри задач.
 _STANDARD = ProtocolBrief(
     template_name="Стандартный протокол встречи",
     title_fallback="Протокол встречи",
@@ -63,7 +66,6 @@ _STANDARD = ProtocolBrief(
         _section("key_points", "💡 Ключевые выводы"),
         _section("discussion", "💬 Обсуждение"),
         _section("questions", "❓ Открытые вопросы"),
-        _section("next_steps", "📅 Следующие шаги"),
     ),
 )
 
@@ -75,7 +77,6 @@ _BRIEF_SUMMARY = ProtocolBrief(
         _section("decisions", "✅ Решения"),
         _section("action_items", "📌 Задачи и сроки"),
         _section("key_points", "💡 Ключевые выводы"),
-        _section("next_steps", "📅 Следующие шаги"),
     ),
 )
 
