@@ -11,7 +11,6 @@
 голосовое, фото и ссылка проваливаются мимо, в обычную обработку записи.
 """
 
-import re
 from typing import Callable, Optional
 
 from aiogram import Router
@@ -21,7 +20,10 @@ from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
 from src.services.mapping_session import MappingSession, mapping_sessions
-from src.services.participants_service import participants_service
+from src.services.participants_service import (
+    is_valid_manual_name,
+    participants_service,
+)
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.url_detection import contains_url
 from src.ux.card_sender import edit_card
@@ -56,9 +58,6 @@ _SKIP_CONTINUED_TEXT = (
     "⏭️ **Сопоставление пропущено**\n\n"
     "⏳ Продолжаю генерацию протокола без замены имен спикеров..."
 )
-
-# Разделители нескольких имён в одном сообщении: запятая или перенос строки.
-_NAME_SEPARATORS = re.compile(r"[,\n]")
 
 
 def _skip_needs_confirmation(session: MappingSession) -> bool:
@@ -247,20 +246,109 @@ def _looks_like_multiple_names(text: str) -> bool:
     """Несколько имён (разделители — запятая или перенос строки) в одном сообщении.
 
     Под-вид ждёт ровно одно имя для одного спикера; пачку имён принимает общий
-    вид карточки. Считаем непустые куски после разбиения — их два и больше.
+    вид карточки. Разбор разделителей — единый (``parse_manual_names``); здесь
+    лишь считаем непустые куски: их два и больше.
     """
-    parts = [p.strip() for p in _NAME_SEPARATORS.split(text) if p.strip()]
-    return len(parts) >= 2
+    return len(participants_service.parse_manual_names(text)) >= 2
+
+
+def _unnamed_speakers(session: MappingSession) -> list[str]:
+    """Неназванные спикеры в порядке их появления в записи (как строки карточки)."""
+    diarization = session.transcription_result.diarization
+    speakers = diarization.speakers if diarization else []
+    return [s for s in speakers if not session.speaker_mapping.get(s)]
+
+
+async def _apply_subview_name(
+    message: Message, session: MappingSession, user_id: int
+) -> None:
+    """Семантика под-вида (#99): одно имя редактируемому спикеру.
+
+    Несколько имён или имя вне планки 2–50 → короткий отказ, ничего не применяем
+    (всё или ничего). Валидное имя → участник и сопоставление, под-вид закрыт,
+    карточка перерисована главным видом.
+    """
+    speaker_id = session.editing_speaker
+    if _looks_like_multiple_names(message.text):
+        await message.answer(
+            f"Здесь ждём одно имя — для {speaker_id}. Несколько имён можно "
+            "отправить из общего вида карточки (◀️ Назад)."
+        )
+        return
+
+    new_list, display_name = participants_service.add_manual_participant(
+        session.request.participants_list, message.text
+    )
+    if new_list is None:
+        await message.answer(
+            "Имя должно быть 2–50 символов и не начинаться с «/».\n"
+            "Отправьте имя ещё раз или нажмите «◀️ Назад»."
+        )
+        return
+
+    session.request.participants_list = new_list
+    new_mapping = dict(session.speaker_mapping)
+    if speaker_id:
+        new_mapping[speaker_id] = display_name
+    mapping_sessions.update_mapping(user_id, new_mapping)
+    session.editing_speaker = None
+    await _redraw_main_card_after_naming(session, user_id, message)
+
+
+async def _apply_main_view_names(
+    message: Message, session: MappingSession, user_id: int
+) -> None:
+    """Семантика главного вида (#100): раскладка имён по неназванным спикерам.
+
+    Одно предсказуемое правило: имена (запятая/перенос — разделители) ложатся на
+    неназванных по порядку появления; уже названных не трогаем. Больше имён, чем
+    неназванных → ничего не применяем, переспрашиваем с числами. «Всё или ничего»:
+    хоть одно имя вне планки 2–50 — не применяется ни одно.
+    """
+    names = participants_service.parse_manual_names(message.text)
+    if not names or not all(is_valid_manual_name(name) for name in names):
+        await message.answer(
+            "Каждое имя — 2–50 символов и не начинается с «/».\n"
+            "Отправьте имена ещё раз через запятую или с новой строки."
+        )
+        return
+
+    unnamed = _unnamed_speakers(session)
+    if not unnamed:
+        await message.answer(
+            "Все спикеры уже названы. Нажмите «✅ Подтвердить и продолжить»."
+        )
+        return
+    if len(names) > len(unnamed):
+        await message.answer(
+            f"Без имени осталось {len(unnamed)} спикера, а имён — {len(names)}. "
+            f"Отправьте не больше {len(unnamed)}."
+        )
+        return
+
+    # Применяем последовательно: дедуп внутри add_manual_participant видит имена,
+    # уже добавленные из этого же сообщения. Все имена прошли планку выше, поэтому
+    # new_list не станет None.
+    new_list = session.request.participants_list
+    new_mapping = dict(session.speaker_mapping)
+    for speaker_id, name in zip(unnamed, names):
+        new_list, display_name = participants_service.add_manual_participant(
+            new_list, name
+        )
+        new_mapping[speaker_id] = display_name
+    session.request.participants_list = new_list
+    mapping_sessions.update_mapping(user_id, new_mapping)
+    await _redraw_main_card_after_naming(session, user_id, message)
 
 
 async def receive_speaker_name(message: Message) -> None:
-    """Сообщение с именем спикера, пока открыт под-вид (``editing_speaker``).
+    """Текст при открытой Карточке сопоставления: имя(имена) по неназванным спикерам.
 
-    Фильтр гарантировал: живая сессия, ``editing_speaker`` задан, content — текст
-    без ссылки. Валидное одно имя → полноценный участник сессии и сопоставление
-    спикера, под-вид закрывается, карточка перерисовывается главным видом.
-    Несколько имён или имя вне планки 2–50 → короткий отказ, ничего не применяем
-    (всё или ничего).
+    Фильтр гарантировал живую сессию и текст без ссылки. Ветвление по виду
+    (ADR-0006): под-вид (``editing_speaker`` задан) — одно имя редактируемому
+    спикеру (#99); главный вид (``editing_speaker`` пуст) — раскладка имён по
+    неназванным спикерам (#100). Необратимого шага текст не запускает: карточка
+    лишь перерисовывается, продолжение — только по «✅ Подтвердить и продолжить».
     """
     try:
         user_id = message.from_user.id
@@ -268,34 +356,11 @@ async def receive_speaker_name(message: Message) -> None:
         if session is None:
             # Сессия истекла между проверкой фильтра и телом — ловить нечего.
             return
-        speaker_id = session.editing_speaker
-        text = message.text
 
-        if _looks_like_multiple_names(text):
-            await message.answer(
-                f"Здесь ждём одно имя — для {speaker_id}. Несколько имён можно "
-                "отправить из общего вида карточки (◀️ Назад)."
-            )
-            return
-
-        new_list, display_name = participants_service.add_manual_participant(
-            session.request.participants_list, text
-        )
-        if new_list is None:
-            await message.answer(
-                "Имя должно быть 2–50 символов и не начинаться с «/».\n"
-                "Отправьте имя ещё раз или нажмите «◀️ Назад»."
-            )
-            return
-
-        session.request.participants_list = new_list
-        new_mapping = dict(session.speaker_mapping)
-        if speaker_id:
-            new_mapping[speaker_id] = display_name
-        mapping_sessions.update_mapping(user_id, new_mapping)
-        session.editing_speaker = None
-
-        await _redraw_main_card_after_naming(session, user_id, message)
+        if session.editing_speaker is not None:
+            await _apply_subview_name(message, session, user_id)
+        else:
+            await _apply_main_view_names(message, session, user_id)
 
     except Exception as e:
         logger.error(f"Ошибка в receive_speaker_name: {e}", exc_info=True)
@@ -317,13 +382,15 @@ async def speaker_mapping_cancel_callback(
 
 
 async def _capturing_speaker_name(message: Message) -> bool:
-    """Фильтр message-хендлера имени: ловим текст, только пока открыт под-вид
-    спикера (``editing_speaker`` живой сессии) и это не ссылка.
+    """Фильтр message-хендлера имени: ловим текст без ссылки, пока жива сессия
+    сопоставления — НЕЗАВИСИМО от ``editing_speaker`` (#100).
 
-    Ссылка, не-текст (файл/голос/видео/фото) и истёкшая по TTL сессия
-    проваливаются мимо — в обычный поток обработки записи; под-вид карточки их
-    не съедает (ADR-0006). Живость сессии читается здесь же: под-вида нет без
-    живой сессии, поэтому истёкшая сессия просто перестаёт ловить.
+    Ловля расширена с под-вида на всю открытую карточку: под-вид (editing_speaker
+    задан) принимает одно имя спикеру, главный вид — раскладку имён по неназванным
+    (ветвление внутри ``receive_speaker_name``). Ссылка, не-текст (файл/голос/
+    видео/фото) и истёкшая по TTL сессия проваливаются мимо — в обычный поток
+    обработки записи; карточка их не съедает (ADR-0006). Живость сессии читается
+    здесь же: нет живой сессии → нет открытой карточки → ловить нечего.
     """
     user = message.from_user
     if user is None or not message.text:
@@ -331,7 +398,7 @@ async def _capturing_speaker_name(message: Message) -> bool:
     if contains_url(message.text):
         return False
     session = mapping_sessions.peek(user.id)
-    return session is not None and session.editing_speaker is not None
+    return session is not None
 
 
 def setup_speaker_mapping_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:

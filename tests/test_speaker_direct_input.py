@@ -382,20 +382,26 @@ def _SESSION_GONE_NOT_SENT(message) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_main_view_text_not_captured():
-    """В главном виде (editing_speaker=None) текст ловцом не съедается — уходит в
-    обычный поток (прямой ввод из главного вида — уже #100, не #99)."""
+async def test_main_view_text_is_laid_out_over_unnamed(_patch_card_render):
+    """Плановая дельта #100: в главном виде (editing_speaker=None) текст ТЕПЕРЬ
+    ловится роутером карточки и раскладывается по неназванным спикерам.
+
+    В #99 этот же кейс уходил мимо в общий поток (тест назывался
+    ``test_main_view_text_not_captured``); #100 расширяет область ловца на весь
+    главный вид, поэтому ожидание переписано. Одно имя без разделителей → первому
+    неназванному спикеру по порядку появления; под-вид при этом не открывается.
+    """
     session = _make_session(participants=None, speaker_mapping={}, user_id=53)
     session.confirmation_message = _FakeMessage(53)
-    mapping_sessions.save(53, session)  # сессия жива, но под-вид не открыт
+    mapping_sessions.save(53, session)  # сессия жива, под-вид не открыт (главный вид)
     router = _mapping_router()
 
-    routers, caught = _wall_routers(router)
     message = _FakeMessage(53, text="Мария Сидорова")
-    winner = await _deliver_message(routers, message, _make_fsm(53))
+    winner = await _deliver_message([router], message, _make_fsm(53))
 
-    assert winner is routers[-1]
-    assert "SPEAKER_1" not in session.speaker_mapping
+    assert winner is router  # главный вид ловит текст
+    assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"  # первый неназванный
+    assert session.editing_speaker is None  # раскладка не открывает под-вид
 
 
 # ---------------------------------------------------------------------------
@@ -466,26 +472,32 @@ async def test_slash_name_refused_in_subview():
 
 
 @pytest.mark.asyncio
-async def test_back_button_clears_editing_speaker():
-    """«◀️ Назад» (sm_cancel) снимает editing_speaker: следующий текст уходит
-    мимо ловца в обычный поток."""
+async def test_back_button_returns_to_main_view_layout(_patch_card_render):
+    """«◀️ Назад» (sm_cancel) снимает editing_speaker и возвращает в главный вид.
+
+    Плановая дельта #100: раньше следующий текст уходил мимо ловца в общий поток;
+    теперь главный вид ловит его и раскладывает по неназванным. Открываем под-вид
+    SPEAKER_2, жмём «Назад», шлём одно имя — оно ложится на ПЕРВОГО неназванного
+    (SPEAKER_1), а не на недавно редактированного SPEAKER_2: это и есть возврат в
+    главный вид, а не наивная ловля в под-виде.
+    """
     session = _make_session(participants=None, speaker_mapping={}, user_id=57)
     session.confirmation_message = _FakeMessage(57)
     mapping_sessions.save(57, session)
     router = _mapping_router()
-    await _open_subview(router, 57, "SPEAKER_1")
+    await _open_subview(router, 57, "SPEAKER_2")
 
     cancel = _registered_callback(router, SmCancel)
     await cancel(_FakeCallback("sm_cancel:57", 57, _FakeMessage(57)),
                  SmCancel(user_id=57), _make_fsm(57))
 
     assert session.editing_speaker is None
-    routers, caught = _wall_routers(router)
     winner = await _deliver_message(
-        routers, _FakeMessage(57, text="Мария Сидорова"), _make_fsm(57)
+        [router], _FakeMessage(57, text="Мария Сидорова"), _make_fsm(57)
     )
-    assert winner is routers[-1]  # больше не ловим
-    assert "SPEAKER_1" not in session.speaker_mapping
+    assert winner is router  # главный вид ловит текст (дельта #100)
+    assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"  # первый неназванный
+    assert "SPEAKER_2" not in session.speaker_mapping  # недавно редактированный не тронут
 
 
 @pytest.mark.asyncio

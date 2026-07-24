@@ -261,25 +261,34 @@ async def test_expired_session_falls_through_no_gone_text():
 
 
 @pytest.mark.asyncio
-async def test_cancel_stops_capturing_the_next_message():
+async def test_cancel_returns_to_main_view_which_captures_text():
+    """«◀️ Назад» закрывает под-вид (editing_speaker снят).
+
+    Плановая дельта #100 (роутинг): раньше следующий текст в главном виде уходил
+    мимо роутера карточки; теперь главный вид ловит его и раскладывает по
+    неназванным. Открываем под-вид SPEAKER_2, жмём «Назад», шлём одно имя — оно
+    ложится на первого неназванного (SPEAKER_1), подтверждая возврат в главный
+    вид, а не наивную ловлю недавно редактированного SPEAKER_2.
+    """
     session = _make_session(
         participants=[{"name": "Иван Петров"}], speaker_mapping={}, user_id=47
     )
     session.confirmation_message = _FakeMessage(47)
     mapping_sessions.save(47, session)
     router = _mapping_router()
-    await _open_subview(router, 47, "SPEAKER_1")
+    await _open_subview(router, 47, "SPEAKER_2")
 
     cancel = _registered_callback(router, SmCancel)
     cancel_cb = _FakeCallback("sm_cancel:47", user_id=47, message=_FakeMessage(47))
     await cancel(cancel_cb, SmCancel.unpack(cancel_cb.data), _make_fsm(47))
+    assert session.editing_speaker is None
 
     message = _FakeMessage(47, text="Мария Сидорова")
     winner = await _deliver_message([router], message, _make_fsm(47))
 
-    assert winner is None  # после «Назад» имя больше не ловится роутером карточки
-    assert "SPEAKER_1" not in session.speaker_mapping
-    assert session.request.participants_list == [{"name": "Иван Петров"}]
+    assert winner is router  # главный вид ловит текст (дельта #100)
+    assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"  # первый неназванный
+    assert "SPEAKER_2" not in session.speaker_mapping
 
 
 # ---------------------------------------------------------------------------

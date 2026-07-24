@@ -17,6 +17,18 @@ from src.models.meeting_info import MeetingInfo
 MANUAL_NAME_MIN_LEN = 2
 MANUAL_NAME_MAX_LEN = 50
 
+# Разделители нескольких имён в одном сообщении (главный вид карточки): запятая
+# или перенос строки. Сообщение без разделителей = одно имя (пробелы внутри
+# законны, «Анна Петровна» — одно имя).
+_NAME_SEPARATORS = re.compile(r"[,\n]")
+
+
+def is_valid_manual_name(trimmed: str) -> bool:
+    """Проходит ли уже триммленное имя планку ручного ввода (2–50, не с «/»)."""
+    if not (MANUAL_NAME_MIN_LEN <= len(trimmed) <= MANUAL_NAME_MAX_LEN):
+        return False
+    return not trimmed.startswith("/")
+
 
 class ParticipantsService:
     """Сервис для парсинга и валидации списка участников"""
@@ -559,6 +571,16 @@ class ParticipantsService:
         display_name = self.convert_full_name_to_short(trimmed)
         new_list = list(current) + [{"name": trimmed, "role": ""}]
         return new_list, display_name
+
+    def parse_manual_names(self, text: str) -> List[str]:
+        """Разобрать текст в список имён (главный вид карточки).
+
+        Разделители — запятая или перенос строки; текст без разделителей = одно
+        имя. Куски триммятся, пустые отбрасываются. Валидацию планки делает
+        вызывающий отдельно (parse и validate разведены, чтобы применять «всё или
+        ничего» до применения) — см. :func:`is_valid_manual_name`.
+        """
+        return [p.strip() for p in _NAME_SEPARATORS.split(text or "") if p.strip()]
 
     def format_participants_for_llm(self, participants: List[Dict[str, str]]) -> str:
         """

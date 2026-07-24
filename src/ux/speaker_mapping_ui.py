@@ -25,6 +25,30 @@ from src.ux.speaker_mapping_callback_data import (
 # во что превратятся неназванные спикеры в готовом протоколе.
 _UNMAPPED_HINT = "Неназванные спикеры попадут в протокол как «Участник N»"
 
+# Строка-приглашение главного вида (#100): зовёт назвать спикеров одним
+# сообщением. Показывается только в главном виде (не в под-виде: под-вид ждёт
+# одно имя одному спикеру, «через запятую» там сбивало бы) и только пока есть
+# неназванные — вместе с _UNMAPPED_HINT, приглашение сверху.
+_MAIN_VIEW_NAME_PROMPT = (
+    "Отправьте имена одним сообщением — через запятую, по порядку спикеров."
+)
+
+
+def _compose_hint(
+    has_unmapped: bool, current_editing_speaker: Optional[str]
+) -> Optional[str]:
+    """Собрать подсказку под карточкой из строки-приглашения и nudge про «Участник N».
+
+    Всех назвали → подсказки нет. Есть неназванные: под-вид несёт только nudge,
+    главный вид — приглашение (сверху) плюс nudge. Две строки живут одним полем
+    ``hint`` через перенос — рендер отдаёт их как один блок (см. card_content).
+    """
+    if not has_unmapped:
+        return None
+    if current_editing_speaker:
+        return _UNMAPPED_HINT
+    return f"{_MAIN_VIEW_NAME_PROMPT}\n{_UNMAPPED_HINT}"
+
 
 def _speaker_order(diarization: Optional[Diarization]) -> List[str]:
     """Спикеры в порядке их появления в сегментах (единый источник для карточки)."""
@@ -177,8 +201,10 @@ def build_mapping_card(
             SpeakerRow(speaker_id=speaker_id, display_name=display_name, quote=quote)
         )
 
-    # Есть хоть один несопоставленный спикер → подсказываем следствие (nudge).
-    hint = _UNMAPPED_HINT if any(r.display_name is None for r in rows) else None
+    # Есть хоть один несопоставленный спикер → подсказка (приглашение + nudge в
+    # главном виде, только nudge — в под-виде).
+    has_unmapped = any(r.display_name is None for r in rows)
+    hint = _compose_hint(has_unmapped, current_editing_speaker)
 
     return MappingCard(header=header, rows=tuple(rows), hint=hint)
 
