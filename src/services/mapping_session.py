@@ -36,6 +36,11 @@ class MappingSession:
     # Сообщение-карточка сопоставления: ручной ввод имени перерисовывает её
     # на месте (сообщение пользователя с именем — отдельное сообщение чата).
     confirmation_message: Optional[Any] = None
+    # Спикер, чей под-вид сейчас открыт и ждёт имя сообщением (None — под-вида
+    # нет, ловец имени молчит). Признак «кто ждёт имя» живёт прямо в сессии
+    # (#99): ставится при входе в под-вид (sm_change), снимается на «◀️ Назад»,
+    # выборе участника, применении имени, подтверждении и пропуске.
+    editing_speaker: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -92,38 +97,3 @@ class MappingSessionStore:
 
 # Глобальный экземпляр
 mapping_sessions = MappingSessionStore(ttl_seconds=3600)
-
-
-class NameWaitRegistry:
-    """Кто из пользователей ждёт ручного ввода имени спикера — и для какого спикера.
-
-    Признак ожидания живёт ОТДЕЛЬНО от сессии сопоставления и её TTL, повторяя
-    прежнюю независимость FSM-состояния от сессии: истёкшая по TTL сессия так же
-    получает _SESSION_GONE_TEXT из хендлера имени, а не роняет имя в общий
-    обработчик (#98 — поведенчески нейтральный слайс, характеризационные тесты
-    остаются зелёными без правок). Временная конструкция: в #99 признак сольётся
-    с сессией по спеке фильтра прямого ввода — тогда этот реестр уйдёт.
-    """
-
-    def __init__(self) -> None:
-        self._waiting: Dict[int, str] = {}
-
-    def mark(self, user_id: int, speaker_id: str) -> None:
-        """Отметить: пользователь ждёт имя для указанного спикера."""
-        self._waiting[user_id] = speaker_id
-
-    def speaker_for(self, user_id: int) -> Optional[str]:
-        """Спикер, которому пользователь сейчас вводит имя (None — не ждёт)."""
-        return self._waiting.get(user_id)
-
-    def is_waiting(self, user_id: int) -> bool:
-        """Ждёт ли пользователь ручной ввод имени прямо сейчас."""
-        return user_id in self._waiting
-
-    def clear(self, user_id: int) -> None:
-        """Снять признак ожидания (отмена, применение имени, истёкшая сессия, финал)."""
-        self._waiting.pop(user_id, None)
-
-
-# Глобальный реестр ожидания имени спикера
-name_wait_registry = NameWaitRegistry()

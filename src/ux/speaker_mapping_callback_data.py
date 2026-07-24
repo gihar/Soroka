@@ -29,13 +29,6 @@ class SmSelect(CallbackData, prefix="sm_select"):
     user_id: int
 
 
-class SmCustom(CallbackData, prefix="sm_custom"):
-    """Ручной ввод имени спикера: ``sm_custom:{speaker_id}:{user_id}``."""
-
-    speaker_id: str
-    user_id: int
-
-
 class SmCancel(CallbackData, prefix="sm_cancel"):
     """Возврат к основному виду карточки: ``sm_cancel:{user_id}``."""
 

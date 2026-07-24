@@ -4,7 +4,6 @@
 
 import asyncio
 import os
-import re
 from typing import Optional
 
 from aiogram import F, Router
@@ -19,6 +18,7 @@ from src.handlers.record_state import register_new_record
 from src.services import FileService, ProcessingService, TemplateService
 from src.services.url_service import URLService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.utils.url_detection import contains_url, extract_url
 from src.ux.quick_actions import QuickActionsUI
 
 
@@ -551,16 +551,17 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
 
 
 def _contains_url(text: str) -> bool:
-    """Проверить, содержит ли текст URL"""
-    url_pattern = r'https?://[^\s]+'
-    return bool(re.search(url_pattern, text))
+    """Проверить, содержит ли текст URL.
+
+    Делегирует общему детектору: фильтр ловца имени в карточке сопоставления
+    сходится на том же определении «в сообщении есть ссылка».
+    """
+    return contains_url(text)
 
 
 def _extract_url(text: str) -> str:
-    """Извлечь URL из текста"""
-    url_pattern = r'https?://[^\s]+'
-    match = re.search(url_pattern, text)
-    return match.group(0) if match else ""
+    """Извлечь URL из текста (общий детектор)."""
+    return extract_url(text)
 
 
 async def _process_url(message: Message, url: str, state: FSMContext, template_service: TemplateService):

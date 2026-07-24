@@ -24,7 +24,6 @@ from src.performance.metrics import ProcessingMetrics  # noqa: E402
 from src.services.mapping_session import (  # noqa: E402
     MappingSession,
     mapping_sessions,
-    name_wait_registry,
 )
 from src.services.participants_service import participants_service  # noqa: E402
 from src.ux.speaker_mapping_ui import create_mapping_keyboard  # noqa: E402
@@ -146,6 +145,26 @@ def test_add_manual_participant_rejects_command_like_name():
     assert display_name is None
 
 
+def test_add_manual_participant_rejects_name_over_50_chars():
+    """Имя длиннее 50 символов после trim отклоняется: верхняя граница планки
+    отсекает вставленный абзац, ошибочно принятый за имя (#99)."""
+    new_list, display_name = participants_service.add_manual_participant(
+        [], "Я" * 51
+    )
+
+    assert new_list is None
+    assert display_name is None
+
+
+def test_add_manual_participant_accepts_name_at_50_chars():
+    """Ровно 50 символов — на границе, принимается."""
+    name = "Я" * 50
+    new_list, display_name = participants_service.add_manual_participant([], name)
+
+    assert new_list is not None
+    assert new_list[-1]["name"] == name
+
+
 def test_add_manual_participant_dedups_existing_participant():
     """Совпадение с уже имеющимся участником переиспользуется без дубля."""
     original = [{"name": "Тимченко Алексей Александрович", "role": "разработчик"}]
@@ -176,32 +195,7 @@ def test_add_manual_participant_stores_raw_full_name_displays_short():
 
 
 # ---------------------------------------------------------------------------
-# B. Клавиатура карточки — кнопка «Ввести имя вручную» в под-виде выбора
-# ---------------------------------------------------------------------------
-
-
-def test_subview_offers_manual_name_button_after_leave_unnamed():
-    """В под-виде выбора участника есть кнопка ручного ввода имени спикера,
-    сразу после «Оставить без имени», с callback sm_custom."""
-    keyboard = create_mapping_keyboard(
-        speaker_mapping={},
-        diarization=_diarization_two_speakers(),
-        participants=[{"name": "Иван Петров"}],
-        user_id=42,
-        current_editing_speaker="SPEAKER_1",
-    )
-    rows = keyboard.inline_keyboard
-
-    leave_button = rows[0][0]
-    manual_button = rows[1][0]
-
-    assert leave_button.callback_data == "sm_select:SPEAKER_1:none:42"
-    assert "вручную" in manual_button.text
-    assert manual_button.callback_data == "sm_custom:SPEAKER_1:42"
-
-
-# ---------------------------------------------------------------------------
-# C. Callback sm_custom — переход в ожидание имени спикера
+# B. Клавиатура под-вида — без промежуточной кнопки «Ввести имя вручную» (#99)
 # ---------------------------------------------------------------------------
 
 
@@ -209,43 +203,23 @@ def test_subview_offers_manual_name_button_after_leave_unnamed():
 def _clean_sessions():
     yield
     mapping_sessions.discard(42)
-    name_wait_registry.clear(42)
 
 
-@pytest.mark.asyncio
-async def test_sm_custom_marks_waiting_and_prompts(monkeypatch):
-    """sm_custom отмечает в реестре ожидание имени для спикера и рисует подсказку
-    «отправьте имя» с кнопкой отмены."""
-    import src.utils.telegram_safe as ts
-    from src.handlers.callbacks.speaker_mapping_callbacks import (
-        request_custom_speaker_name,
+def test_subview_leaves_unnamed_button_first_without_manual_entry():
+    """Первой кнопкой под-вида — «Оставить без имени»; промежуточной кнопки
+    «Ввести имя вручную» (sm_custom) больше нет: имя вводится прямо сообщением
+    (ADR-0006). Прежде она стояла сразу после «Оставить без имени»."""
+    keyboard = create_mapping_keyboard(
+        speaker_mapping={},
+        diarization=_diarization_two_speakers(),
+        participants=[{"name": "Иван Петров"}],
+        user_id=42,
+        current_editing_speaker="SPEAKER_1",
     )
-    from src.ux.speaker_mapping_callback_data import SmCustom
+    callbacks = [b.callback_data for row in keyboard.inline_keyboard for b in row]
 
-    edited = []
-
-    async def fake_edit(message, text, **kwargs):
-        edited.append((text, kwargs.get("reply_markup")))
-        return True
-
-    # Под-вид ожидания имени доставляется отправителем карточек (ADR-0005),
-    # поэтому шов — telegram_safe.safe_edit_text.
-    monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
-
-    mapping_sessions.save(42, _make_session(participants=[{"name": "Иван Петров"}]))
-
-    state = _FakeState()
-    message = _FakeMessage(user_id=42)
-    callback = _FakeCallback("sm_custom:SPEAKER_1:42", user_id=42, message=message)
-
-    await request_custom_speaker_name(callback, SmCustom.unpack(callback.data), state)
-
-    assert name_wait_registry.speaker_for(42) == "SPEAKER_1"
-
-    prompt_text, reply_markup = edited[-1]
-    assert "SPEAKER_1" in prompt_text
-    cancel_button = reply_markup.inline_keyboard[0][0]
-    assert cancel_button.callback_data == "sm_cancel:42"
+    assert keyboard.inline_keyboard[0][0].callback_data == "sm_select:SPEAKER_1:none:42"
+    assert not any(c.startswith("sm_custom") for c in callbacks)
 
 
 # ---------------------------------------------------------------------------
@@ -344,9 +318,11 @@ def test_subview_keyboard_survives_empty_participants():
         current_editing_speaker="SPEAKER_1",
     )
     callbacks = [b.callback_data for row in keyboard.inline_keyboard for b in row]
-    # Есть «Оставить без имени» и «Ввести имя вручную», без кнопок участников
+    # Есть «Оставить без имени» и «◀️ Назад», без кнопок участников и без
+    # промежуточной «Ввести имя вручную» (#99).
     assert "sm_select:SPEAKER_1:none:42" in callbacks
-    assert "sm_custom:SPEAKER_1:42" in callbacks
+    assert "sm_cancel:42" in callbacks
+    assert not any(c.startswith("sm_custom") for c in callbacks)
 
 
 # ---------------------------------------------------------------------------

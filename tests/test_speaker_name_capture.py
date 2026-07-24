@@ -1,11 +1,17 @@
-"""Характеризация ловли имени спикера в Карточке сопоставления (issue #98).
+"""Характеризация ловли имени спикера в Карточке сопоставления (issue #98 → #99).
 
-Тесты описывают наблюдаемое поведение ручного ввода имени через публичный
-интерфейс — регистрируемые хендлеры карточки и роутер сопоставления, — не
-завязываясь на механизм признака ожидания (FSM-состояние или поле сессии).
-Вход в ожидание идёт РОВНО через ``sm_custom``, доставка имени — через фильтры
-зарегистрированного message-хендлера. Так тесты остаются зелёными и до, и после
-переезда признака ожидания из FSM в сессию сопоставления.
+Тесты описывают наблюдаемое поведение через публичный интерфейс — роутер
+сопоставления в окружении соседних роутеров (как в ``bot.py``), — не завязываясь
+на механизм признака ожидания. В #98 признак жил в отдельном реестре и вход был
+через ``sm_custom``; в #99 признак — поле сессии ``editing_speaker``, а вход в
+под-вид — тап по спикеру (``sm_change``). Здесь зафиксированы РОУТИНГ (что ловится
+роутером сопоставления, а что уходит мимо) и два ОСОЗНАННЫХ изменения поведения
+#99, отмеченные комментариями у изменённых ожиданий:
+
+- не-текст (файл/голос/фото) больше НЕ получает мягкий отказ «пришлите текстом»,
+  а проваливается в обычный поток загрузки записи (ловец привязан только к тексту);
+- истёкшая по TTL сессия при открытом под-виде больше НЕ отвечает «Состояние
+  истекло», а проваливается в общий обработчик (под-вида нет без живой сессии).
 """
 
 import os
@@ -27,17 +33,12 @@ from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
 
 import src.handlers.callbacks.speaker_mapping_callbacks as cb  # noqa: E402
 import src.utils.telegram_safe as ts  # noqa: E402
-from src.handlers.callbacks.speaker_mapping_callbacks import (  # noqa: E402
-    request_custom_speaker_name,
-    speaker_mapping_cancel_callback,
-)
 from src.models.diarization import Diarization, Segment  # noqa: E402
 from src.models.processing import ProcessingRequest, TranscriptionResult  # noqa: E402
 from src.performance.metrics import ProcessingMetrics  # noqa: E402
 from src.services.mapping_session import MappingSession, mapping_sessions  # noqa: E402
-from src.ux.speaker_mapping_callback_data import SmCancel, SmCustom  # noqa: E402
+from src.ux.speaker_mapping_callback_data import SmCancel, SmChange  # noqa: E402
 
-_SESSION_GONE_TEXT = cb._SESSION_GONE_TEXT
 _BOT_ID = 123456
 
 
@@ -106,10 +107,6 @@ class _FakeMessage:
 async def _deliver_message(routers, message, state):
     """Мини-диспетчер: гоняет сообщение по роутерам В ПОРЯДКЕ включения, отдаёт
     первому подошедшему message-хендлеру (как aiogram) и возвращает роутер-победитель.
-
-    Контекст фильтров повторяет то, что кладёт FSM-middleware: ``raw_state`` для
-    StateFilter и ``state`` для тела хендлера. Кастомный фильтр сессии читает
-    ``message`` — тоже получает его.
     """
     raw_state = await state.get_state()
     ctx = {
@@ -139,15 +136,23 @@ async def _noop(**kwargs):
     return None
 
 
-async def _enter_naming(user_id, speaker_id="SPEAKER_1"):
-    """Войти в ожидание имени РОВНО как пользователь: тап «Ввести имя вручную»."""
-    state = _make_fsm(user_id)
-    message = _FakeMessage(user_id)
+def _registered_callback(router, cbdata_cls):
+    for handler in router.callback_query.handlers:
+        for flt in handler.filters:
+            if getattr(flt.callback, "callback_data", None) is cbdata_cls:
+                return handler.callback
+    raise AssertionError(f"нет хендлера для {cbdata_cls.__name__}")
+
+
+async def _open_subview(router, user_id, speaker_id="SPEAKER_1"):
+    """Войти в под-вид спикера РОВНО как пользователь: тап по кнопке спикера."""
+    handler = _registered_callback(router, SmChange)
     callback = _FakeCallback(
-        f"sm_custom:{speaker_id}:{user_id}", user_id=user_id, message=message
+        f"sm_change:{speaker_id}:{user_id}", user_id=user_id,
+        message=_FakeMessage(user_id),
     )
-    await request_custom_speaker_name(callback, SmCustom.unpack(callback.data), state)
-    return state
+    await handler(callback, SmChange(speaker_id=speaker_id, user_id=user_id),
+                  _make_fsm(user_id))
 
 
 @pytest.fixture(autouse=True)
@@ -160,8 +165,13 @@ def _patch_card_render(monkeypatch):
         rendered.append(text)
         return True
 
+    async def fake_edit_card(message, content, keyboard):
+        rendered.append(content.to_plain())
+        return True
+
     monkeypatch.setattr(ts, "safe_edit_text", fake_safe_edit)
     monkeypatch.setattr(cb, "safe_edit_text", fake_safe_edit)
+    monkeypatch.setattr(cb, "edit_card", fake_edit_card)
     return rendered
 
 
@@ -173,125 +183,80 @@ def _clean_sessions():
 
 
 # ---------------------------------------------------------------------------
-# Валидное имя — применяется к спикеру, добавляет участника, перерисовывает карту
+# Позитивный якорь: имя в открытом под-виде ловит роутер сопоставления
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_valid_name_applies_to_speaker_and_adds_participant(_patch_card_render):
+async def test_valid_name_applies_to_speaker(_patch_card_render):
     session = _make_session(participants=None, speaker_mapping={}, user_id=42)
     session.confirmation_message = _FakeMessage(42)
     mapping_sessions.save(42, session)
+    router = _mapping_router()
+    await _open_subview(router, 42, "SPEAKER_1")
 
-    state = await _enter_naming(42)
     message = _FakeMessage(42, text="Мария Сидорова")
+    winner = await _deliver_message([router], message, _make_fsm(42))
 
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None  # имя поймал роутер сопоставления
+    assert winner is router  # имя поймал роутер сопоставления
     assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"
-    assert any(
-        p["name"] == "Мария Сидорова" for p in session.request.participants_list
-    )
     assert any("Мария" in text for text in _patch_card_render)
 
 
-@pytest.mark.asyncio
-async def test_valid_name_dedups_with_existing_participant():
-    """Совпадение с уже имеющимся участником переиспользует его без дубля."""
-    original = [{"name": "Тимченко Алексей Александрович", "role": "разработчик"}]
-    session = _make_session(participants=original, speaker_mapping={}, user_id=43)
-    session.confirmation_message = _FakeMessage(43)
-    mapping_sessions.save(43, session)
-
-    state = await _enter_naming(43)
-    message = _FakeMessage(43, text="Алексей Тимченко")
-
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None
-    assert session.speaker_mapping["SPEAKER_1"] == "Алексей Тимченко"
-    assert len(session.request.participants_list) == 1  # без дубля
-
-
 # ---------------------------------------------------------------------------
-# Невалидное имя — мягкий отказ, ожидание держится
+# Осознанное изменение #99: не-текст больше не получает мягкий отказ, а уходит мимо
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_short_name_reasks_and_keeps_waiting():
-    session = _make_session(
-        participants=[{"name": "Иван Петров"}], speaker_mapping={}, user_id=44
-    )
-    session.confirmation_message = _FakeMessage(44)
-    mapping_sessions.save(44, session)
-
-    state = await _enter_naming(44)
-    message = _FakeMessage(44, text="И")
-
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None
-    assert "SPEAKER_1" not in session.speaker_mapping
-    assert session.request.participants_list == [{"name": "Иван Петров"}]
-    hint = message.replies[-1]
-    assert "короче" in hint
-    assert "текстом" not in hint  # это про длину, не про тип контента
-
-    # Ожидание держится: следующее валидное имя всё ещё ловится и применяется.
-    followup = _FakeMessage(44, text="Мария Сидорова")
-    winner2 = await _deliver_message([_mapping_router()], followup, state)
-    assert winner2 is not None
-    assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"
-
-
-@pytest.mark.asyncio
-async def test_slash_name_reasks_within_naming_subview():
-    """Имя с «/» (не зарегистрированная команда) в под-виде ввода — мягкий отказ
-    тем же хендлером имени; сопоставление и список участников не тронуты."""
-    session = _make_session(
-        participants=[{"name": "Иван Петров"}], speaker_mapping={}, user_id=45
-    )
-    session.confirmation_message = _FakeMessage(45)
-    mapping_sessions.save(45, session)
-
-    state = await _enter_naming(45)
-    message = _FakeMessage(45, text="/skip")
-
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None
-    assert "SPEAKER_1" not in session.speaker_mapping
-    assert session.request.participants_list == [{"name": "Иван Петров"}]
-    assert "/" in message.replies[-1]  # переспрос называет запрет на «/»
-
-
-@pytest.mark.asyncio
-async def test_non_text_message_soft_refuses_and_keeps_waiting():
-    """Не-текст (голосовое/документ/фото): мягкий отказ «пришлите текстом»,
-    запись НЕ теряется мимо и НЕ трактуется как короткое имя."""
+async def test_non_text_message_falls_through_no_soft_refusal():
+    """В #98 не-текст в под-виде получал мягкий отказ «пришлите текстом» и
+    удерживал ожидание. В #99 ловец привязан ТОЛЬКО к тексту: не-текст уходит
+    мимо в обычный поток загрузки записи — отказа больше нет, под-вид цел."""
     session = _make_session(
         participants=[{"name": "Иван Петров"}], speaker_mapping={}, user_id=46
     )
     session.confirmation_message = _FakeMessage(46)
     mapping_sessions.save(46, session)
+    router = _mapping_router()
+    await _open_subview(router, 46, "SPEAKER_1")
 
-    state = await _enter_naming(46)
     message = _FakeMessage(46, text=None)  # не-текстовый контент
+    winner = await _deliver_message([router], message, _make_fsm(46))
 
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None  # хендлер имени поймал не-текст, не пропустил мимо
-    hint = message.replies[-1]
-    assert "текстом" in hint
-    assert "Отмена" in hint
+    assert winner is None  # мимо роутера сопоставления
+    assert message.replies == []  # мягкого отказа больше нет
     assert "SPEAKER_1" not in session.speaker_mapping
-    assert session.request.participants_list == [{"name": "Иван Петров"}]
+    assert session.editing_speaker == "SPEAKER_1"  # под-вид продолжает ждать имя
 
 
 # ---------------------------------------------------------------------------
-# Отмена из под-вида — ожидание снимается, следующее сообщение не ловится
+# Осознанное изменение #99: истёкшая сессия больше не отвечает «Состояние истекло»
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_expired_session_falls_through_no_gone_text():
+    """В #98 истёкшая по TTL сессия при открытом под-виде получала
+    _SESSION_GONE_TEXT из хендлера имени (признак жил отдельно от сессии). В #99
+    признак — поле сессии: нет живой сессии → нет под-вида → текст просто
+    проваливается мимо в общий обработчик. Прежнего ответа «истекло» тут нет."""
+    session = _make_session(participants=None, speaker_mapping={}, user_id=48)
+    session.confirmation_message = _FakeMessage(48)
+    mapping_sessions.save(48, session)
+    router = _mapping_router()
+    await _open_subview(router, 48, "SPEAKER_1")
+    mapping_sessions.discard(48)  # имитируем истечение TTL сессии
+
+    message = _FakeMessage(48, text="Мария Сидорова")
+    winner = await _deliver_message([router], message, _make_fsm(48))
+
+    assert winner is None  # мимо роутера сопоставления
+    assert message.replies == []  # «Состояние истекло» больше не шлём
+
+
+# ---------------------------------------------------------------------------
+# Закрытие под-вида «◀️ Назад» снимает ловлю следующего сообщения
 # ---------------------------------------------------------------------------
 
 
@@ -302,45 +267,23 @@ async def test_cancel_stops_capturing_the_next_message():
     )
     session.confirmation_message = _FakeMessage(47)
     mapping_sessions.save(47, session)
+    router = _mapping_router()
+    await _open_subview(router, 47, "SPEAKER_1")
 
-    state = await _enter_naming(47)
-
+    cancel = _registered_callback(router, SmCancel)
     cancel_cb = _FakeCallback("sm_cancel:47", user_id=47, message=_FakeMessage(47))
-    await speaker_mapping_cancel_callback(
-        cancel_cb, SmCancel.unpack(cancel_cb.data), state
-    )
+    await cancel(cancel_cb, SmCancel.unpack(cancel_cb.data), _make_fsm(47))
 
     message = _FakeMessage(47, text="Мария Сидорова")
-    winner = await _deliver_message([_mapping_router()], message, state)
+    winner = await _deliver_message([router], message, _make_fsm(47))
 
-    assert winner is None  # после отмены имя больше не ловится хендлером карточки
+    assert winner is None  # после «Назад» имя больше не ловится роутером карточки
     assert "SPEAKER_1" not in session.speaker_mapping
     assert session.request.participants_list == [{"name": "Иван Петров"}]
 
 
 # ---------------------------------------------------------------------------
-# Истёкшая сессия — сообщение об истёкшем состоянии
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_expired_session_reports_gone():
-    session = _make_session(participants=None, speaker_mapping={}, user_id=48)
-    session.confirmation_message = _FakeMessage(48)
-    mapping_sessions.save(48, session)
-
-    state = await _enter_naming(48)
-    mapping_sessions.discard(48)  # имитируем истечение TTL сессии
-
-    message = _FakeMessage(48, text="Мария Сидорова")
-    winner = await _deliver_message([_mapping_router()], message, state)
-
-    assert winner is not None
-    assert message.replies[-1] == _SESSION_GONE_TEXT
-
-
-# ---------------------------------------------------------------------------
-# Несущая стена: команды и кнопки reply-меню в ожидании имени идут своим роутерам
+# Несущая стена: команды и кнопки reply-меню в под-виде идут своим роутерам
 # ---------------------------------------------------------------------------
 
 
@@ -376,33 +319,32 @@ def _wall_routers(mapping_router):
 
 
 @pytest.mark.asyncio
-async def test_command_and_menu_bypass_name_capture_during_waiting():
+async def test_command_and_menu_bypass_name_capture_in_subview():
     session = _make_session(participants=None, speaker_mapping={}, user_id=49)
     session.confirmation_message = _FakeMessage(49)
     mapping_sessions.save(49, session)
-
-    state = await _enter_naming(49)
     mapping_router = _mapping_router()
+    await _open_subview(mapping_router, 49, "SPEAKER_1")
     routers, caught = _wall_routers(mapping_router)
 
-    # Зарегистрированная команда во время ожидания → роутер команд, не ловля имени.
-    winner = await _deliver_message(routers, _FakeMessage(49, text="/start"), state)
+    # Зарегистрированная команда в под-виде → роутер команд, не ловля имени.
+    winner = await _deliver_message(routers, _FakeMessage(49, text="/start"), _make_fsm(49))
     assert winner is routers[0]
     assert caught["winner"] == "command"
     assert "SPEAKER_1" not in session.speaker_mapping
 
-    # Кнопка reply-меню во время ожидания → роутер quick-actions.
+    # Кнопка reply-меню в под-виде → роутер quick-actions.
     caught["winner"] = None
     winner = await _deliver_message(
-        routers, _FakeMessage(49, text="⚙️ Настройки"), state
+        routers, _FakeMessage(49, text="⚙️ Настройки"), _make_fsm(49)
     )
     assert winner is routers[1]
     assert caught["winner"] == "menu"
     assert "SPEAKER_1" not in session.speaker_mapping
 
-    # Обычный текст-имя во время ожидания → роутер сопоставления, имя применяется.
+    # Обычный текст-имя в под-виде → роутер сопоставления, имя применяется.
     winner = await _deliver_message(
-        routers, _FakeMessage(49, text="Мария Сидорова"), state
+        routers, _FakeMessage(49, text="Мария Сидорова"), _make_fsm(49)
     )
     assert winner is mapping_router
     assert session.speaker_mapping["SPEAKER_1"] == "Мария Сидорова"

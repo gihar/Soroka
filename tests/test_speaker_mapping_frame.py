@@ -16,10 +16,7 @@ _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))  # noqa: E402
 
-from src.services.mapping_session import (  # noqa: E402
-    mapping_sessions,
-    name_wait_registry,
-)
+from src.services.mapping_session import mapping_sessions  # noqa: E402
 from src.ux.speaker_mapping_callback_data import SmChange  # noqa: E402
 
 USER = 7777
@@ -53,7 +50,6 @@ class _FakeCallback:
 def _clean_sessions():
     yield
     mapping_sessions.discard(USER)
-    name_wait_registry.clear(USER)
 
 
 def _cbdata():
@@ -184,26 +180,3 @@ async def test_frame_edit_error_on_body_exception(monkeypatch):
     await handler(_FakeCallback(from_user_id=USER), _cbdata(), _FakeState())
 
     assert edited and "ошибка при продолжении обработки" in edited[-1]
-
-
-@pytest.mark.asyncio
-async def test_frame_clear_name_wait_clears_even_when_session_gone(monkeypatch):
-    """clear_name_wait=True снимает признак ожидания имени до разрешения сессии —
-    даже если она истекла: отмена из под-вида с мёртвой сессией не должна оставить
-    пользователя в ловле имени."""
-    import src.handlers.callbacks.speaker_mapping_callbacks as cb
-
-    async def fake_edit(message, text, **kwargs):
-        return True
-
-    monkeypatch.setattr(cb, "safe_edit_text", fake_edit)
-    mapping_sessions.discard(USER)
-    name_wait_registry.mark(USER, "SPEAKER_1")
-
-    @cb.card_handler(session="peek", clear_name_wait=True)
-    async def handler(callback, callback_data, state, user_id, session):
-        pass
-
-    await handler(_FakeCallback(from_user_id=USER), _cbdata(), _FakeState())
-
-    assert not name_wait_registry.is_waiting(USER)

@@ -15,7 +15,6 @@ from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
     SmConfirm,
-    SmCustom,
     SmSelect,
     SmSkip,
     SmSkipConfirm,
@@ -94,13 +93,41 @@ def extract_speaker_quotes(
     return result
 
 
+def _card_header(
+    participants: List[Dict[str, str]],
+    current_editing_speaker: Optional[str],
+) -> str:
+    """Заголовок карточки под текущий вид.
+
+    Под-вид спикера (``current_editing_speaker`` задан) называет редактируемого
+    спикера и приглашает печатать (ADR-0006): без списка участников — только
+    «отправьте сообщением», со списком — «…или выберите ниже». Главный вид —
+    «проверьте сопоставление» при наличии списка, «назовите спикеров (по
+    желанию)» без него (ADR-0002).
+    """
+    if current_editing_speaker:
+        if participants:
+            return (
+                f"✏️ Имя для {current_editing_speaker} — "
+                "отправьте сообщением или выберите ниже"
+            )
+        return f"✏️ Имя для {current_editing_speaker} — отправьте сообщением"
+
+    return (
+        "Проверьте сопоставление спикеров"
+        if participants
+        else "Назовите спикеров (по желанию)"
+    )
+
+
 def build_mapping_card(
     speaker_mapping: Dict[str, str],
     diarization: Optional[Diarization],
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
-    speakers_with_audio: Optional[Set[str]] = None
+    speakers_with_audio: Optional[Set[str]] = None,
+    current_editing_speaker: Optional[str] = None,
 ) -> MappingCard:
     """
     Собрать семантическое содержимое Карточки сопоставления (ADR-0005).
@@ -117,6 +144,8 @@ def build_mapping_card(
         speakers_text: Словарь {speaker_id: полный_текст} с предобработанным текстом
         speakers_with_audio: Спикеры с доставленным фрагментом записи — их цитата
             уже в подписи фрагмента, в карточке не дублируется
+        current_editing_speaker: спикер открытого под-вида — заголовок называет
+            его и приглашает отправить имя (None — главный вид)
 
     Returns:
         MappingCard с заголовком и строками спикеров в порядке их появления
@@ -124,13 +153,7 @@ def build_mapping_card(
     # Импортируем сервис для преобразования имен
     from src.services.participants_service import participants_service
 
-    # Без списка участников карточка — общий экран именования спикеров (ADR-0002):
-    # копия смещается с «проверьте/подтвердите» на «назовите (по желанию)».
-    header = (
-        "Проверьте сопоставление спикеров"
-        if participants
-        else "Назовите спикеров (по желанию)"
-    )
+    header = _card_header(participants, current_editing_speaker)
 
     rows: List[SpeakerRow] = []
     # Спикеры — в порядке их появления в диаризации
@@ -187,22 +210,15 @@ def create_mapping_keyboard(
         # Создаем кнопки для выбора участника
         used_participants = set(speaker_mapping.values())
         
-        # Кнопка "Оставить без имени"
+        # Кнопка "Оставить без имени". Имя человека, которого нет в списке,
+        # вводится прямо сообщением — под-вид уже ждёт текст (ADR-0006),
+        # промежуточной кнопки «Ввести имя вручную» больше нет.
         keyboard_buttons.append([InlineKeyboardButton(
             text="❌ Оставить без имени",
             callback_data=SmSelect(
                 speaker_id=current_editing_speaker,
                 participant_idx="none",
                 user_id=user_id,
-            ).pack()
-        )])
-
-        # Кнопка "Ввести имя вручную" — назвать спикера человеком, которого нет
-        # в списке участников (ADR-0002). Имя ловит FSM-состояние.
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="✏️ Ввести имя вручную",
-            callback_data=SmCustom(
-                speaker_id=current_editing_speaker, user_id=user_id
             ).pack()
         )])
 
@@ -273,18 +289,6 @@ def create_mapping_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
 
-def create_name_prompt_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура под-вида ожидания имени: одна кнопка «Отмена».
-
-    Callback ``sm_cancel:{user_id}`` уже обрабатывается — возвращает к главному
-    виду карточки; хендлер отмены также очищает FSM-состояние ожидания имени.
-    """
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="◀️ Отмена",
-        callback_data=SmCancel(user_id=user_id).pack()
-    )]])
-
-
 def format_skip_confirm_message() -> PlainCard:
     """Содержимое под-вида подтверждения пустого пропуска (ADR-0005): простой экран.
 
@@ -313,15 +317,6 @@ def create_skip_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
             callback_data=SmCancel(user_id=user_id).pack(),
         )],
     ])
-
-
-def format_name_prompt_message(speaker_id: str) -> PlainCard:
-    """Содержимое под-вида ожидания имени спикера (ADR-0005): простой экран.
-
-    Возвращает PlainCard — тот же отправитель карточек доставит его как обычный
-    текст (HTML лишь экранирует, разметки в подсказке нет).
-    """
-    return PlainCard(text=f"✏️ Отправьте имя для {speaker_id} сообщением")
 
 
 async def show_mapping_confirmation(
@@ -390,6 +385,7 @@ async def update_mapping_message(
         unmapped_speakers,
         speakers_text=speakers_text,
         speakers_with_audio=speakers_with_audio,
+        current_editing_speaker=current_editing_speaker,
     )
     keyboard = create_mapping_keyboard(
         speaker_mapping,

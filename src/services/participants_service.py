@@ -11,6 +11,12 @@ from loguru import logger
 
 from src.models.meeting_info import MeetingInfo
 
+# Планка имени, введённого вручную в карточке сопоставления: 2–50 символов после
+# трима. Нижняя граница отсекает случайные «И», верхняя — вставленный абзац или
+# ссылку, ошибочно принятые за имя.
+MANUAL_NAME_MIN_LEN = 2
+MANUAL_NAME_MAX_LEN = 50
+
 
 class ParticipantsService:
     """Сервис для парсинга и валидации списка участников"""
@@ -531,11 +537,13 @@ class ParticipantsService:
             Кортеж ``(new_list, display_name)``:
             - при валидном новом имени — новый список (иммутабельно) с добавленным
               участником и его отображаемое имя в формате «Имя Фамилия»;
-            - ``(None, None)`` — если имя невалидно (короче 2 символов после trim
-              или начинается с «/»).
+            - ``(None, None)`` — если имя невалидно (вне планки 2–50 символов
+              после trim или начинается с «/»).
         """
         trimmed = (raw_name or "").strip()
-        if len(trimmed) < 2 or trimmed.startswith("/"):
+        if not (MANUAL_NAME_MIN_LEN <= len(trimmed) <= MANUAL_NAME_MAX_LEN):
+            return None, None
+        if trimmed.startswith("/"):
             return None, None
 
         current = participants or []

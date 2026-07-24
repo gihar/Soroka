@@ -4,8 +4,14 @@
 Работают с типизированной сессией сопоставления: peek для чтения (смена,
 выбор, отмена), атомарный take для подтверждения/пропуска — повторный тап
 получает None и не запускает второе возобновление.
+
+Прямой ввод имени (ADR-0006): тап на спикера (``sm_change``) открывает под-вид,
+готовый принять имя сообщением. Признак «какой спикер ждёт имя» — поле сессии
+``editing_speaker``. Ловец имени привязан только к тексту без ссылки: файл,
+голосовое, фото и ссылка проваливаются мимо, в обычную обработку записи.
 """
 
+import re
 from typing import Callable, Optional
 
 from aiogram import Router
@@ -14,27 +20,21 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
-from src.services.mapping_session import (
-    MappingSession,
-    mapping_sessions,
-    name_wait_registry,
-)
+from src.services.mapping_session import MappingSession, mapping_sessions
 from src.services.participants_service import participants_service
 from src.utils.telegram_safe import safe_edit_text
+from src.utils.url_detection import contains_url
 from src.ux.card_sender import edit_card
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
     SmConfirm,
-    SmCustom,
     SmSelect,
     SmSkip,
     SmSkipConfirm,
 )
 from src.ux.speaker_mapping_ui import (
-    create_name_prompt_keyboard,
     create_skip_confirm_keyboard,
-    format_name_prompt_message,
     format_skip_confirm_message,
     update_mapping_message,
 )
@@ -56,6 +56,9 @@ _SKIP_CONTINUED_TEXT = (
     "⏭️ **Сопоставление пропущено**\n\n"
     "⏳ Продолжаю генерацию протокола без замены имен спикеров..."
 )
+
+# Разделители нескольких имён в одном сообщении: запятая или перенос строки.
+_NAME_SEPARATORS = re.compile(r"[,\n]")
 
 
 def _skip_needs_confirmation(session: MappingSession) -> bool:
@@ -80,14 +83,14 @@ async def _finish_skip(
     """Финал пустого пропуска: правка сообщения, очистка FSM, генерация без имён.
 
     Общий хвост прямого пропуска без трения и подтверждённого пропуска
-    (``sm_skipok``). Сессия уже изъята вызывающим (take) — здесь только продолжаем
-    обработку с пустым сопоставлением.
+    (``sm_skipok``). Сессия уже изъята вызывающим (take) — под-вид с ней закрыт,
+    ``editing_speaker`` неактуален; здесь только продолжаем обработку с пустым
+    сопоставлением.
     """
     await safe_edit_text(
         callback.message, _SKIP_CONTINUED_TEXT, parse_mode="Markdown"
     )
     await state.clear()
-    name_wait_registry.clear(session.request.user_id)
     await processing_service.continue_processing_after_mapping_confirmation(
         session=session,
         confirmed_mapping={},
@@ -130,7 +133,6 @@ def card_handler(
     session: Optional[str] = None,
     answer_text: Optional[str] = None,
     on_error: str = "answer",
-    clear_name_wait: bool = False,
 ) -> Callable:
     """Каркас callback-хендлера Карточки сопоставления.
 
@@ -144,9 +146,6 @@ def card_handler(
         answer_text: текст ответа на callback (тост/снятие «загрузки»).
         on_error: ``"answer"`` — тост «Произошла ошибка»; ``"edit"`` — правка
             сообщения текстом об ошибке продолжения обработки.
-        clear_name_wait: снять признак ожидания имени до разрешения сессии
-            (отмена из под-вида ручного ввода не должна оставлять ловлю имени —
-            следующее сообщение ушло бы в хендлер имени вместо обычной обработки).
     """
 
     def decorator(core: Callable) -> Callable:
@@ -158,9 +157,6 @@ def card_handler(
                     return
 
                 await _safe_callback_answer(callback, answer_text)
-
-                if clear_name_wait:
-                    name_wait_registry.clear(user_id)
 
                 current_session = None
                 if session == "peek":
@@ -188,8 +184,12 @@ def card_handler(
 
 
 async def _show_main_view(callback: CallbackQuery, session: MappingSession,
-                          user_id: int, editing_speaker: Optional[str] = None) -> None:
-    """Перерисовать карточку сопоставления из типизированной сессии."""
+                          user_id: int) -> None:
+    """Перерисовать Карточку сопоставления из типизированной сессии.
+
+    Под-вид спикера или главный вид выбирается признаком ``editing_speaker``
+    самой сессии: задан — под-вид ждёт имя, None — главный вид.
+    """
     diarization = session.transcription_result.diarization
     await update_mapping_message(
         callback.message,
@@ -197,38 +197,16 @@ async def _show_main_view(callback: CallbackQuery, session: MappingSession,
         diarization,
         session.request.participants_list or [],
         user_id,
-        current_editing_speaker=editing_speaker,
+        current_editing_speaker=session.editing_speaker,
         speakers_text=diarization.speakers_text if diarization else None,
         speakers_with_audio=session.speakers_with_audio,
-    )
-
-
-@card_handler(session="peek")
-async def request_custom_speaker_name(
-    callback: CallbackQuery, callback_data: SmCustom, state: FSMContext,
-    user_id: int, session: MappingSession,
-) -> None:
-    """sm_custom: перейти в ожидание имени спикера, введённого вручную.
-
-    Каркас проверил владельца и прочитал сессию (peek). Тело отмечает в реестре
-    ожидания, что пользователь вводит имя для этого спикера, и перерисовывает
-    карточку в под-вид «Отправьте имя для SPEAKER_N сообщением» с «◀️ Отмена».
-    """
-    speaker_id = callback_data.speaker_id
-    name_wait_registry.mark(user_id, speaker_id)
-
-    # Под-вид ожидания имени идёт тем же отправителем карточек (ADR-0005).
-    await edit_card(
-        callback.message,
-        format_name_prompt_message(speaker_id),
-        create_name_prompt_keyboard(user_id),
     )
 
 
 async def _redraw_main_card_after_naming(
     session: MappingSession, user_id: int, fallback_message: Message
 ) -> None:
-    """Перерисовать главный вид карточки после ручного ввода имени.
+    """Перерисовать главный вид карточки после ввода имени.
 
     Карточка — отдельное сообщение (``session.confirmation_message``): правим её
     на месте, чтобы новый участник сразу стал доступен кнопкой для остальных
@@ -265,40 +243,48 @@ async def _redraw_main_card_after_naming(
     )
 
 
-async def receive_custom_speaker_name(message: Message) -> None:
-    """Сообщение с именем спикера, пока пользователь ждёт ручной ввод (реестр).
+def _looks_like_multiple_names(text: str) -> bool:
+    """Несколько имён (разделители — запятая или перенос строки) в одном сообщении.
 
-    Валидное имя → полноценный участник сессии и сопоставление спикера, признак
-    ожидания снимается, карточка перерисовывается главным видом. Невалидное —
-    мягко переспрашиваем, ожидание держим. Нет живой сессии (истекла по TTL) —
-    сообщение об истёкшем состоянии и сброс признака: ловить больше нечего.
+    Под-вид ждёт ровно одно имя для одного спикера; пачку имён принимает общий
+    вид карточки. Считаем непустые куски после разбиения — их два и больше.
+    """
+    parts = [p.strip() for p in _NAME_SEPARATORS.split(text) if p.strip()]
+    return len(parts) >= 2
+
+
+async def receive_speaker_name(message: Message) -> None:
+    """Сообщение с именем спикера, пока открыт под-вид (``editing_speaker``).
+
+    Фильтр гарантировал: живая сессия, ``editing_speaker`` задан, content — текст
+    без ссылки. Валидное одно имя → полноценный участник сессии и сопоставление
+    спикера, под-вид закрывается, карточка перерисовывается главным видом.
+    Несколько имён или имя вне планки 2–50 → короткий отказ, ничего не применяем
+    (всё или ничего).
     """
     try:
         user_id = message.from_user.id
-        speaker_id = name_wait_registry.speaker_for(user_id)
-
         session = mapping_sessions.peek(user_id)
         if session is None:
-            name_wait_registry.clear(user_id)
-            await message.answer(_SESSION_GONE_TEXT)
+            # Сессия истекла между проверкой фильтра и телом — ловить нечего.
             return
+        speaker_id = session.editing_speaker
+        text = message.text
 
-        # Не-текстовый контент (голосовое/аудио/видео/документ/фото/стикер):
-        # message.text is None. Не трактуем как «слишком короткое имя» и не теряем
-        # запись молча — держим ожидание и точечно просим прислать имя текстом.
-        if not message.text:
+        if _looks_like_multiple_names(text):
             await message.answer(
-                "Отправьте имя спикера текстом или нажмите «◀️ Отмена»."
+                f"Здесь ждём одно имя — для {speaker_id}. Несколько имён можно "
+                "отправить из общего вида карточки (◀️ Назад)."
             )
             return
 
         new_list, display_name = participants_service.add_manual_participant(
-            session.request.participants_list, message.text
+            session.request.participants_list, text
         )
         if new_list is None:
             await message.answer(
-                "Имя должно быть не короче 2 символов и не начинаться с «/».\n"
-                "Отправьте имя ещё раз или нажмите «Отмена»."
+                "Имя должно быть 2–50 символов и не начинаться с «/».\n"
+                "Отправьте имя ещё раз или нажмите «◀️ Назад»."
             )
             return
 
@@ -307,53 +293,56 @@ async def receive_custom_speaker_name(message: Message) -> None:
         if speaker_id:
             new_mapping[speaker_id] = display_name
         mapping_sessions.update_mapping(user_id, new_mapping)
-
-        name_wait_registry.clear(user_id)
+        session.editing_speaker = None
 
         await _redraw_main_card_after_naming(session, user_id, message)
 
     except Exception as e:
-        logger.error(f"Ошибка в receive_custom_speaker_name: {e}", exc_info=True)
+        logger.error(f"Ошибка в receive_speaker_name: {e}", exc_info=True)
         await message.answer("❌ Произошла ошибка при обработке имени.")
 
 
-@card_handler(session="peek", clear_name_wait=True)
+@card_handler(session="peek")
 async def speaker_mapping_cancel_callback(
     callback: CallbackQuery, callback_data: SmCancel, state: FSMContext,
     user_id: int, session: MappingSession,
 ) -> None:
-    """sm_cancel: вернуться к основному виду карточки.
+    """sm_cancel: «◀️ Назад» — закрыть под-вид спикера, вернуться к главному виду.
 
-    Каркас с ``clear_name_wait=True`` снимает признак ожидания имени до
-    разрешения сессии: отмена из под-вида ручного ввода не должна оставлять
-    пользователя в ловле имени (следующее сообщение ушло бы в хендлер имени
-    вместо обычной обработки). Из под-вида выбора участника признак не
-    установлен — сброс безвреден.
+    Снимает ``editing_speaker``: следующее текстовое сообщение уже не ловится
+    как имя, а уходит в обычную обработку записи.
     """
+    session.editing_speaker = None
     await _show_main_view(callback, session, user_id)
 
 
-async def _awaiting_speaker_name(message: Message) -> bool:
-    """Фильтр message-хендлера имени: ловим сообщение, только пока пользователь
-    ждёт ручной ввод имени (реестр ожидания).
+async def _capturing_speaker_name(message: Message) -> bool:
+    """Фильтр message-хендлера имени: ловим текст, только пока открыт под-вид
+    спикера (``editing_speaker`` живой сессии) и это не ссылка.
 
-    Живость сессии проверяет сам хендлер, не фильтр: истёкшая по TTL сессия
-    должна получить _SESSION_GONE_TEXT, а не провалиться мимо в общий обработчик.
+    Ссылка, не-текст (файл/голос/видео/фото) и истёкшая по TTL сессия
+    проваливаются мимо — в обычный поток обработки записи; под-вид карточки их
+    не съедает (ADR-0006). Живость сессии читается здесь же: под-вида нет без
+    живой сессии, поэтому истёкшая сессия просто перестаёт ловить.
     """
     user = message.from_user
-    return user is not None and name_wait_registry.is_waiting(user.id)
+    if user is None or not message.text:
+        return False
+    if contains_url(message.text):
+        return False
+    session = mapping_sessions.peek(user.id)
+    return session is not None and session.editing_speaker is not None
 
 
 def setup_speaker_mapping_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
     """Настройка обработчиков callback запросов для сопоставления спикеров"""
     router = Router()
 
-    # Ручной ввод имени спикера (ADR-0002): callback перехода в ожидание имени
-    # и message-хендлер приёма имени. Роутер сопоставления включён раньше общего
-    # message_router (см. bot.py), поэтому имя ловится реестром ожидания здесь, а
-    # команды и кнопки меню перехватывают их роутеры ещё раньше по цепочке.
-    router.callback_query(SmCustom.filter())(request_custom_speaker_name)
-    router.message(_awaiting_speaker_name)(receive_custom_speaker_name)
+    # Прямой ввод имени спикера (ADR-0006): message-хендлер приёма имени, пока
+    # открыт под-вид спикера. Роутер сопоставления включён раньше общего
+    # message_router (см. bot.py), поэтому имя ловится здесь, а команды, кнопки
+    # меню и ссылки/файлы перехватывают их роутеры (или общий поток) по цепочке.
+    router.message(_capturing_speaker_name)(receive_speaker_name)
 
     @router.callback_query(SmChange.filter())
     @card_handler(session="peek")
@@ -361,10 +350,9 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         callback: CallbackQuery, callback_data: SmChange, state: FSMContext,
         user_id: int, session: MappingSession,
     ):
-        """sm_change: показать под-вид выбора участника для спикера."""
-        await _show_main_view(
-            callback, session, user_id, editing_speaker=callback_data.speaker_id
-        )
+        """sm_change: открыть под-вид спикера, готовый принять имя сообщением."""
+        session.editing_speaker = callback_data.speaker_id
+        await _show_main_view(callback, session, user_id)
 
     @router.callback_query(SmSelect.filter())
     @card_handler(session="peek")
@@ -407,6 +395,7 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
                 return
 
         mapping_sessions.update_mapping(user_id, speaker_mapping)
+        session.editing_speaker = None
 
         # Обновляем сообщение (возвращаемся к основному виду)
         await _show_main_view(callback, session, user_id)
@@ -422,7 +411,8 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         """sm_confirm: подтвердить сопоставление и продолжить обработку.
 
         Каркас атомарно изъял сессию (take): повторный тап получил бы None и не
-        запустил второе возобновление.
+        запустил второе возобновление. Под-вид закрыт вместе с изъятой сессией —
+        ``editing_speaker`` отдельно снимать не нужно.
         """
         # Обновляем сообщение (кратко, без обещаний - реальная обработка начнется в следующем сообщении)
         await safe_edit_text(
@@ -431,9 +421,8 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
             parse_mode="Markdown"
         )
 
-        # Очищаем состояние FSM и признак ожидания имени
+        # Очищаем состояние FSM
         await state.clear()
-        name_wait_registry.clear(user_id)
 
         # Продолжаем обработку — сессия передаётся владением
         await processing_service.continue_processing_after_mapping_confirmation(
