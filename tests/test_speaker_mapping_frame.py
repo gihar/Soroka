@@ -180,24 +180,3 @@ async def test_frame_edit_error_on_body_exception(monkeypatch):
     await handler(_FakeCallback(from_user_id=USER), _cbdata(), _FakeState())
 
     assert edited and "ошибка при продолжении обработки" in edited[-1]
-
-
-@pytest.mark.asyncio
-async def test_frame_clear_state_clears_even_when_session_gone(monkeypatch):
-    """clear_state=True очищает FSM до разрешения сессии — даже если она истекла."""
-    import src.handlers.callbacks.speaker_mapping_callbacks as cb
-
-    async def fake_edit(message, text, **kwargs):
-        return True
-
-    monkeypatch.setattr(cb, "safe_edit_text", fake_edit)
-    mapping_sessions.discard(USER)
-
-    @cb.card_handler(session="peek", clear_state=True)
-    async def handler(callback, callback_data, state, user_id, session):
-        pass
-
-    state = _FakeState()
-    await handler(_FakeCallback(from_user_id=USER), _cbdata(), state)
-
-    assert await state.get_state() is None

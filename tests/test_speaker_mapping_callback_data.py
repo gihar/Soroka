@@ -17,7 +17,6 @@ from src.ux.speaker_mapping_callback_data import (  # noqa: E402
     SmCancel,
     SmChange,
     SmConfirm,
-    SmCustom,
     SmSelect,
     SmSkip,
 )
@@ -58,17 +57,6 @@ def test_sm_select_wire_format_roundtrip_with_index():
     )
     data = SmSelect.unpack("sm_select:SPEAKER_1:3:42")
     assert data.participant_idx == "3"
-
-
-def test_sm_custom_wire_format_roundtrip():
-    """``sm_custom:{speaker_id}:{user_id}`` — переход к ручному вводу имени."""
-    assert (
-        SmCustom(speaker_id="SPEAKER_1", user_id=42).pack()
-        == "sm_custom:SPEAKER_1:42"
-    )
-    data = SmCustom.unpack("sm_custom:SPEAKER_1:42")
-    assert data.speaker_id == "SPEAKER_1"
-    assert data.user_id == 42
 
 
 def test_sm_cancel_wire_format_roundtrip():
