@@ -145,7 +145,15 @@ class FeedbackCollector:
 
 class FeedbackUI:
     """Пользовательский интерфейс для сбора обратной связи"""
-    
+
+    @staticmethod
+    def feedback_intro_text() -> str:
+        """Единый текст-приглашение к обратной связи (один слоган во всём боте)."""
+        return (
+            "**Обратная связь**\n\n"
+            "Помогите сделать бота лучше. Выберите тип обратной связи:"
+        )
+
     @staticmethod
     def create_rating_keyboard(feedback_type: str = "protocol_quality") -> InlineKeyboardMarkup:
         """Создать клавиатуру для оценки"""
@@ -282,7 +290,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка обработки рейтинга: {e}")
-            await callback.answer("❌ Ошибка при сохранении оценки")
+            await callback.answer("Не удалось сохранить оценку, попробуйте ещё раз")
     
     @router.callback_query(F.data.startswith("feedback_skip_"))
     async def handle_skip_feedback(callback: CallbackQuery):
@@ -317,7 +325,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка выбора типа обратной связи: {e}")
-            await callback.answer("❌ Ошибка при обработке")
+            await callback.answer("Не удалось открыть форму, попробуйте ещё раз")
     
     return router
 

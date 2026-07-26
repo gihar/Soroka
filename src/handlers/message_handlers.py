@@ -72,8 +72,8 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             if not file_obj.file_id:
                 await safe_answer(
                     message,
-                    "❌ Ошибка: не удалось получить идентификатор файла. "
-                    "Попробуйте отправить файл еще раз."
+                    "❌ Не удалось распознать файл.\n"
+                    "Отправьте его ещё раз."
                 )
                 return
             
@@ -93,7 +93,11 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
-            await safe_answer(message, "❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось принять файл.\n"
+                "Отправьте его ещё раз — обычно повторная попытка помогает."
+            )
     
     # Обрабатываем текст только когда пользователь НЕ в FSM-состоянии
     @router.message(StateFilter(None), F.content_type == 'text')
@@ -142,7 +146,11 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в text_handler: {e}")
-            await safe_answer(message, "❌ Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось обработать сообщение.\n"
+                "Отправьте запись или ссылку ещё раз."
+            )
     
     return router
 
@@ -177,36 +185,40 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
         logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
         
-        # Проверяем наличие LLM (template_id может быть None для умного выбора)
+        # Проверяем наличие модели (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
             await message.answer(
-                "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
+                "❌ Настройки обработки не сохранились.\n"
+                "Отправьте запись заново — и снова выберите способ обработки."
             )
             await state.clear()
             return
-        
+
         # Проверяем template_id только если не используется умный выбор
-        if (not data.get('use_smart_selection') and 
+        if (not data.get('use_smart_selection') and
             not data.get('template_id')):
             await message.answer(
-                "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
+                "❌ Шаблон не выбран.\n"
+                "Отправьте запись заново и выберите шаблон."
             )
             await state.clear()
             return
-        
+
         # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
         is_external_file = data.get('is_external_file', False)
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Пришлите ссылку ещё раз."
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Отправьте файл ещё раз."
                 )
                 await state.clear()
                 return
@@ -278,7 +290,10 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await message.answer("❌ Произошла ошибка при подготовке обработки файла.")
+        await message.answer(
+            "❌ Не получилось запустить обработку.\n"
+            "Отправьте запись заново."
+        )
         await state.clear()
 
 
@@ -550,7 +565,10 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         
     except Exception as e:
         logger.error(f"Ошибка при показе шаблонов: {e}")
-        await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
+        await message.answer(
+            "❌ Не удалось загрузить шаблоны.\n"
+            "Попробуйте ещё раз — если повторится, откройте /templates."
+        )
 
 
 def _contains_url(text: str) -> bool:
@@ -658,10 +676,19 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await safe_edit_text(status_message, error_message, parse_mode="Markdown")
                 
             except FileError as e:
-                await safe_edit_text(status_message, f"❌ Ошибка при обработке файла: {e}")
-                
+                logger.warning(f"Не удалось обработать файл по ссылке {url}: {e}")
+                await safe_edit_text(
+                    status_message,
+                    "❌ Не получилось обработать файл по ссылке.\n"
+                    "Проверьте, что файл доступен для скачивания, и пришлите ссылку ещё раз."
+                )
+
     except Exception as e:
         logger.error(f"Ошибка при обработке URL {url}: {e}")
         # Используем safe_answer только если не удалось создать status_message
         if not status_message:
-            await safe_answer(message, "❌ Произошла ошибка при обработке ссылки. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось обработать ссылку.\n"
+                "Проверьте доступ по ссылке и отправьте её ещё раз."
+            )

@@ -46,7 +46,10 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в start_handler: {e}")
-            await message.answer("❌ Произошла ошибка при запуске. Попробуйте еще раз.")
+            await message.answer(
+                "❌ Не получилось запустить бота.\n"
+                "Попробуйте ещё раз командой /start."
+            )
     
     @router.message(Command("help", "h"))
     async def help_handler(message: Message):
@@ -89,7 +92,10 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Ошибка в settings_handler: {e}")
-            await message.answer("❌ Произошла ошибка при загрузке настроек.")
+            await message.answer(
+                "❌ Не удалось открыть настройки.\n"
+                "Попробуйте ещё раз командой /settings."
+            )
     
     @router.message(Command("templates", "t"))
     async def templates_handler(message: Message):
@@ -146,7 +152,10 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в templates_handler: {e}")
-            await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
+            await message.answer(
+                "❌ Не удалось загрузить шаблоны.\n"
+                "Попробуйте ещё раз командой /templates."
+            )
     
     @router.message(Command("feedback", "fb"))
     async def feedback_handler(message: Message):
@@ -155,8 +164,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         
         keyboard = FeedbackUI.create_feedback_type_keyboard()
         await safe_answer(message,
-            "**Обратная связь**\n\n"
-            "Помогите нам улучшить бота! Выберите тип обратной связи:",
+            FeedbackUI.feedback_intro_text(),
             reply_markup=keyboard,
             parse_mode="Markdown"
         )

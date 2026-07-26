@@ -197,7 +197,7 @@ def setup_quick_actions_handlers() -> Router:
             "• Как видео сообщение\n"
             "• Как документ\n"
             "• Голосовое сообщение\n\n"
-            f"Максимальный размер: {max_mb}MB.\n"
+            f"Максимальный размер: {max_mb} МБ.\n"
             "Если файл превышает максимальный размер, отправьте, пожалуйста, ссылку на него (например, Google Drive, Яндекс.Диск или Synology Drive) с доступом на скачивание."
         )
     
@@ -237,7 +237,10 @@ def setup_quick_actions_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка в my_templates_button_handler: {e}")
-            await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
+            await message.answer(
+                "❌ Не удалось загрузить шаблоны.\n"
+                "Попробуйте ещё раз — если повторится, откройте /templates."
+            )
     
     @router.message(F.text == "⚙️ Настройки")
     async def settings_button_handler(message: Message):
@@ -294,9 +297,9 @@ def setup_quick_actions_handlers() -> Router:
                     for template in favorite_templates[:3]:
                         stats_text += f"• {template['name']}: {template['count']} раз\n"
 
-                # LLM провайдеры
+                # Модели ИИ
                 if llm_providers:
-                    stats_text += "\n**Используемые AI модели:**\n"
+                    stats_text += "\n**Используемые модели ИИ:**\n"
                     for provider in llm_providers[:3]:
                         provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
                         stats_text += f"• {provider_name}: {provider['count']} раз\n"
@@ -344,8 +347,7 @@ def setup_quick_actions_handlers() -> Router:
         from src.ux.feedback_system import FeedbackUI
         keyboard = FeedbackUI.create_feedback_type_keyboard()
         await safe_answer(message,
-            "**Обратная связь**\n\n"
-            "Помогите нам стать лучше! Выберите тип обратной связи:",
+            FeedbackUI.feedback_intro_text(),
             reply_markup=keyboard,
             parse_mode="Markdown"
         )

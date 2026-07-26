@@ -384,15 +384,15 @@ class ProgressTracker:
         self._last_text = ""
         
         stage_name = stage.name if stage else stage_id
-        
-        # Экранируем специальные символы Markdown для безопасного отображения
-        safe_error_message = self._escape_markdown(error_message)
-        
+
+        # Сырой текст исключения — только в лог, не пользователю (анти-референс
+        # PRODUCT.md «сырой машинный вывод»). Пользователь видит простую фразу.
+        logger.error(f"Обработка прервалась на этапе {stage_id}: {error_message}")
+
+        safe_stage = self._escape_markdown(stage_name)
         text = (
-            f"❌ **Ошибка при обработке**\n\n"
-            f"Этап: {stage_name}\n"
-            f"Ошибка: {safe_error_message}\n\n"
-            f"Попробуйте загрузить файл еще раз."
+            f"❌ Обработка прервалась на этапе «{safe_stage}».\n"
+            "Отправьте запись ещё раз — обычно повторная попытка помогает."
         )
         
         try:

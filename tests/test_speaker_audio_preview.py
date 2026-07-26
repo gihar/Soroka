@@ -71,8 +71,8 @@ async def test_sends_one_voice_per_speaker_in_order(monkeypatch, tmp_path):
     )
 
     assert len(sent_order) == 2
-    assert "SPEAKER_1" in sent_order[0]
-    assert "SPEAKER_2" in sent_order[1]
+    assert "Спикер 1" in sent_order[0]
+    assert "Спикер 2" in sent_order[1]
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,7 @@ async def test_one_speaker_cut_failure_does_not_block_others(monkeypatch, tmp_pa
     )
 
     assert len(sent) == 1
-    assert "SPEAKER_2" in sent[0]
+    assert "Спикер 2" in sent[0]
 
 
 @pytest.mark.asyncio
@@ -202,7 +202,7 @@ async def test_falls_back_to_audio_when_voice_fails(monkeypatch, tmp_path):
 
     assert len(voice_calls) == 1  # голосовое пробуем первым
     assert len(audio_calls) == 1  # и падаем в фолбэк на аудиофайл
-    assert "SPEAKER_1" in audio_calls[0]
+    assert "Спикер 1" in audio_calls[0]
 
 
 @pytest.mark.asyncio

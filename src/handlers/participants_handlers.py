@@ -72,7 +72,10 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         
     except Exception as e:
         logger.error(f"Ошибка при показе меню участников: {e}")
-        await message.answer("❌ Произошла ошибка при загрузке меню.")
+        await message.answer(
+            "❌ Не удалось открыть меню участников.\n"
+            "Отправьте запись заново."
+        )
 
 
 async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dict):
@@ -103,7 +106,10 @@ async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dic
 
     except Exception as e:
         logger.error(f"Ошибка при показе меню доп. информации: {e}")
-        await callback_query.message.edit_text("❌ Произошла ошибка при загрузке меню.")
+        await callback_query.message.edit_text(
+            "❌ Не удалось открыть меню.\n"
+            "Попробуйте ещё раз."
+        )
 
 
 def setup_participants_handlers() -> Router:
@@ -142,7 +148,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при запросе автоизвлечения: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
 
     @router.callback_query(F.data == "input_new_participants")
     async def prompt_participants_input(callback: CallbackQuery, state: FSMContext):
@@ -170,7 +179,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при запросе ввода участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "upload_participants_file")
     async def prompt_file_upload(callback: CallbackQuery, state: FSMContext):
@@ -204,7 +216,10 @@ def setup_participants_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при запросе файла: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "use_saved_participants")
     async def use_saved_participants(callback: CallbackQuery, state: FSMContext):
@@ -247,7 +262,10 @@ def setup_participants_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при загрузке сохраненного списка: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось загрузить сохранённый список.\n"
+                "Введите участников заново или пропустите шаг."
+            )
     
     @router.callback_query(F.data == "skip_participants")
     async def skip_participants(callback: CallbackQuery, state: FSMContext):
@@ -267,7 +285,10 @@ def setup_participants_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при пропуске участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
     
     @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "text")
     async def handle_participants_text(message: Message, state: FSMContext):
@@ -312,8 +333,8 @@ def setup_participants_handlers() -> Router:
             # Проверяем, есть ли участники
             if not all_participants:
                 await safe_answer(message, 
-                    "❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
-                    "Попробуйте другой текст или отправьте /cancel для отмены.",
+                    "❌ Не удалось найти участников в этом тексте.\n"
+                    "Пришлите список участников или отправьте /cancel.",
                     parse_mode="Markdown"
                 )
                 return
@@ -322,8 +343,8 @@ def setup_participants_handlers() -> Router:
             is_valid, error_message = participants_service.validate_participants(all_participants)
             if not is_valid:
                 await safe_answer(message, 
-                    f"❌ **Ошибка валидации:**\n{error_message}\n\n"
-                    f"Попробуйте еще раз или отправьте /cancel для отмены.",
+                    f"❌ {error_message}\n"
+                    "Поправьте список и отправьте ещё раз или /cancel.",
                     parse_mode="Markdown"
                 )
                 return
@@ -397,7 +418,8 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при обработке текста участников: {e}")
             await message.answer(
-                "❌ Произошла ошибка при обработке списка. Попробуйте еще раз."
+                "❌ Не удалось разобрать список участников.\n"
+                "Проверьте формат и отправьте ещё раз."
             )
     
     @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "document")
@@ -435,8 +457,8 @@ def setup_participants_handlers() -> Router:
                 
                 if not is_valid:
                     await safe_answer(message, 
-                        f"❌ **Ошибка валидации:**\n{error_message}\n\n"
-                        f"Попробуйте еще раз.",
+                        f"❌ {error_message}\n"
+                        "Поправьте список в файле и пришлите ещё раз.",
                         parse_mode="Markdown"
                     )
                     return
@@ -466,7 +488,11 @@ def setup_participants_handlers() -> Router:
                 )
                 
             except FileError as e:
-                await message.answer(f"❌ Ошибка при обработке файла: {e}")
+                logger.warning(f"Не удалось разобрать файл участников: {e}")
+                await message.answer(
+                    "❌ Не удалось разобрать файл.\n"
+                    "Проверьте формат (.txt или .csv) и пришлите ещё раз."
+                )
             finally:
                 # Убеждаемся что файл удален
                 if os.path.exists(temp_file_path):
@@ -478,7 +504,8 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при обработке файла участников: {e}")
             await message.answer(
-                "❌ Произошла ошибка при обработке файла. Попробуйте еще раз."
+                "❌ Не удалось разобрать файл участников.\n"
+                "Проверьте формат (.txt или .csv) и отправьте ещё раз."
             )
     
     @router.callback_query(F.data == "confirm_meeting_info")
@@ -505,7 +532,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
 
     @router.callback_query(F.data == "save_meeting_info")
     async def save_meeting_info(callback: CallbackQuery, state: FSMContext):
@@ -543,7 +573,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении информации о встрече: {e}")
-            await callback.message.answer("❌ Произошла ошибка при сохранении.")
+            await callback.message.answer(
+                "❌ Не удалось сохранить информацию.\n"
+                "Попробуйте ещё раз."
+            )
 
     @router.callback_query(F.data == "confirm_participants")
     async def confirm_participants(callback: CallbackQuery, state: FSMContext):
@@ -565,7 +598,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
     
     @router.callback_query(F.data == "save_and_confirm_participants")
     async def save_and_confirm_participants(callback: CallbackQuery, state: FSMContext):
@@ -597,7 +633,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка при сохранении.")
+            await callback.message.answer(
+                "❌ Не удалось сохранить список.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "cancel_participants")
     async def cancel_participants(callback: CallbackQuery, state: FSMContext):

@@ -24,15 +24,15 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'messages' else ''}В сообщения",
+                    text=f"{'✅ ' if current == 'messages' else ''}В сообщение",
                     callback_data="set_protocol_output_messages"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'file' else ''}В файл md",
+                    text=f"{'✅ ' if current == 'file' else ''}В файл Markdown",
                     callback_data="set_protocol_output_file"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'pdf' else ''}В файл pdf",
+                    text=f"{'✅ ' if current == 'pdf' else ''}В файл PDF",
                     callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
@@ -48,17 +48,17 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             await safe_edit_text(callback.message,
                 "**Вывод протокола**\n\n"
                 "Выберите, как отправлять готовый протокол:\n"
-                "• В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
-                "• В файл md — протокол отправляется как прикрепленный файл (.md)\n"
-                "• В файл pdf — протокол отправляется как прикрепленный файл (.pdf)\n"
-                "• В файл Word — протокол приходит документом Word (.docx)",
+                "• В сообщение — протокол приходит текстом в чат (по умолчанию)\n"
+                "• В файл Markdown — протокол приходит файлом .md\n"
+                "• В файл PDF — протокол приходит файлом .pdf\n"
+                "• В файл Word — протокол приходит документом .docx",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в settings_protocol_output_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке настроек")
+            await callback.answer("Не удалось загрузить настройки, попробуйте ещё раз")
 
     @router.callback_query(F.data.in_({"set_protocol_output_messages", "set_protocol_output_file", "set_protocol_output_pdf", "set_protocol_output_docx"}))
     async def set_protocol_output_mode_callback(callback: CallbackQuery):
@@ -66,16 +66,16 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             if callback.data.endswith('messages'):
                 mode = 'messages'
-                mode_text = "В сообщения"
+                mode_text = "В сообщение"
             elif callback.data.endswith('pdf'):
                 mode = 'pdf'
-                mode_text = "В файл pdf"
+                mode_text = "В файл PDF"
             elif callback.data.endswith('docx'):
                 mode = 'docx'
                 mode_text = "В файл Word"
             else:
                 mode = 'file'
-                mode_text = "В файл md"
+                mode_text = "В файл Markdown"
 
             await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
 
@@ -124,7 +124,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
         except Exception as e:
             logger.error(f"Ошибка в settings_reset_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при сбросе настроек")
+            await callback.answer("Не удалось сбросить настройки, попробуйте ещё раз")
 
     @router.callback_query(F.data == "settings_stats")
     async def settings_stats_callback(callback: CallbackQuery):
@@ -164,7 +164,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                         stats_text += f"• {t['name']}: {t['count']} раз\n"
 
                 if llm_providers:
-                    stats_text += "\n**AI модели:**\n"
+                    stats_text += "\n**Модели ИИ:**\n"
                     for p in llm_providers[:3]:
                         name = p['llm_provider'].title() if p['llm_provider'] else '?'
                         stats_text += f"• {name}: {p['count']} раз\n"
@@ -191,7 +191,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
         except Exception as e:
             logger.error(f"Ошибка в settings_stats_callback: {e}")
-            await callback.answer("❌ Ошибка при загрузке статистики")
+            await callback.answer("Не удалось загрузить статистику, попробуйте ещё раз")
 
     @router.callback_query(F.data == "back_to_settings")
     async def back_to_settings_callback(callback: CallbackQuery):
@@ -213,7 +213,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
         except Exception as e:
             logger.error(f"Ошибка в back_to_settings_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при возврате к настройкам")
+            await callback.answer("Не удалось вернуться к настройкам, попробуйте ещё раз")
 
     @router.callback_query(F.data == "settings_active_model")
     async def settings_active_model_callback(callback: CallbackQuery):

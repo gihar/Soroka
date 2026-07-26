@@ -11,6 +11,7 @@ from loguru import logger
 from src.models.diarization import Diarization
 from src.ux.card_content import MappingCard, PlainCard, SpeakerRow
 from src.ux.card_sender import edit_card, send_card
+from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
@@ -31,6 +32,12 @@ _UNMAPPED_HINT = "Неназванные спикеры попадут в про
 # неназванные — вместе с _UNMAPPED_HINT, приглашение сверху.
 _MAIN_VIEW_NAME_PROMPT = (
     "Отправьте имена одним сообщением — через запятую, по порядку спикеров."
+)
+
+# Вводная строка главного вида: одним предложением объясняет новичку, зачем шаг.
+# Живёт под заголовком, отдельно от нижнего предупреждения про «Участник N».
+_CARD_INTRO = (
+    "Назовите, кто есть кто — имена попадут в протокол вместо номеров спикеров."
 )
 
 
@@ -130,12 +137,13 @@ def _card_header(
     желанию)» без него (ADR-0002).
     """
     if current_editing_speaker:
+        speaker_label = humanize_speaker_label(current_editing_speaker)
         if participants:
             return (
-                f"✏️ Имя для {current_editing_speaker} — "
+                f"Имя для «{speaker_label}» — "
                 "отправьте сообщением или выберите ниже"
             )
-        return f"✏️ Имя для {current_editing_speaker} — отправьте сообщением"
+        return f"Имя для «{speaker_label}» — отправьте сообщением"
 
     return (
         "Проверьте сопоставление спикеров"
@@ -206,7 +214,11 @@ def build_mapping_card(
     has_unmapped = any(r.display_name is None for r in rows)
     hint = _compose_hint(has_unmapped, current_editing_speaker)
 
-    return MappingCard(header=header, rows=tuple(rows), hint=hint)
+    # Вводная строка — только в главном виде: в под-виде пользователь уже называет
+    # одного спикера, повторять «зачем шаг» незачем.
+    intro = None if current_editing_speaker else _CARD_INTRO
+
+    return MappingCard(header=header, rows=tuple(rows), hint=hint, intro=intro)
 
 
 def create_mapping_keyboard(
@@ -238,9 +250,10 @@ def create_mapping_keyboard(
         
         # Кнопка "Оставить без имени". Имя человека, которого нет в списке,
         # вводится прямо сообщением — под-вид уже ждёт текст (ADR-0006),
-        # промежуточной кнопки «Ввести имя вручную» больше нет.
+        # промежуточной кнопки «Ввести имя вручную» больше нет. ❌ зарезервирован
+        # за ошибками, поэтому у действия-кнопки глифа нет.
         keyboard_buttons.append([InlineKeyboardButton(
-            text="❌ Оставить без имени",
+            text="Оставить без имени",
             callback_data=SmSelect(
                 speaker_id=current_editing_speaker,
                 participant_idx="none",
@@ -273,7 +286,7 @@ def create_mapping_keyboard(
 
         # Кнопка "Назад"
         keyboard_buttons.append([InlineKeyboardButton(
-            text="◀️ Назад",
+            text="⬅️ Назад",
             callback_data=SmCancel(user_id=user_id).pack()
         )])
         
@@ -283,14 +296,16 @@ def create_mapping_keyboard(
 
         # Каждая кнопка в отдельной строке (одна колонка)
         for speaker_id in all_speakers:
+            speaker_label = humanize_speaker_label(speaker_id)
             participant_name = speaker_mapping.get(speaker_id)
             if participant_name:
-                # Показываем короткое имя
+                # Показываем короткое имя. Тап открывает под-вид переименования —
+                # отдельный глиф-«карандаш» для этого не нужен (✏ снят из кнопок).
                 from src.services.participants_service import participants_service
                 short_name = participants_service.convert_full_name_to_short(participant_name)
-                button_text = f"✏️ {speaker_id}: {short_name}"
+                button_text = f"{speaker_label}: {short_name}"
             else:
-                button_text = f"{speaker_id}"
+                button_text = speaker_label
             
             keyboard_buttons.append([InlineKeyboardButton(
                 text=button_text,
@@ -308,7 +323,7 @@ def create_mapping_keyboard(
         )])
 
         keyboard_buttons.append([InlineKeyboardButton(
-            text="❌ Пропустить сопоставление",
+            text="⏭️ Пропустить сопоставление",
             callback_data=SmSkip(user_id=user_id).pack()
         )])
     
@@ -339,7 +354,7 @@ def create_skip_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
             callback_data=SmSkipConfirm(user_id=user_id).pack(),
         )],
         [InlineKeyboardButton(
-            text="✏️ Назвать спикеров",
+            text="Назвать спикеров",
             callback_data=SmCancel(user_id=user_id).pack(),
         )],
     ])

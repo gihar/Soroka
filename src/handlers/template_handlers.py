@@ -202,7 +202,8 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             logger.error(f"Ошибка при сохранении шаблона: {e}")
             await safe_edit_text(
                 callback.message,
-                f"❌ Ошибка при сохранении шаблона: {e}"
+                "❌ Не удалось сохранить шаблон.\n"
+                "Попробуйте ещё раз."
             )
         
         await state.clear()
@@ -326,6 +327,6 @@ async def _show_template_preview(message: Message, template_data: dict, template
     except Exception as e:
         logger.error(f"Ошибка при создании предварительного просмотра: {e}")
         await message.answer(
-            f"❌ Ошибка при создании предварительного просмотра: {e}\n\n"
-            f"Попробуйте изменить содержимое шаблона."
+            "❌ Не удалось собрать предпросмотр шаблона.\n"
+            "Проверьте разметку и переменные в шаблоне и пришлите его ещё раз."
         )

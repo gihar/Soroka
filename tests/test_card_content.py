@@ -61,10 +61,10 @@ def test_mapped_and_unmapped_rows_are_labelled():
     html = card.to_html()
     plain = card.to_plain()
 
-    assert "<b>SPEAKER_1</b> → Иван ✓" in html
-    assert "<b>SPEAKER_2</b> → Не определен ❓" in html
-    assert "SPEAKER_1 → Иван ✓" in plain
-    assert "SPEAKER_2 → Не определен ❓" in plain
+    assert "<b>Спикер 1</b> → Иван ✓" in html
+    assert "<b>Спикер 2</b> → Не определен ❓" in html
+    assert "Спикер 1 → Иван ✓" in plain
+    assert "Спикер 2 → Не определен ❓" in plain
 
 
 def test_hint_renders_below_rows_in_html_and_plain():
@@ -83,8 +83,8 @@ def test_hint_renders_below_rows_in_html_and_plain():
     assert hint in plain
     assert hint in html  # экранирование не трогает «», буквы, N
     # подсказка стоит под строкой спикера — внизу карточки
-    assert html.index("SPEAKER_1") < html.index("Участник N")
-    assert plain.index("SPEAKER_1") < plain.index("Участник N")
+    assert html.index("Спикер 1") < html.index("Участник N")
+    assert plain.index("Спикер 1") < plain.index("Участник N")
 
 
 def test_no_hint_keeps_card_layout_unchanged():
@@ -95,7 +95,7 @@ def test_no_hint_keeps_card_layout_unchanged():
         rows=(SpeakerRow(speaker_id="SPEAKER_1", display_name="Иван"),),
     )
 
-    assert card.to_plain().endswith("SPEAKER_1 → Иван ✓")
+    assert card.to_plain().endswith("Спикер 1 → Иван ✓")
     assert "─" not in card.to_plain()
 
 

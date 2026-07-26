@@ -49,8 +49,8 @@ _SESSION_GONE_TEXT = (
 )
 
 _PROCESSING_ERROR_TEXT = (
-    "❌ Произошла ошибка при продолжении обработки.\n\n"
-    "Пожалуйста, попробуйте начать обработку заново."
+    "❌ Не получилось продолжить обработку.\n"
+    "Отправьте запись заново — обычно повторная попытка помогает."
 )
 
 
@@ -143,8 +143,8 @@ def card_handler(
         session: ``"peek"`` (читать, не изымая), ``"take"`` (атомарно изъять —
             двойной тап получит None) или ``None`` (сессия телу не нужна).
         answer_text: текст ответа на callback (тост/снятие «загрузки»).
-        on_error: ``"answer"`` — тост «Произошла ошибка»; ``"edit"`` — правка
-            сообщения текстом об ошибке продолжения обработки.
+        on_error: ``"answer"`` — короткий тост «не получилось»; ``"edit"`` —
+            правка сообщения текстом об ошибке продолжения обработки.
     """
 
     def decorator(core: Callable) -> Callable:
@@ -174,7 +174,7 @@ def card_handler(
                 if on_error == "edit":
                     await safe_edit_text(callback.message, _PROCESSING_ERROR_TEXT)
                 else:
-                    await _safe_callback_answer(callback, "❌ Произошла ошибка")
+                    await _safe_callback_answer(callback, "Не получилось, попробуйте ещё раз")
 
         wrapper.__name__ = core.__name__
         return wrapper
@@ -357,7 +357,10 @@ async def receive_speaker_name(message: Message) -> None:
 
     except Exception as e:
         logger.error(f"Ошибка в receive_speaker_name: {e}", exc_info=True)
-        await message.answer("❌ Произошла ошибка при обработке имени.")
+        await message.answer(
+            "❌ Не получилось обработать имя.\n"
+            "Отправьте его ещё раз."
+        )
 
 
 @card_handler(session="peek")
