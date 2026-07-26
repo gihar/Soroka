@@ -98,7 +98,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             templates = await template_service.get_all_templates()
             
             if not templates:
-                await message.answer("📝 Шаблоны не найдены.")
+                await message.answer("Шаблоны не найдены.")
                 return
             
             # Группируем шаблоны по категориям
@@ -125,20 +125,20 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             
             # Добавляем кнопку создания шаблона
             keyboard_buttons.append([InlineKeyboardButton(
-                text="➕ Добавить шаблон",
+                text="Добавить шаблон",
                 callback_data="add_template"
             )])
 
             # Справка: как устроены шаблоны (переменные, {% if %}, пример)
             keyboard_buttons.append([InlineKeyboardButton(
-                text="ℹ️ Как устроены шаблоны",
+                text="Как устроены шаблоны",
                 callback_data="templates_help"
             )])
-            
+
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-            
-            await safe_answer(message, 
-                f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
+
+            await safe_answer(message,
+                f"**Доступные шаблоны:** {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -154,8 +154,8 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         from src.ux.feedback_system import FeedbackUI
         
         keyboard = FeedbackUI.create_feedback_type_keyboard()
-        await safe_answer(message, 
-            "💬 **Обратная связь**\n\n"
+        await safe_answer(message,
+            "**Обратная связь**\n\n"
             "Помогите нам улучшить бота! Выберите тип обратной связи:",
             reply_markup=keyboard,
             parse_mode="Markdown"

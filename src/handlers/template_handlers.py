@@ -24,7 +24,7 @@ class TemplateStates(StatesGroup):
 def _cancel_keyboard() -> InlineKeyboardMarkup:
     """Кнопка выхода из создания шаблона — FSM не должен быть ловушкой."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_template_creation")
+        InlineKeyboardButton(text="Отменить", callback_data="cancel_template_creation")
     ]])
 
 
@@ -43,7 +43,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_name)
             await safe_edit_text(
                 callback.message,
-                "📝 **Создание нового шаблона**\n\n"
+                "**Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
                 reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
@@ -60,7 +60,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_name)
             await safe_edit_text(
                 callback.message,
-                "📝 **Создание нового шаблона**\n\n"
+                "**Создание нового шаблона**\n\n"
                 "Введите название шаблона:",
                 reply_markup=_cancel_keyboard(),
                 parse_mode="Markdown"
@@ -215,7 +215,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_content)
             await safe_edit_text(
                 callback.message,
-                "🔄 **Редактирование шаблона**\n\n"
+                "**Редактирование шаблона**\n\n"
                 "Введите новое содержимое шаблона:",
                 parse_mode="Markdown"
             )
@@ -231,7 +231,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.clear()
             await safe_edit_text(
                 callback.message,
-                "❌ Создание шаблона отменено."
+                "Создание шаблона отменено."
             )
             await callback.answer()
         except Exception as e:
@@ -275,10 +275,10 @@ async def _show_template_preview(message: Message, template_data: dict, template
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ Сохранить", callback_data="save_template"),
-                InlineKeyboardButton(text="✏️ Изменить", callback_data="edit_template")
+                InlineKeyboardButton(text="Изменить", callback_data="edit_template")
             ],
             [
-                InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_template")
+                InlineKeyboardButton(text="Отменить", callback_data="cancel_template")
             ]
         ])
         
@@ -308,7 +308,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
             )
 
         preview_message = (
-            f"👀 **Предварительный просмотр шаблона**\n\n"
+            f"**Предварительный просмотр шаблона**\n\n"
             f"**Название:** {template_data['template_name']}\n"
             f"**Описание:** {template_data.get('template_description', '*Без описания*')}\n\n"
             f"**Результат с тестовыми данными:**\n\n"

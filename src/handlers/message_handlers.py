@@ -102,10 +102,13 @@ def setup_message_handlers(file_service: FileService, template_service: Template
         try:
             text = message.text.strip()
             
-            # Исключаем обработку кнопок меню - они должны обрабатываться в quick_actions
+            # Исключаем обработку кнопок меню - они должны обрабатываться в quick_actions.
+            # Список зеркалит подписи главного меню (create_main_menu): при их смене
+            # правится и здесь, иначе тап по кнопке уйдёт в обработку как URL.
             menu_buttons = [
-                "📤 Загрузить файл", "📝 Мои шаблоны", "⚙️ Настройки", 
-                "📊 Статистика", "❓ Помощь", "💬 Обратная связь"
+                "Мои шаблоны", "⚙️ Настройки",
+                "Помощь", "Обратная связь",
+                "🔧 Меню администратора",
             ]
             
             if text in menu_buttons:
@@ -121,10 +124,10 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             if not _contains_url(text):
                 await safe_answer(
                     message,
-                    "📎 Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск/Synology Drive для обработки.\n\n"
+                    "Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск/Synology Drive для обработки.\n\n"
                     "Поддерживаемые форматы:\n"
-                    "🎵 Аудио: MP3, WAV, M4A, OGG\n"
-                    "🎬 Видео: MP4, AVI, MOV, MKV"
+                    "Аудио: MP3, WAV, M4A, OGG\n"
+                    "Видео: MP4, AVI, MOV, MKV"
                 )
                 return
             
@@ -491,23 +494,23 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         
         # Кнопка 1: Умный выбор (всегда показывать первой)
         keyboard_buttons.append([InlineKeyboardButton(
-            text="🤖 Протокол: Умный выбор шаблона",
+            text="Протокол: Умный выбор шаблона",
             callback_data="quick_smart_select"
         )])
-        
+
         # Кнопка 2: Сохранённый шаблон (если есть)
         if default_template_id is not None:
             default_id = default_template_id
             button_text = None
             try:
                 if default_id == 0:
-                    button_text = "🤖 Протокол: Умный выбор (по умолчанию)"
+                    button_text = "Протокол: Умный выбор (по умолчанию)"
                 else:
                     try:
                         default_template = await template_service.get_template_by_id(default_id)
-                        button_text = f"📋 По шаблону: {default_template.name}"
+                        button_text = f"По шаблону: {default_template.name}"
                     except TemplateNotFoundError:
-                        button_text = f"📋 По шаблону (ID {default_id})"
+                        button_text = f"По шаблону (ID {default_id})"
                 
                 if button_text:
                     keyboard_buttons.append([InlineKeyboardButton(
@@ -519,7 +522,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         
         # Кнопка 4: Выбрать шаблон (для разового использования)
         keyboard_buttons.append([InlineKeyboardButton(
-            text="📋 Выбрать шаблон",
+            text="Выбрать шаблон",
             callback_data="select_template_once"
         )])
         
@@ -533,10 +536,10 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             message_text = f"✅ Список участников сохранен ({participants_count} чел.)\n\n"
         
         message_text += (
-            "📝 **Выберите способ создания протокола:**\n\n"
-            "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
-            "📋 **По шаблону** - использовать сохранённый шаблон\n"
-            "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки"
+            "**Выберите способ создания протокола:**\n\n"
+            "**Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
+            "**По шаблону** - использовать сохранённый шаблон\n"
+            "**Выбрать шаблон** - выбрать шаблон для текущей обработки"
         )
         
         await safe_answer(message, 
@@ -569,7 +572,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
     status_message = None
     try:
         # Отправляем сообщение о начале обработки
-        status_message = await safe_answer(message, "🔍 Проверяю ссылку...")
+        status_message = await safe_answer(message, "Проверяю ссылку...")
         if not status_message:
             logger.warning("Не удалось отправить статусное сообщение")
             return
@@ -588,7 +591,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 return
             
             # Получаем информацию о файле
-            await safe_edit_text(status_message, "📊 Получаю информацию о файле...")
+            await safe_edit_text(status_message, "Получаю информацию о файле...")
             
             try:
                 filename, file_size, direct_url = await url_service.get_file_info(url)
@@ -601,9 +604,9 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await safe_edit_text(
                     status_message,
                     f"✅ Файл найден!\n\n"
-                    f"📄 Имя: {filename}\n"
-                    f"📊 Размер: {size_mb:.1f} МБ\n\n"
-                    f"⬇️ Начинаю скачивание..."
+                    f"Имя: {filename}\n"
+                    f"Размер: {size_mb:.1f} МБ\n\n"
+                    f"Начинаю скачивание..."
                 )
                 
                 # Скачиваем файл (используем уже полученный direct_url, чтобы не делать повторный запрос)

@@ -38,7 +38,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
                 saved = participants_service.participants_from_json(user.saved_participants)
                 if saved:
                     keyboard_buttons.append([InlineKeyboardButton(
-                        text=f"📋 Использовать сохраненный ({len(saved)} чел.)",
+                        text=f"Использовать сохраненный ({len(saved)} чел.)",
                         callback_data="use_saved_participants"
                     )])
             except Exception:
@@ -46,7 +46,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
 
         # Add new participants
         keyboard_buttons.append([InlineKeyboardButton(
-            text="👥 Добавить участников",
+            text="Добавить участников",
             callback_data="input_new_participants"
         )])
 
@@ -59,7 +59,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "👥 **Участники встречи**\n\n"
+            "**Участники встречи**\n\n"
             "Укажите участников для точной атрибуции в протоколе.\n"
             "Введите имена в любом формате — по одному на строку."
         )
@@ -79,19 +79,19 @@ async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dic
     """Menu for inputting additional protocol information"""
     try:
         keyboard_buttons = [
-            [InlineKeyboardButton(text="📋 Повестка встречи", callback_data="input_meeting_agenda")],
-            [InlineKeyboardButton(text="📊 Список проектов", callback_data="input_project_list")],
-            [InlineKeyboardButton(text="✅ Готово", callback_data="protocol_info_complete")],
+            [InlineKeyboardButton(text="Повестка встречи", callback_data="input_meeting_agenda")],
+            [InlineKeyboardButton(text="Список проектов", callback_data="input_project_list")],
+            [InlineKeyboardButton(text="Готово", callback_data="protocol_info_complete")],
             [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
         ]
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "📝 **Дополнительная информация к протоколу**\n\n"
+            "**Дополнительная информация к протоколу**\n\n"
             "Добавьте контекст для улучшения качества протокола:\n\n"
-            "📋 **Повестка встречи** - основные темы и вопросы для обсуждения\n"
-            "📊 **Список проектов** - названия проектов, упоминаемых во встрече\n\n"
+            "**Повестка встречи** - основные темы и вопросы для обсуждения\n"
+            "**Список проектов** - названия проектов, упоминаемых во встрече\n\n"
             "Выберите действие:"
         )
 
@@ -120,11 +120,11 @@ def setup_participants_handlers() -> Router:
 
             # Создаем клавиатуру с кнопками навигации
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_participants")]
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel_participants")]
             ])
 
             await safe_answer(callback.message, 
-                "🔍 **Автоматическое извлечение информации о встрече**\n\n"
+                "**Автоматическое извлечение информации о встрече**\n\n"
                 "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
                 "**Поддерживаемые форматы:**\n"
                 "• Email с полями От, Кому, Копия, Тема, Когда\n"
@@ -156,7 +156,7 @@ def setup_participants_handlers() -> Router:
             ])
 
             await safe_answer(callback.message, 
-                "📝 **Введите список участников**\n\n"
+                "**Введите список участников**\n\n"
                 "Отправьте список участников текстом (один участник на строку).\n\n"
                 "**Примеры форматов:**\n"
                 "• `Иван Петров, руководитель`\n"
@@ -184,7 +184,7 @@ def setup_participants_handlers() -> Router:
             ])
             
             await safe_answer(callback.message, 
-                "📎 **Загрузите файл с участниками**\n\n"
+                "**Загрузите файл с участниками**\n\n"
                 "Отправьте файл в формате .txt или .csv\n\n"
                 "**Формат .txt:**\n"
                 "```\n"
@@ -278,7 +278,7 @@ def setup_participants_handlers() -> Router:
             # Проверка на команду отмены
             if text.startswith('/cancel'):
                 await state.clear()
-                await message.answer("❌ Ввод участников отменен.")
+                await message.answer("Ввод участников отменен.")
                 return
 
             # Гибридный подход: пробуем автоизвлечение, затем обычный парсинг
@@ -354,7 +354,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_meeting_info"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_meeting_info")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_meeting_info")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
@@ -363,7 +363,7 @@ def setup_participants_handlers() -> Router:
                 ])
 
                 await safe_answer(message, 
-                    f"🔍 **Автоматически извлечена информация о встрече:**\n\n"
+                    f"**Автоматически извлечена информация о встрече:**\n\n"
                     f"{display_text}{warning_text}\n\n**Использовать эту информацию?**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -380,7 +380,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
@@ -451,7 +451,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="upload_participants_file"),
@@ -605,7 +605,7 @@ def setup_participants_handlers() -> Router:
         try:
             await callback.answer("Ввод отменен")
             await state.clear()
-            await callback.message.answer("❌ Ввод участников отменен.")
+            await callback.message.answer("Ввод участников отменен.")
             
         except Exception as e:
             logger.error(f"Ошибка при отмене: {e}")
@@ -630,10 +630,10 @@ def setup_participants_handlers() -> Router:
             # Set FSM state for text input
             if info_type == "meeting_agenda":
                 await state.set_state(ProtocolInfoState.waiting_agenda)
-                prompt_text = "📋 **Введите повестку встречи**\n\nПеречислите основные темы и вопросы для обсуждения:"
+                prompt_text = "**Введите повестку встречи**\n\nПеречислите основные темы и вопросы для обсуждения:"
             elif info_type == "project_list":
                 await state.set_state(ProtocolInfoState.waiting_project_list)
-                prompt_text = "📊 **Введите список проектов**\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
+                prompt_text = "**Введите список проектов**\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
             else:
                 return
 

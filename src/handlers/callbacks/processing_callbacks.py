@@ -27,7 +27,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         data = await state.get_data()
 
         # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info("🔍 Данные из state перед созданием request (callback):")
+        logger.info("Данные из state перед созданием request (callback):")
         participants_list = data.get('participants_list')
         if participants_list:
             logger.info(f"  participants_list: {len(participants_list)} чел.")
@@ -100,7 +100,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         )
 
         # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info("🔍 ProcessingRequest создан, проверка полей:")
+        logger.info("ProcessingRequest создан, проверка полей:")
         if request.participants_list:
             logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
         else:
@@ -256,7 +256,7 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             )
 
             await safe_edit_text(callback.message,
-                "🚀 **Быстрая обработка**\n\n⏳ Начинаю обработку...")
+                "**Быстрая обработка**\n\n⏳ Начинаю обработку...")
             await _safe_callback_answer(callback)
             await _process_file(callback, state, processing_service)
 

@@ -24,19 +24,19 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'messages' else ''}💬 В сообщения",
+                    text=f"{'✅ ' if current == 'messages' else ''}В сообщения",
                     callback_data="set_protocol_output_messages"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'file' else ''}📎 В файл md",
+                    text=f"{'✅ ' if current == 'file' else ''}В файл md",
                     callback_data="set_protocol_output_file"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'pdf' else ''}📄 В файл pdf",
+                    text=f"{'✅ ' if current == 'pdf' else ''}В файл pdf",
                     callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'docx' else ''}📝 В файл Word",
+                    text=f"{'✅ ' if current == 'docx' else ''}В файл Word",
                     callback_data="set_protocol_output_docx"
                 )],
                 [InlineKeyboardButton(
@@ -46,12 +46,12 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message,
-                "📤 **Вывод протокола**\n\n"
+                "**Вывод протокола**\n\n"
                 "Выберите, как отправлять готовый протокол:\n"
-                "• 💬 В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
-                "• 📎 В файл md — протокол отправляется как прикрепленный файл (.md)\n"
-                "• 📄 В файл pdf — протокол отправляется как прикрепленный файл (.pdf)\n"
-                "• 📝 В файл Word — протокол приходит документом Word (.docx)",
+                "• В сообщения — протокол приходит текстом в чат (по умолчанию)\n"
+                "• В файл md — протокол отправляется как прикрепленный файл (.md)\n"
+                "• В файл pdf — протокол отправляется как прикрепленный файл (.pdf)\n"
+                "• В файл Word — протокол приходит документом Word (.docx)",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -66,16 +66,16 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         try:
             if callback.data.endswith('messages'):
                 mode = 'messages'
-                mode_text = "💬 В сообщения"
+                mode_text = "В сообщения"
             elif callback.data.endswith('pdf'):
                 mode = 'pdf'
-                mode_text = "📄 В файл pdf"
+                mode_text = "В файл pdf"
             elif callback.data.endswith('docx'):
                 mode = 'docx'
-                mode_text = "📝 В файл Word"
+                mode_text = "В файл Word"
             else:
                 mode = 'file'
-                mode_text = "📎 В файл md"
+                mode_text = "В файл md"
 
             await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
 
@@ -113,7 +113,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message,
-                "🔄 **Настройки сброшены**\n\n"
+                "**Настройки сброшены**\n\n"
                 "Все ваши настройки восстановлены по умолчанию:\n\n"
                 "• Шаблон по умолчанию сброшен\n"
                 "• Другие настройки восстановлены\n\n"
@@ -144,9 +144,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 favorite_templates = user_stats.get('favorite_templates', [])
                 llm_providers = user_stats.get('llm_providers', [])
 
-                stats_text = "📊 **Ваша статистика**\n\n"
-                stats_text += f"🔄 **Обработано файлов:** {total_files}\n"
-                stats_text += f"📅 **Активных дней:** {active_days}\n"
+                stats_text = "**Ваша статистика**\n\n"
+                stats_text += f"**Обработано файлов:** {total_files}\n"
+                stats_text += f"**Активных дней:** {active_days}\n"
 
                 if user_stats.get('first_file_date'):
                     try:
@@ -154,28 +154,28 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                             user_stats['first_file_date'].replace('Z', '+00:00')
                         )
                         days_since = (datetime.now() - first_date.replace(tzinfo=None)).days
-                        stats_text += f"🎯 **Дней с начала:** {days_since}\n"
+                        stats_text += f"**Дней с начала:** {days_since}\n"
                     except Exception:
                         pass
 
                 if favorite_templates:
-                    stats_text += "\n📝 **Популярные шаблоны:**\n"
+                    stats_text += "\n**Популярные шаблоны:**\n"
                     for t in favorite_templates[:3]:
                         stats_text += f"• {t['name']}: {t['count']} раз\n"
 
                 if llm_providers:
-                    stats_text += "\n🤖 **AI модели:**\n"
+                    stats_text += "\n**AI модели:**\n"
                     for p in llm_providers[:3]:
                         name = p['llm_provider'].title() if p['llm_provider'] else '?'
                         stats_text += f"• {name}: {p['count']} раз\n"
             else:
-                stats_text = "📊 **Статистика**\n\nОбработано файлов: 0\n🚀 Отправьте файл для обработки!\n"
+                stats_text = "**Статистика**\n\nОбработано файлов: 0\nОтправьте файл для обработки!\n"
 
             # System stats only for admins
             from src.utils.admin_utils import is_admin
             if is_admin(callback.from_user.id):
                 stats_text += (
-                    f"\n🌐 **Система:**\n"
+                    f"\n**Система:**\n"
                     f"• Запросов: {system_stats.get('total_requests', 0)}\n"
                     f"• Пользователей: {system_stats.get('active_users', 0)}\n"
                     f"• Среднее время: {system_stats.get('average_processing_time', 0):.1f}с\n"
@@ -264,7 +264,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             await safe_edit_text(
                 callback.message,
-                "🤖 **Модель ИИ**\n\n"
+                "**Модель ИИ**\n\n"
                 "Выберите модель, которая будет использоваться ботом:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
                 parse_mode="Markdown",

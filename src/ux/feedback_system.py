@@ -154,19 +154,18 @@ class FeedbackUI:
         # Рейтинг от 1 до 5
         rating_row = []
         for i in range(1, 6):
-            emoji = "⭐" * i
             rating_row.append(
                 InlineKeyboardButton(
-                    text=f"{i} {emoji}",
+                    text=str(i),
                     callback_data=f"feedback_rating_{feedback_type}_{i}"
                 )
             )
         buttons.append(rating_row)
-        
+
         # Кнопка пропуска
         buttons.append([
             InlineKeyboardButton(
-                text="⏭️ Пропустить оценку",
+                text="⏭ Пропустить оценку",
                 callback_data=f"feedback_skip_{feedback_type}"
             )
         ])
@@ -179,31 +178,31 @@ class FeedbackUI:
         buttons = [
             [
                 InlineKeyboardButton(
-                    text="📋 Качество протокола",
+                    text="Качество протокола",
                     callback_data="feedback_type_protocol_quality"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="⚡ Скорость обработки",
+                    text="Скорость обработки",
                     callback_data="feedback_type_processing_speed"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🎨 Удобство использования",
+                    text="Удобство использования",
                     callback_data="feedback_type_user_experience"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🐛 Сообщить об ошибке",
+                    text="Сообщить об ошибке",
                     callback_data="feedback_type_bug_report"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="💡 Предложение улучшения",
+                    text="Предложение улучшения",
                     callback_data="feedback_type_suggestion"
                 )
             ]
@@ -216,27 +215,27 @@ class FeedbackUI:
         """Сформировать запрос обратной связи"""
         type_messages = {
             "protocol_quality": (
-                "📋 **Оценка качества протокола**\n\n"
+                "**Оценка качества протокола**\n\n"
                 "Насколько вы довольны качеством созданного протокола?\n"
                 "Учитывайте структуру, полноту информации и точность транскрипции."
             ),
             "processing_speed": (
-                "⚡ **Оценка скорости обработки**\n\n"
+                "**Оценка скорости обработки**\n\n"
                 "Как вы оцениваете скорость обработки вашего файла?\n"
                 "Было ли время ожидания приемлемым?"
             ),
             "user_experience": (
-                "🎨 **Оценка удобства использования**\n\n"
+                "**Оценка удобства использования**\n\n"
                 "Насколько удобно было использовать бота?\n"
                 "Понятен ли интерфейс и логика работы?"
             ),
             "bug_report": (
-                "🐛 **Сообщение об ошибке**\n\n"
+                "**Сообщение об ошибке**\n\n"
                 "Оцените серьезность проблемы и опишите что произошло.\n"
                 "Ваш отзыв поможет нам исправить ошибки."
             ),
             "suggestion": (
-                "💡 **Предложение улучшения**\n\n"
+                "**Предложение улучшения**\n\n"
                 "Есть идеи как сделать бота лучше?\n"
                 "Оцените важность вашего предложения."
             )
@@ -275,10 +274,9 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             feedback_collector.add_feedback(feedback)
             
             # Подтверждаем без фанфар: оценка — служебное действие
-            rating_emoji = "⭐" * rating
             await safe_edit_text(
                 callback.message,
-                f"Оценка записана: {rating}/5 {rating_emoji}",
+                f"Оценка записана: {rating}/5",
                 parse_mode="Markdown"
             )
             
@@ -291,7 +289,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
         """Обработчик пропуска оценки"""
         await safe_edit_text(
             callback.message,
-            "👌 **Оценка пропущена**\n\n"
+            "**Оценка пропущена**\n\n"
             "Вы всегда можете оставить обратную связь командой /feedback"
         )
     

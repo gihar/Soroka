@@ -12,7 +12,6 @@ from typing import Optional, Protocol, runtime_checkable
 
 from src.services.protocol_render.telegram_html import escape_telegram_html
 
-_SEPARATOR = "────────────────────────"
 _NOT_DEFINED = "Не определен"
 
 
@@ -54,7 +53,7 @@ class MappingCard:
 
     def to_html(self) -> str:
         """Разметка Telegram HTML: жирные заголовок и спикеры, цитаты в кавычках."""
-        lines = [f"🎭 <b>{escape_telegram_html(self.header)}</b>", ""]
+        lines = [f"<b>{escape_telegram_html(self.header)}</b>", ""]
         for row in self.rows:
             speaker = f"<b>{escape_telegram_html(row.speaker_id)}</b>"
             if row.display_name:
@@ -66,12 +65,11 @@ class MappingCard:
             lines.append("")
         if self.hint:
             lines.append(f"<i>{escape_telegram_html(self.hint)}</i>")
-        lines.append(_SEPARATOR)
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip("\n")
 
     def to_plain(self) -> str:
         """Plain-страховка: то же содержимое без тегов и без экранирования."""
-        lines = [f"🎭 {self.header}", ""]
+        lines = [self.header, ""]
         for row in self.rows:
             if row.display_name:
                 lines.append(f"{row.speaker_id} → {row.display_name} ✓")
@@ -82,8 +80,7 @@ class MappingCard:
             lines.append("")
         if self.hint:
             lines.append(self.hint)
-        lines.append(_SEPARATOR)
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip("\n")
 
 
 @dataclass(frozen=True)

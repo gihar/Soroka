@@ -73,7 +73,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "📋 **Выберите шаблон:**\n\nШаблон будет использован для текущей обработки.",
+                "**Выберите шаблон:**\n\nШаблон будет использован для текущей обработки.",
                 reply_markup=keyboard, parse_mode="Markdown"
             )
 
@@ -100,7 +100,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 return
 
             await safe_edit_text(callback.message,
-                f"📋 **Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
+                f"**Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -132,7 +132,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=template_id, use_smart_selection=False)
 
             await safe_edit_text(callback.message,
-                f"📋 **Выбран шаблон: {template.name}**\n\n"
+                f"**Выбран шаблон: {template.name}**\n\n"
                 "Шаблон будет использован для текущей обработки.\n\n"
                 "⏳ Начинаю обработку...",
                 parse_mode="Markdown"
@@ -208,7 +208,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message,
-                "📝 Выберите шаблон для протокола:",
+                "Выберите шаблон для протокола:",
                 reply_markup=keyboard
             )
 
@@ -227,7 +227,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"📝 **Все шаблоны**\n\n"
+                f"**Все шаблоны**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон для установки по умолчанию:",
                 reply_markup=keyboard
@@ -249,7 +249,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"📝 **Все шаблоны**\n\n"
+                f"**Все шаблоны**\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон:",
                 reply_markup=keyboard
@@ -271,7 +271,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             # Добавляем кнопку умного выбора
             keyboard_buttons.append([InlineKeyboardButton(
-                text="🤖 Умный выбор шаблона",
+                text="Умный выбор шаблона",
                 callback_data="smart_template_selection"
             )])
 
@@ -285,8 +285,8 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "📝 **Выберите шаблон для протокола:**\n\n"
-                "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон",
+                "**Выберите шаблон для протокола:**\n\n"
+                "**Умный выбор** - ИИ автоматически подберёт подходящий шаблон",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -309,7 +309,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=0, use_smart_selection=True)
 
             await safe_edit_text(callback.message,
-                "🤖 **Умный выбор шаблона активирован!**\n\n"
+                "**Умный выбор шаблона активирован!**\n\n"
                 "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
                 "наиболее подходящий шаблон после транскрипции.\n\n"
                 "⏳ Начинаю обработку...",
@@ -337,7 +337,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=0, use_smart_selection=True)
 
             await safe_edit_text(callback.message,
-                "🤖 **Умный выбор шаблона**\n\n"
+                "**Умный выбор шаблона**\n\n"
                 "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                 "⏳ Начинаю обработку...",
                 parse_mode="Markdown"
@@ -375,7 +375,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             if user.default_template_id == 0:
                 await state.update_data(template_id=0, use_smart_selection=True)
                 await safe_edit_text(callback.message,
-                    "🤖 **Используется Умный выбор шаблона**\n\n"
+                    "**Используется Умный выбор шаблона**\n\n"
                     "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                     "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
@@ -393,7 +393,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
                 await state.update_data(template_id=template.id, use_smart_selection=False)
                 await safe_edit_text(callback.message,
-                    f"📋 **Используется шаблон: {template.name}**\n\n"
+                    f"**Используется шаблон: {template.name}**\n\n"
                     "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )
@@ -437,7 +437,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"⚙️ **Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
+                f"**Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -464,7 +464,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
                 await safe_edit_text(callback.message,
                     "✅ **Умный выбор установлен по умолчанию**\n\n"
-                    "🤖 ИИ автоматически подберёт подходящий шаблон.\n\n"
+                    "ИИ автоматически подберёт подходящий шаблон.\n\n"
                     "⏳ Начинаю обработку...",
                     parse_mode="Markdown"
                 )

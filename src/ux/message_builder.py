@@ -93,12 +93,12 @@ class MessageBuilder:
             suggestions = cls._get_default_suggestions(error_type)
         
         if suggestions:
-            message += "💡 **Что можно сделать:**\n"
+            message += "**Что можно сделать:**\n"
             for suggestion in suggestions:
                 message += f"• {suggestion}\n"
             message += "\n"
-        
-        message += "🔄 Попробуйте еще раз или обратитесь за помощью командой /help"
+
+        message += "Попробуйте еще раз или обратитесь за помощью командой /help"
         
         return message
     
@@ -160,7 +160,7 @@ class MessageBuilder:
 
         template_name = (result.get("template_used") or {}).get("name")
         if template_name:
-            lines.append(f"\U0001F4DD Шаблон: {_html.escape(template_name)}")
+            lines.append(f"Шаблон: {_html.escape(template_name)}")
 
         participants_line = cls._participants_line(result)
         if participants_line:
@@ -168,7 +168,7 @@ class MessageBuilder:
 
         duration = result.get("processing_duration")
         if duration:
-            lines.append(f"\u23F1 Обработка: {cls._format_duration(duration)}")
+            lines.append(f"Обработка: {cls._format_duration(duration)}")
 
         return "\n".join(lines)
 
@@ -188,10 +188,10 @@ class MessageBuilder:
         """Строка об участниках: сопоставление или количество голосов."""
         speaker_mapping = result.get("speaker_mapping") or {}
         if speaker_mapping:
-            return f"\U0001F465 Участников сопоставлено: {len(speaker_mapping)}"
+            return f"Участников сопоставлено: {len(speaker_mapping)}"
         diarization = (result.get("transcription_result") or {}).get("diarization")
         if diarization and len(getattr(diarization, "speakers", [])) > 1:
-            return f"\U0001F465 Участников: {len(diarization.speakers)}"
+            return f"Участников: {len(diarization.speakers)}"
         return ""
 
     @staticmethod
@@ -220,28 +220,28 @@ class MessageBuilder:
             actual_mb = actual_size / (1024 * 1024)
             
             return (
-                f"📦 **Файл слишком большой**\n\n"
+                f"**Файл слишком большой**\n\n"
                 f"Размер файла: {actual_mb:.1f} MB\n"
                 f"Максимальный размер: {max_size} MB\n\n"
-                f"💡 **Что можно сделать:**\n"
+                f"**Что можно сделать:**\n"
                 f"• Сжать файл с помощью программ для конвертации\n"
                 f"• Разделить запись на несколько частей\n"
                 f"• Использовать формат с лучшим сжатием (MP3)\n"
                 f"• Снизить качество аудио для уменьшения размера\n"
                 f"• Система автоматически сжимает файлы для ускорения обработки"
             )
-        
+
         elif error_type == "format":
             file_ext = error_details.get("extension", "")
             supported_formats = error_details.get("supported_formats", [])
-            
+
             return (
-                f"📁 **Неподдерживаемый формат файла**\n\n"
+                f"**Неподдерживаемый формат файла**\n\n"
                 f"Формат файла: {file_ext}\n\n"
-                f"✅ **Поддерживаемые форматы:**\n"
-                f"🎵 Аудио: {', '.join(supported_formats.get('audio', []))}\n"
-                f"🎬 Видео: {', '.join(supported_formats.get('video', []))}\n\n"
-                f"💡 **Что можно сделать:**\n"
+                f"**Поддерживаемые форматы:**\n"
+                f"Аудио: {', '.join(supported_formats.get('audio', []))}\n"
+                f"Видео: {', '.join(supported_formats.get('video', []))}\n\n"
+                f"**Что можно сделать:**\n"
                 f"• Конвертировать файл в поддерживаемый формат\n"
                 f"• Отправить файл как документ\n"
                 f"• Использовать онлайн-конвертеры\n"
@@ -254,13 +254,13 @@ class MessageBuilder:
     def templates_help_message(cls) -> str:
         """Справка по работе с шаблонами"""
         return (
-            "📝 **Управление шаблонами протоколов**\n\n"
-            
-            "🎨 **Что такое шаблоны?**\n"
+            "**Управление шаблонами протоколов**\n\n"
+
+            "**Что такое шаблоны?**\n"
             "Шаблоны определяют структуру и содержание итогового протокола. "
             "Вы можете использовать готовые шаблоны или создать собственные.\n\n"
-            
-            "✨ **Основные переменные:**\n"
+
+            "**Основные переменные:**\n"
             "• `{{ meeting_title }}` - название встречи\n"
             "• `{{ date }}` / `{{ time }}` - дата и время\n"
             "• `{{ participants }}` - список участников\n"
@@ -270,11 +270,11 @@ class MessageBuilder:
             "• `{{ discussion }}` - ход обсуждения\n"
             "• `{{ next_steps }}` - следующие шаги\n\n"
 
-            "🔀 **Условные секции:**\n"
+            "**Условные секции:**\n"
             "Оборачивайте секцию в `{% if переменная %}` ... `{% endif %}` - "
             "если данных нет, секция не попадёт в протокол (ни заголовка, ни пустого места).\n\n"
 
-            "📋 **Пример шаблона:**\n"
+            "**Пример шаблона:**\n"
             "```\n"
             "# {{ meeting_title or 'Протокол встречи' }}\n"
             "{% if date %}**Дата:** {{ date }}{% endif %}\n"
@@ -285,7 +285,7 @@ class MessageBuilder:
             "{% endif %}\n"
             "```\n\n"
 
-            "💡 **Советы:**\n"
+            "**Советы:**\n"
             "• Используйте Markdown: `#` заголовки, `-` списки, `**жирный**`\n"
             "• Тестируйте шаблоны с предпросмотром\n"
             "• Создавайте специализированные шаблоны для разных типов встреч"

@@ -95,7 +95,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             except Exception:
                 can_delete = False
 
-            text = f"📝 **{template.name}**\n\n"
+            text = f"**{template.name}**\n\n"
             if template.description:
                 text += f"*Описание:* {template.description}\n\n"
 
@@ -105,11 +105,11 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             rows = []
             if can_delete:
                 rows.append([InlineKeyboardButton(
-                    text="🗑 Удалить шаблон",
+                    text="Удалить шаблон",
                     callback_data=f"delete_template_{template.id}"
                 )])
             rows.append([InlineKeyboardButton(
-                text="🔙 Назад к списку шаблонов",
+                text="Назад к списку шаблонов",
                 callback_data="back_to_templates"
             )])
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -131,7 +131,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
-                    InlineKeyboardButton(text="↩️ Отмена", callback_data=f"view_template_{template_id}")
+                    InlineKeyboardButton(text="Отмена", callback_data=f"view_template_{template_id}")
                 ]
             ])
             await safe_edit_text(callback.message,
@@ -158,10 +158,10 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                         text=t.name,
                         callback_data=f"view_template_{t.id}"
                     )] for t in templates
-                ] + [[InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_template")]])
+                ] + [[InlineKeyboardButton(text="Добавить шаблон", callback_data="add_template")]])
 
                 await safe_edit_text(callback.message,
-                    "🗑 Шаблон удалён.\n\n📝 **Доступные шаблоны:**",
+                    "Шаблон удалён.\n\n**Доступные шаблоны:**",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
                 )
@@ -217,14 +217,14 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             # Добавляем кнопку создания шаблона
             keyboard_buttons.append([InlineKeyboardButton(
-                text="➕ Добавить шаблон",
+                text="Добавить шаблон",
                 callback_data="add_template"
             )])
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                f"📝 **Доступные шаблоны:** {len(templates)}\n\n"
+                f"**Доступные шаблоны:** {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
@@ -246,7 +246,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 # Если нет шаблонов, предлагаем создать
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
-                        text="📝 Создать шаблон",
+                        text="Создать шаблон",
                         callback_data="create_template"
                     )],
                     [InlineKeyboardButton(
@@ -256,7 +256,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ])
 
                 await safe_edit_text(callback.message,
-                    "📝 **Шаблон по умолчанию**\n\n"
+                    "**Шаблон по умолчанию**\n\n"
                     "У вас пока нет доступных шаблонов.\n"
                     "Создайте шаблон, чтобы установить его по умолчанию:",
                     reply_markup=keyboard
@@ -267,12 +267,12 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                     all_templates,
                     lambda t: f"set_default_template_{t.id}",
                     top_rows=[[InlineKeyboardButton(
-                        text="🤖 Умный выбор (рекомендуется)",
+                        text="Умный выбор (рекомендуется)",
                         callback_data="set_default_template_0",
                     )]],
                     bottom_rows=[
                         [InlineKeyboardButton(
-                            text="🔄 Сбросить шаблон по умолчанию",
+                            text="Сбросить шаблон по умолчанию",
                             callback_data="reset_default_template",
                         )],
                         [InlineKeyboardButton(
@@ -283,7 +283,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 )
 
                 await safe_edit_text(callback.message,
-                    "📝 **Шаблон по умолчанию**\n\n"
+                    "**Шаблон по умолчанию**\n\n"
                     "Выберите шаблон или доверьте выбор ИИ:",
                     reply_markup=keyboard,
                     parse_mode="Markdown"
@@ -409,7 +409,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             # Добавляем опцию "Умный выбор" первой
             keyboard_buttons.append([InlineKeyboardButton(
-                text="🤖 Умный выбор (рекомендуется)",
+                text="Умный выбор (рекомендуется)",
                 callback_data="quick_template_smart"
             )])
 
@@ -429,7 +429,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "⚙️ **Выберите шаблон по умолчанию:**\n\n"
+                "**Выберите шаблон по умолчанию:**\n\n"
                 "Выбранный шаблон будет сохранён и использован для обработки этого файла.",
                 reply_markup=keyboard,
                 parse_mode="Markdown"

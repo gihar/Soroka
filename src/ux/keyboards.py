@@ -20,7 +20,7 @@ def build_template_picker(
     top_rows: Optional[List[_Row]] = None,
     bottom_rows: Optional[List[_Row]] = None,
     cancel_callback: Optional[str] = None,
-    cancel_text: str = "✖️ Отмена",
+    cancel_text: str = "Отмена",
 ) -> InlineKeyboardMarkup:
     """Сетка выбора шаблона в 2 колонки — единый вид для всех пикеров.
 

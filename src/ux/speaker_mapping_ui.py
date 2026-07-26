@@ -290,7 +290,7 @@ def create_mapping_keyboard(
                 short_name = participants_service.convert_full_name_to_short(participant_name)
                 button_text = f"✏️ {speaker_id}: {short_name}"
             else:
-                button_text = f"➕ {speaker_id}"
+                button_text = f"{speaker_id}"
             
             keyboard_buttons.append([InlineKeyboardButton(
                 text=button_text,
