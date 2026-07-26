@@ -93,16 +93,16 @@ def _protocol_actions_keyboard(history_id, output_mode: str):
     file_row = []
     if output_mode != "pdf":
         file_row.append(InlineKeyboardButton(
-            text="📄 PDF", callback_data=f"proto_pdf_{history_id}"
+            text="PDF", callback_data=f"proto_pdf_{history_id}"
         ))
     if output_mode != "docx":
         file_row.append(InlineKeyboardButton(
-            text="📝 Word", callback_data=f"proto_docx_{history_id}"
+            text="Word", callback_data=f"proto_docx_{history_id}"
         ))
     if file_row:
         rows.append(file_row)
     rows.append([InlineKeyboardButton(
-        text="🔁 Другой шаблон", callback_data=f"proto_regen_{history_id}"
+        text="Другой шаблон", callback_data=f"proto_regen_{history_id}"
     )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -134,7 +134,7 @@ async def send_protocol_file(bot, chat_id: int, protocol_text: str,
                              reply_markup=None) -> bool:
     """Render and send the protocol as a downloadable ``.md``/``.pdf``/``.docx``.
 
-    Reusable outside the delivery pipeline (e.g. the «📄 PDF» / «📝 Word» actions
+    Reusable outside the delivery pipeline (e.g. the «PDF» / «Word» actions
     on an already delivered protocol). Word/PDF render failures degrade to the
     canonical ``.md`` rather than dropping the delivery. Returns ``True`` only
     when delivered.
