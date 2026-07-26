@@ -61,21 +61,6 @@ async def test_settings_button_renders_bold_not_literal_stars():
 
 
 @pytest.mark.asyncio
-async def test_upload_file_button_renders_bold_not_literal_stars():
-    """«Загрузка файла» приходит жирным <b>, а не буквальными `**` (баг 2)."""
-    from src.ux.quick_actions import setup_quick_actions_handlers
-
-    router = setup_quick_actions_handlers()
-    message = _mock_message()
-    await _invoke_message_handler(router, "upload_file_button_handler", message)
-
-    text, parse_mode = _last_answer(message)
-    assert parse_mode == "HTML"
-    assert "**" not in text
-    assert "<b>Загрузка файла</b>" in text
-
-
-@pytest.mark.asyncio
 async def test_feedback_skip_renders_bold_not_literal_stars():
     """«Оценка пропущена» (safe_edit_text без parse_mode — баг) уходит в HTML."""
     from src.ux import feedback_system as fs
@@ -294,11 +279,10 @@ _TAG_RE = re.compile(r"</?(b|i|code|pre|u|s)>")
 
 
 def _surface_files():
+    # Фаза 4 распространила канон на админ-поверхность — admin_handlers больше
+    # не исключается из инварианта «HTML-теги ⇒ parse_mode=HTML».
     for base in ("ux", "handlers"):
-        for path in (_SRC / base).rglob("*.py"):
-            if path.name == "admin_handlers.py":
-                continue
-            yield path
+        yield from (_SRC / base).rglob("*.py")
 
 
 def _call_text(call: ast.Call) -> str:

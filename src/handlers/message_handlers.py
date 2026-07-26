@@ -19,7 +19,21 @@ from src.services import FileService, ProcessingService, TemplateService
 from src.services.url_service import URLService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
-from src.ux.quick_actions import QuickActionsUI
+from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
+
+
+def _menu_button_texts() -> list[str]:
+    """Подписи кнопок главного меню (create_main_menu).
+
+    Единый список зеркалит подписи главного меню: text_handler пропускает эти
+    тапы в свой роутер вместо разбора как URL. Вход в админку берётся из общей
+    константы ADMIN_MENU_BUTTON, чтобы подпись не разъехалась с кнопкой.
+    """
+    return [
+        "Мои шаблоны", "⚙️ Настройки",
+        "Помощь", "Обратная связь",
+        ADMIN_MENU_BUTTON,
+    ]
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
@@ -107,15 +121,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             text = message.text.strip()
             
             # Исключаем обработку кнопок меню - они должны обрабатываться в quick_actions.
-            # Список зеркалит подписи главного меню (create_main_menu): при их смене
-            # правится и здесь, иначе тап по кнопке уйдёт в обработку как URL.
-            menu_buttons = [
-                "Мои шаблоны", "⚙️ Настройки",
-                "Помощь", "Обратная связь",
-                "🔧 Меню администратора",
-            ]
-            
-            if text in menu_buttons:
+            if text in _menu_button_texts():
                 # Пропускаем - пусть обрабатывает другой роутер
                 return
             
@@ -325,100 +331,6 @@ async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
         logger.debug(f"Мониторинг позиции задачи {task_id} отменен")
     except Exception as e:
         logger.error(f"Ошибка в мониторинге позиции задачи {task_id}: {e}")
-
-
-def _fix_markdown_tags(text: str) -> str:
-    """Исправить незакрытые Markdown-теги в тексте"""
-    # Подсчитываем количество открытых/закрытых тегов
-    bold_count = text.count('**')
-    italic_count = text.count('_')
-    code_count = text.count('`')
-    
-    # Закрываем незакрытые теги
-    if bold_count % 2 != 0:
-        text = text + '**'
-    if italic_count % 2 != 0:
-        text = text + '_'
-    if code_count % 2 != 0:
-        text = text + '`'
-    
-    return text
-
-
-async def _send_long_protocol(message: Message, protocol_text: str):
-    """Отправить длинный протокол частями"""
-    try:
-        # Максимальная длина сообщения в Telegram (с запасом)
-        MAX_LENGTH = 4000
-        
-        logger.info(f"Начинаем разбивку протокола длиной {len(protocol_text)} символов на части")
-        
-        # Разбиваем протокол на части
-        parts = []
-        current_part = ""
-        
-        # Разбиваем по строкам, чтобы не разрывать слова
-        lines = protocol_text.split('\n')
-        logger.info(f"Разбиваем на {len(lines)} строк")
-        
-        for line_num, line in enumerate(lines):
-            # Проверяем, поместится ли строка в текущую часть
-            if len(current_part) + len(line) + 1 <= MAX_LENGTH:
-                current_part += line + '\n'
-            else:
-                # Если текущая часть не пустая, добавляем её в список частей
-                if current_part.strip():
-                    parts.append(current_part.strip())
-                    logger.debug(f"Добавлена часть {len(parts)} длиной {len(current_part.strip())} символов")
-                # Начинаем новую часть
-                current_part = line + '\n'
-        
-        # Добавляем последнюю часть, если она не пустая
-        if current_part.strip():
-            parts.append(current_part.strip())
-            logger.debug(f"Добавлена последняя часть {len(parts)} длиной {len(current_part.strip())} символов")
-        
-        logger.info(f"Протокол разбит на {len(parts)} частей")
-        
-        # Отправляем части
-        for i, part in enumerate(parts):
-            try:
-                if i == 0:
-                    # Первая часть
-                    part_text = f"📄 **Протокол встречи:**\n\n{part}"
-                else:
-                    # Остальные части с номером
-                    part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
-                
-                # Исправляем незакрытые Markdown-теги
-                part_text = _fix_markdown_tags(part_text)
-                
-                logger.debug(f"Отправляем часть {i+1}/{len(parts)} длиной {len(part_text)} символов")
-                await safe_answer(message, part_text, parse_mode="Markdown")
-                
-                # Небольшая задержка между сообщениями
-                import asyncio
-                await asyncio.sleep(0.5)
-                
-            except Exception as part_error:
-                logger.error(f"Ошибка при отправке части {i+1}: {part_error}")
-                # Пытаемся отправить часть без Markdown
-                try:
-                    await message.answer(f"📄 Протокол (часть {i+1}):\n\n{part}")
-                except Exception as fallback_error:
-                    logger.error(f"Не удалось отправить часть {i+1} даже без Markdown: {fallback_error}")
-                    await message.answer(f"❌ Ошибка при отправке части {i+1} протокола")
-            
-    except Exception as e:
-        logger.error(f"Ошибка при отправке длинного протокола: {e}")
-        # Если не удалось разбить, отправляем как есть (может быть обрезано)
-        try:
-            truncated_text = protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)"
-            logger.info(f"Отправляем обрезанный протокол длиной {len(truncated_text)} символов")
-            await safe_answer(message, truncated_text, parse_mode="Markdown")
-        except Exception as fallback_error:
-            logger.error(f"Не удалось отправить даже обрезанный протокол: {fallback_error}")
-            await message.answer("❌ Ошибка при отправке протокола. Попробуйте еще раз.")
 
 
 def _extract_file_info(message: Message) -> tuple:

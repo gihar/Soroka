@@ -14,11 +14,14 @@ from aiogram.types import (
 )
 from loguru import logger
 
-from src.config import settings
 from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer
 from src.utils.template_sort import sort_templates_by_name
-from src.ux.html_text import esc
+
+# Единый источник подписи входа в меню админа: кнопка главного меню, фильтр
+# текст-хендлера и зеркало в message_handlers ссылаются сюда, чтобы подпись не
+# разъехалась (⚙ занят «Настройками», поэтому вход в админку — без глифа).
+ADMIN_MENU_BUTTON = "Меню администратора"
 
 
 class QuickActionsUI:
@@ -43,7 +46,7 @@ class QuickActionsUI:
         # Добавляем кнопку администратора только для админов
         if user_id and is_admin(user_id):
             keyboard.append([
-                KeyboardButton(text="🔧 Меню администратора")
+                KeyboardButton(text=ADMIN_MENU_BUTTON)
             ])
         
         return ReplyKeyboardMarkup(
@@ -126,43 +129,43 @@ class QuickActionsUI:
         buttons = [
             [
                 InlineKeyboardButton(
-                    text="📊 Статистика системы",
+                    text="Статистика системы",
                     callback_data="admin_status"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🏥 Проверка здоровья",
+                    text="Проверка здоровья",
                     callback_data="admin_health"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📈 Производительность",
+                    text="Производительность",
                     callback_data="admin_performance"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🧹 Управление файлами",
+                    text="Управление файлами",
                     callback_data="admin_cleanup"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🎙️ Режим транскрипции",
+                    text="Режим транскрипции",
                     callback_data="admin_transcription"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🔄 Сброс компонентов",
+                    text="Сброс компонентов",
                     callback_data="admin_reset"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📥 Экспорт статистики",
+                    text="Экспорт статистики",
                     callback_data="admin_export"
                 )
             ],
@@ -186,22 +189,6 @@ class QuickActionsUI:
 def setup_quick_actions_handlers() -> Router:
     """Настройка обработчиков быстрых действий"""
     router = Router()
-    
-    @router.message(F.text == "📤 Загрузить файл")
-    async def upload_file_button_handler(message: Message):
-        """Обработчик кнопки загрузки файла"""
-        max_mb = settings.telegram_max_file_size // (1024 * 1024)
-        await message.answer(
-            "<b>Загрузка файла</b>\n\n"
-            "Отправьте аудио или видео файл, либо ссылку на файл любым способом:\n"
-            "• Как аудио сообщение\n"
-            "• Как видео сообщение\n"
-            "• Как документ\n"
-            "• Голосовое сообщение\n\n"
-            f"Максимальный размер: {max_mb} МБ.\n"
-            "Если файл превышает максимальный размер, отправьте, пожалуйста, ссылку на него (например, Google Drive, Яндекс.Диск или Synology Drive) с доступом на скачивание.",
-            parse_mode="HTML",
-        )
     
     @router.message(F.text == "Мои шаблоны")
     async def my_templates_button_handler(message: Message):
@@ -258,85 +245,6 @@ def setup_quick_actions_handlers() -> Router:
             parse_mode="HTML",
         )
     
-    @router.message(F.text == "📊 Статистика")
-    async def stats_button_handler(message: Message):
-        """Обработчик кнопки статистики"""
-        logger.info(f"Пользователь {message.from_user.id} запросил статистику")
-        try:
-            from datetime import datetime
-
-            from src.database import history_repo
-            from src.reliability.middleware import monitoring_middleware
-            
-            # Получаем статистику пользователя из базы данных
-            user_stats = await history_repo.get_user_stats(message.from_user.id)
-            
-            # Получаем системную статистику
-            system_stats = monitoring_middleware.get_stats()
-            
-            if user_stats:
-                # Форматируем личную статистику
-                total_files = user_stats.get('total_files', 0)
-                active_days = user_stats.get('active_days', 0)
-                favorite_templates = user_stats.get('favorite_templates', [])
-                llm_providers = user_stats.get('llm_providers', [])
-                
-                # Строим сообщение
-                stats_text = "<b>Ваша статистика</b>\n\n"
-                stats_text += f"<b>Обработано файлов:</b> {total_files}\n"
-                stats_text += f"<b>Активных дней:</b> {active_days}\n"
-
-                if user_stats.get('first_file_date'):
-                    try:
-                        first_date = datetime.fromisoformat(user_stats['first_file_date'].replace('Z', '+00:00'))
-                        days_since_first = (datetime.now() - first_date.replace(tzinfo=None)).days
-                        stats_text += f"<b>Дней с начала использования:</b> {days_since_first}\n"
-                    except:
-                        pass
-
-                # Любимые шаблоны
-                if favorite_templates:
-                    stats_text += "\n<b>Популярные шаблоны:</b>\n"
-                    for template in favorite_templates[:3]:
-                        stats_text += f"• {esc(template['name'])}: {template['count']} раз\n"
-
-                # Модели ИИ
-                if llm_providers:
-                    stats_text += "\n<b>Используемые модели ИИ:</b>\n"
-                    for provider in llm_providers[:3]:
-                        provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
-                        stats_text += f"• {esc(provider_name)}: {provider['count']} раз\n"
-
-                # System stats only for admins
-                from src.utils.admin_utils import is_admin
-                if is_admin(message.from_user.id):
-                    stats_text += "\n<b>Общая статистика системы:</b>\n"
-                    stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
-                    stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
-                    stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
-                    if system_stats.get('error_rate', 0) > 0:
-                        stats_text += f"• Процент ошибок: {system_stats.get('error_rate', 0):.1f}%\n"
-                    else:
-                        stats_text += "• Система работает стабильно\n"
-
-            else:
-                stats_text = (
-                    "<b>Статистика</b>\n\n"
-                    "<b>Обработано файлов:</b> 0\n"
-                    "Отправьте свой первый файл для обработки!"
-                )
-
-            await safe_answer(message, stats_text, parse_mode="HTML")
-
-        except Exception as e:
-            logger.error(f"Ошибка при получении статистики: {e}")
-            await safe_answer(message,
-                "<b>Статистика</b>\n\n"
-                "Временно недоступна статистика.\n"
-                "Попробуйте позже или обратитесь к администратору.",
-                parse_mode="HTML"
-            )
-    
     @router.message(F.text == "Помощь")
     async def help_button_handler(message: Message):
         """Обработчик кнопки помощи"""
@@ -355,20 +263,20 @@ def setup_quick_actions_handlers() -> Router:
             parse_mode="HTML"
         )
     
-    @router.message(F.text == "🔧 Меню администратора")
+    @router.message(F.text == ADMIN_MENU_BUTTON)
     async def admin_menu_button_handler(message: Message):
         """Обработчик кнопки меню администратора"""
         from src.utils.admin_utils import is_admin
-        
+
         # Проверяем права администратора
         if not is_admin(message.from_user.id):
             await message.answer("❌ Недостаточно прав для выполнения команды.")
             return
-        
+
         # Показываем меню администратора
         keyboard = QuickActionsUI.create_admin_menu()
         await safe_answer(message,
-            "🔧 <b>Меню администратора</b>\n\n"
+            "<b>Меню администратора</b>\n\n"
             "Выберите действие:",
             reply_markup=keyboard,
             parse_mode="HTML"

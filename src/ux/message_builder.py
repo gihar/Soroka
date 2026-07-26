@@ -2,35 +2,12 @@
 Конструктор красивых и информативных сообщений для пользователей
 """
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-
-
-@dataclass
-class MessageStyle:
-    """Стиль сообщения"""
-    emoji: str
-    title: str
-    color: str = "info"  # info, success, warning, error
 
 
 class MessageBuilder:
     """Строитель красивых сообщений"""
-    
-    # Стили для разных типов сообщений
-    STYLES = {
-        "welcome": MessageStyle("🤖", "Добро пожаловать!", "info"),
-        "processing": MessageStyle("🔄", "Обработка", "info"),
-        "success": MessageStyle("✅", "Успешно", "success"),
-        "error": MessageStyle("❌", "Ошибка", "error"),
-        "warning": MessageStyle("⚠️", "Внимание", "warning"),
-        "info": MessageStyle("ℹ️", "Информация", "info"),
-        "help": MessageStyle("❓", "Справка", "info"),
-        "settings": MessageStyle("⚙️", "Настройки", "info"),
-        "templates": MessageStyle("📝", "Шаблоны", "info"),
-        "stats": MessageStyle("📊", "Статистика", "info"),
-    }
-    
+
     @classmethod
     def welcome_message(cls) -> str:
         """Приветствие: одна фраза о сути, точка входа, команды."""
