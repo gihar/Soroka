@@ -150,7 +150,7 @@ class FeedbackUI:
     def feedback_intro_text() -> str:
         """Единый текст-приглашение к обратной связи (один слоган во всём боте)."""
         return (
-            "**Обратная связь**\n\n"
+            "<b>Обратная связь</b>\n\n"
             "Помогите сделать бота лучше. Выберите тип обратной связи:"
         )
 
@@ -223,27 +223,27 @@ class FeedbackUI:
         """Сформировать запрос обратной связи"""
         type_messages = {
             "protocol_quality": (
-                "**Оценка качества протокола**\n\n"
+                "<b>Оценка качества протокола</b>\n\n"
                 "Насколько вы довольны качеством созданного протокола?\n"
                 "Учитывайте структуру, полноту информации и точность транскрипции."
             ),
             "processing_speed": (
-                "**Оценка скорости обработки**\n\n"
+                "<b>Оценка скорости обработки</b>\n\n"
                 "Как вы оцениваете скорость обработки вашего файла?\n"
                 "Было ли время ожидания приемлемым?"
             ),
             "user_experience": (
-                "**Оценка удобства использования**\n\n"
+                "<b>Оценка удобства использования</b>\n\n"
                 "Насколько удобно было использовать бота?\n"
                 "Понятен ли интерфейс и логика работы?"
             ),
             "bug_report": (
-                "**Сообщение об ошибке**\n\n"
+                "<b>Сообщение об ошибке</b>\n\n"
                 "Оцените серьезность проблемы и опишите что произошло.\n"
                 "Ваш отзыв поможет нам исправить ошибки."
             ),
             "suggestion": (
-                "**Предложение улучшения**\n\n"
+                "<b>Предложение улучшения</b>\n\n"
                 "Есть идеи как сделать бота лучше?\n"
                 "Оцените важность вашего предложения."
             )
@@ -285,7 +285,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             await safe_edit_text(
                 callback.message,
                 f"Оценка записана: {rating}/5",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -297,8 +297,9 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
         """Обработчик пропуска оценки"""
         await safe_edit_text(
             callback.message,
-            "**Оценка пропущена**\n\n"
-            "Вы всегда можете оставить обратную связь командой /feedback"
+            "<b>Оценка пропущена</b>\n\n"
+            "Вы всегда можете оставить обратную связь командой /feedback",
+            parse_mode="HTML",
         )
     
     @router.callback_query(F.data.startswith("feedback_type_"))
@@ -320,7 +321,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
                 callback.message,
                 message_text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:

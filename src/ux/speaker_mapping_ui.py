@@ -323,7 +323,7 @@ def create_mapping_keyboard(
         )])
 
         keyboard_buttons.append([InlineKeyboardButton(
-            text="⏭️ Пропустить сопоставление",
+            text="⏭ Пропустить сопоставление",
             callback_data=SmSkip(user_id=user_id).pack()
         )])
     

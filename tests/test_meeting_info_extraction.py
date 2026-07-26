@@ -81,6 +81,20 @@ class TestMeetingInfoExtraction(unittest.TestCase):
         self.assertIn("Тестовая встреча", display_text)
         self.assertIn("Иван Петров", display_text)
         self.assertIn("Мария Иванова", display_text)
+        # Разметка — Telegram HTML, а не Markdown.
+        self.assertIn("<b>Тема:</b>", display_text)
+        self.assertNotIn("**", display_text)
+
+    def test_formatting_escapes_html_special_chars(self):
+        """Тема/имена с `<`, `&` экранируются каноном — рендерятся как текст."""
+        meeting_info = meeting_info_service.extract_meeting_info(
+            "От: A<b>&\nКому: Мария Иванова\nТема: Q&A <тест>\nКогда: 22 октября 2025 г. 15:00."
+        )
+
+        display_text = meeting_info_service.format_meeting_info_for_display(meeting_info)
+
+        self.assertIn("Q&amp;A &lt;тест&gt;", display_text)
+        self.assertNotIn("<b>&", display_text)
 
 
 if __name__ == '__main__':

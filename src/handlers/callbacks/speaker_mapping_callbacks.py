@@ -55,7 +55,7 @@ _PROCESSING_ERROR_TEXT = (
 
 
 _SKIP_CONTINUED_TEXT = (
-    "⏭️ **Сопоставление пропущено**\n\n"
+    "⏭ <b>Сопоставление пропущено</b>\n\n"
     "⏳ Продолжаю генерацию протокола без замены имен спикеров..."
 )
 
@@ -87,7 +87,7 @@ async def _finish_skip(
     сопоставлением.
     """
     await safe_edit_text(
-        callback.message, _SKIP_CONTINUED_TEXT, parse_mode="Markdown"
+        callback.message, _SKIP_CONTINUED_TEXT, parse_mode="HTML"
     )
     await state.clear()
     await processing_service.continue_processing_after_mapping_confirmation(
@@ -480,8 +480,8 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         # Обновляем сообщение (кратко, без обещаний - реальная обработка начнется в следующем сообщении)
         await safe_edit_text(
             callback.message,
-            "✅ **Сопоставление подтверждено**",
-            parse_mode="Markdown"
+            "✅ <b>Сопоставление подтверждено</b>",
+            parse_mode="HTML"
         )
 
         # Очищаем состояние FSM

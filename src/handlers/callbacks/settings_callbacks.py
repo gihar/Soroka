@@ -8,6 +8,7 @@ from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+from src.ux.html_text import esc
 
 
 def setup_settings_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
@@ -46,14 +47,14 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message,
-                "**Вывод протокола**\n\n"
+                "<b>Вывод протокола</b>\n\n"
                 "Выберите, как отправлять готовый протокол:\n"
                 "• В сообщение — протокол приходит текстом в чат (по умолчанию)\n"
                 "• В файл Markdown — протокол приходит файлом .md\n"
                 "• В файл PDF — протокол приходит файлом .pdf\n"
                 "• В файл Word — протокол приходит документом .docx",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
         except Exception as e:
@@ -113,11 +114,12 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message,
-                "**Настройки сброшены**\n\n"
+                "<b>Настройки сброшены</b>\n\n"
                 "Все ваши настройки восстановлены по умолчанию:\n\n"
                 "• Шаблон по умолчанию сброшен\n"
                 "• Другие настройки восстановлены\n\n"
                 "Теперь бот будет использовать настройки по умолчанию.",
+                parse_mode="HTML",
                 reply_markup=keyboard
             )
             await callback.answer()
@@ -144,9 +146,9 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 favorite_templates = user_stats.get('favorite_templates', [])
                 llm_providers = user_stats.get('llm_providers', [])
 
-                stats_text = "**Ваша статистика**\n\n"
-                stats_text += f"**Обработано файлов:** {total_files}\n"
-                stats_text += f"**Активных дней:** {active_days}\n"
+                stats_text = "<b>Ваша статистика</b>\n\n"
+                stats_text += f"<b>Обработано файлов:</b> {total_files}\n"
+                stats_text += f"<b>Активных дней:</b> {active_days}\n"
 
                 if user_stats.get('first_file_date'):
                     try:
@@ -154,28 +156,28 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                             user_stats['first_file_date'].replace('Z', '+00:00')
                         )
                         days_since = (datetime.now() - first_date.replace(tzinfo=None)).days
-                        stats_text += f"**Дней с начала:** {days_since}\n"
+                        stats_text += f"<b>Дней с начала:</b> {days_since}\n"
                     except Exception:
                         pass
 
                 if favorite_templates:
-                    stats_text += "\n**Популярные шаблоны:**\n"
+                    stats_text += "\n<b>Популярные шаблоны:</b>\n"
                     for t in favorite_templates[:3]:
-                        stats_text += f"• {t['name']}: {t['count']} раз\n"
+                        stats_text += f"• {esc(t['name'])}: {t['count']} раз\n"
 
                 if llm_providers:
-                    stats_text += "\n**Модели ИИ:**\n"
+                    stats_text += "\n<b>Модели ИИ:</b>\n"
                     for p in llm_providers[:3]:
                         name = p['llm_provider'].title() if p['llm_provider'] else '?'
-                        stats_text += f"• {name}: {p['count']} раз\n"
+                        stats_text += f"• {esc(name)}: {p['count']} раз\n"
             else:
-                stats_text = "**Статистика**\n\nОбработано файлов: 0\nОтправьте файл для обработки!\n"
+                stats_text = "<b>Статистика</b>\n\nОбработано файлов: 0\nОтправьте файл для обработки!\n"
 
             # System stats only for admins
             from src.utils.admin_utils import is_admin
             if is_admin(callback.from_user.id):
                 stats_text += (
-                    f"\n**Система:**\n"
+                    f"\n<b>Система:</b>\n"
                     f"• Запросов: {system_stats.get('total_requests', 0)}\n"
                     f"• Пользователей: {system_stats.get('active_users', 0)}\n"
                     f"• Среднее время: {system_stats.get('average_processing_time', 0):.1f}с\n"
@@ -186,7 +188,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             ])
 
             await safe_edit_text(callback.message, stats_text,
-                                reply_markup=keyboard, parse_mode="Markdown")
+                                reply_markup=keyboard, parse_mode="HTML")
             await callback.answer()
 
         except Exception as e:
@@ -205,9 +207,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                "⚙️ **Настройки бота**\n\n"
+                "⚙️ <b>Настройки бота</b>\n\n"
                 "Настройте бота под ваши предпочтения:",
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
             await callback.answer()
 
@@ -264,10 +267,10 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             await safe_edit_text(
                 callback.message,
-                "**Модель ИИ**\n\n"
+                "<b>Модель ИИ</b>\n\n"
                 "Выберите модель, которая будет использоваться ботом:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             await callback.answer()
         except Exception as e:
@@ -308,7 +311,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             await safe_edit_text(
                 callback.message,
-                f"✅ Активная модель: **{model_name}**\n\n"
+                f"✅ Активная модель: <b>{esc(model_name)}</b>\n\n"
                 "Бот будет использовать эту модель для всех обработок.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
@@ -316,7 +319,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                         callback_data="back_to_settings",
                     )]
                 ]),
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             await callback.answer()
         except Exception as e:

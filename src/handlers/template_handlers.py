@@ -12,6 +12,7 @@ from src.exceptions import TemplateValidationError
 from src.models.template import TemplateCreate
 from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.ux.html_text import esc
 
 
 class TemplateStates(StatesGroup):
@@ -43,10 +44,10 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_name)
             await safe_edit_text(
                 callback.message,
-                "**Создание нового шаблона**\n\n"
+                "<b>Создание нового шаблона</b>\n\n"
                 "Введите название шаблона:",
                 reply_markup=_cancel_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
         except Exception as e:
@@ -60,10 +61,10 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_name)
             await safe_edit_text(
                 callback.message,
-                "**Создание нового шаблона**\n\n"
+                "<b>Создание нового шаблона</b>\n\n"
                 "Введите название шаблона:",
                 reply_markup=_cancel_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
         except Exception as e:
@@ -108,17 +109,18 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_content)
 
             await safe_answer(message,
-                f"✅ Название сохранено: **{name}**\n\n"
+                f"✅ Название сохранено: <b>{esc(name)}</b>\n\n"
                 "Отправьте содержимое шаблона одним сообщением: Markdown-разметка "
-                "и переменные в `{{ }}`.\n\n"
-                "Основные переменные: `meeting_title`, `date`, `participants`, "
-                "`decisions`, `action_items`, `risks_and_blockers`, `discussion`, "
-                "`next_steps`.\n"
-                "Оборачивайте секции в `{% if переменная %}` … `{% endif %}` — "
-                "пустая секция не попадёт в протокол.\n\n"
+                "и переменные в <code>{{ }}</code>.\n\n"
+                "Основные переменные: <code>meeting_title</code>, <code>date</code>, "
+                "<code>participants</code>, <code>decisions</code>, "
+                "<code>action_items</code>, <code>risks_and_blockers</code>, "
+                "<code>discussion</code>, <code>next_steps</code>.\n"
+                "Оборачивайте секции в <code>{% if переменная %}</code> … "
+                "<code>{% endif %}</code> — пустая секция не попадёт в протокол.\n\n"
                 "Полная справка с примером: /templates → «Как устроены шаблоны».",
                 reply_markup=_cancel_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.error(f"Ошибка в template_name_handler: {e}")
@@ -189,11 +191,11 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             
             await safe_edit_text(
                 callback.message,
-                f"✅ **Шаблон успешно создан!**\n\n"
-                f"**Название:** {created_template.name}\n"
-                f"**ID:** {created_template.id}\n\n"
+                f"✅ <b>Шаблон успешно создан!</b>\n\n"
+                f"<b>Название:</b> {esc(created_template.name)}\n"
+                f"<b>ID:</b> {esc(created_template.id)}\n\n"
                 f"Теперь вы можете использовать этот шаблон при обработке файлов.",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
             logger.info(f"Пользователь {callback.from_user.id} создал шаблон '{created_template.name}'")
@@ -216,9 +218,9 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await state.set_state(TemplateStates.waiting_for_content)
             await safe_edit_text(
                 callback.message,
-                "**Редактирование шаблона**\n\n"
+                "<b>Редактирование шаблона</b>\n\n"
                 "Введите новое содержимое шаблона:",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
         except Exception as e:
@@ -288,8 +290,8 @@ async def _show_template_preview(message: Message, template_data: dict, template
         conditional_hint = ""
         if "{% if" not in template_data["template_content"]:
             conditional_hint = (
-                "\n\n⚠️ В шаблоне нет условных секций `{% if переменная %}` … "
-                "`{% endif %}` — если данных для поля не будет, его заголовок "
+                "\n\n⚠️ В шаблоне нет условных секций <code>{% if переменная %}</code> … "
+                "<code>{% endif %}</code> — если данных для поля не будет, его заголовок "
                 "останется над пустым местом. Пример — в справке /templates."
             )
 
@@ -301,19 +303,22 @@ async def _show_template_preview(message: Message, template_data: dict, template
         if unknown:
             lines = []
             for var_name, suggestion in unknown.items():
-                hint = f" (возможно, `{suggestion}`)" if suggestion else ""
-                lines.append(f"• `{var_name}`{hint}")
+                hint = f" (возможно, <code>{esc(suggestion)}</code>)" if suggestion else ""
+                lines.append(f"• <code>{esc(var_name)}</code>{hint}")
             unknown_hint = (
                 "\n\n⚠️ Переменные, которых нет в реестре полей — их секции "
                 "останутся пустыми:\n" + "\n".join(lines)
             )
 
+        description = template_data.get("template_description")
+        description_html = esc(description) if description else "<i>Без описания</i>"
+
         preview_message = (
-            f"**Предварительный просмотр шаблона**\n\n"
-            f"**Название:** {template_data['template_name']}\n"
-            f"**Описание:** {template_data.get('template_description', '*Без описания*')}\n\n"
-            f"**Результат с тестовыми данными:**\n\n"
-            f"```\n{preview_text}\n```"
+            f"<b>Предварительный просмотр шаблона</b>\n\n"
+            f"<b>Название:</b> {esc(template_data['template_name'])}\n"
+            f"<b>Описание:</b> {description_html}\n\n"
+            f"<b>Результат с тестовыми данными:</b>\n\n"
+            f"<pre>{esc(preview_text)}</pre>"
             f"{conditional_hint}"
             f"{unknown_hint}"
         )
@@ -321,7 +326,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
         await safe_answer(message,
             preview_message,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
     except Exception as e:

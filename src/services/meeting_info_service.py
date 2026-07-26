@@ -262,13 +262,6 @@ class MeetingInfoService:
 
         return None
 
-    def _escape_markdown(self, text: str) -> str:
-        """Экранирование специальных символов Markdown"""
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
-        return text
-
     def _extract_name_from_email_line(self, line: str) -> List[str]:
         """Извлечь все имена из строки (может содержать несколько ФИО через запятую)
         
@@ -388,12 +381,17 @@ class MeetingInfoService:
         return None
 
     def format_meeting_info_for_display(self, meeting_info: MeetingInfo) -> str:
-        """Форматирование информации о встрече для отображения"""
+        """Форматирование информации о встрече для отображения (Telegram HTML).
+
+        Экран интерактивный (ADR-0005): разметка — Telegram HTML, а имена и роли
+        участников (ввод пользователя) экранируются каноном escape_telegram_html.
+        """
+        from src.services.protocol_render.telegram_html import escape_telegram_html
+
         lines = []
 
         # Тема
-        escaped_topic = self._escape_markdown(meeting_info.topic)
-        lines.append(f"📋 **Тема:** {escaped_topic}")
+        lines.append(f"📋 <b>Тема:</b> {escape_telegram_html(meeting_info.topic)}")
 
         # Время
         if meeting_info.start_time:
@@ -401,19 +399,19 @@ class MeetingInfoService:
             if meeting_info.end_time:
                 end_time_str = meeting_info.end_time.strftime("%H:%M")
                 time_str += f" - {end_time_str}"
-            lines.append(f"🕐 **Время:** {time_str}")
+            lines.append(f"🕐 <b>Время:</b> {time_str}")
 
         # Участники
         if meeting_info.participants:
             participants_count = len(meeting_info.participants)
-            lines.append(f"👥 **Участники ({participants_count}):**")
+            lines.append(f"👥 <b>Участники ({participants_count}):</b>")
 
-            for i, participant in enumerate(meeting_info.participants, 1):
+            for participant in meeting_info.participants:
                 marker = "👑" if participant.is_organizer else "•"
-                escaped_name = self._escape_markdown(participant.name)
-                escaped_role = self._escape_markdown(participant.role) if participant.role else ""
-                role_text = f", {escaped_role}" if escaped_role else ""
-                lines.append(f"  {marker} {escaped_name}{role_text}")
+                name = escape_telegram_html(participant.name)
+                role = escape_telegram_html(participant.role) if participant.role else ""
+                role_text = f", {role}" if role else ""
+                lines.append(f"  {marker} {name}{role_text}")
 
         return "\n".join(lines)
 

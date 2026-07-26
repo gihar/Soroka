@@ -10,6 +10,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import sort_templates_by_name
+from src.ux.html_text import esc
 
 from .helpers import _safe_callback_answer
 
@@ -57,9 +58,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ **Шаблоны не найдены**\n\n"
+                    "❌ <b>Шаблоны не найдены</b>\n\n"
                     "Обратитесь к администратору.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
@@ -73,8 +74,8 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "**Выберите шаблон:**\n\nШаблон будет использован для текущей обработки.",
-                reply_markup=keyboard, parse_mode="Markdown"
+                "<b>Выберите шаблон:</b>\n\nШаблон будет использован для текущей обработки.",
+                reply_markup=keyboard, parse_mode="HTML"
             )
 
         except Exception as e:
@@ -94,15 +95,15 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ **Шаблоны не найдены**\n\nОбратитесь к администратору.",
-                    parse_mode="Markdown"
+                    "❌ <b>Шаблоны не найдены</b>\n\nОбратитесь к администратору.",
+                    parse_mode="HTML"
                 )
                 return
 
             await safe_edit_text(callback.message,
-                f"**Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
+                f"<b>Все шаблоны</b>\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
@@ -122,9 +123,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not template:
                 await safe_edit_text(callback.message,
-                    "❌ **Ошибка**\n\n"
+                    "❌ <b>Ошибка</b>\n\n"
                     "Шаблон не найден.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
@@ -132,10 +133,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=template_id, use_smart_selection=False)
 
             await safe_edit_text(callback.message,
-                f"**Выбран шаблон: {template.name}**\n\n"
+                f"<b>Выбран шаблон: {esc(template.name)}</b>\n\n"
                 "Шаблон будет использован для текущей обработки.\n\n"
                 "⏳ Начинаю обработку...",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             # LLM selection removed (admin-only-model migration). Go straight to processing.
@@ -227,10 +228,11 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"**Все шаблоны**\n\n"
+                f"<b>Все шаблоны</b>\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон для установки по умолчанию:",
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
             await callback.answer()
 
@@ -249,10 +251,11 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"**Все шаблоны**\n\n"
+                f"<b>Все шаблоны</b>\n\n"
                 f"Найдено шаблонов: {len(templates)}\n"
                 "Выберите шаблон:",
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
             await callback.answer()
 
@@ -285,10 +288,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "**Выберите шаблон для протокола:**\n\n"
-                "**Умный выбор** - ИИ автоматически подберёт подходящий шаблон",
+                "<b>Выберите шаблон для протокола:</b>\n\n"
+                "<b>Умный выбор</b> - ИИ автоматически подберёт подходящий шаблон",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
 
@@ -309,11 +312,11 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=0, use_smart_selection=True)
 
             await safe_edit_text(callback.message,
-                "**Умный выбор шаблона активирован!**\n\n"
+                "<b>Умный выбор шаблона активирован!</b>\n\n"
                 "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
                 "наиболее подходящий шаблон после транскрипции.\n\n"
                 "⏳ Начинаю обработку...",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             # LLM selection removed (admin-only-model migration). Go straight to processing.
@@ -337,10 +340,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=0, use_smart_selection=True)
 
             await safe_edit_text(callback.message,
-                "**Умный выбор шаблона**\n\n"
+                "<b>Умный выбор шаблона</b>\n\n"
                 "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                 "⏳ Начинаю обработку...",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             # LLM selection removed (admin-only-model migration). Go straight to processing.
@@ -365,9 +368,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not user or not user.default_template_id:
                 await safe_edit_text(callback.message,
-                    "❌ **Ошибка**\n\n"
+                    "❌ <b>Ошибка</b>\n\n"
                     "У вас не установлен шаблон по умолчанию.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
@@ -375,27 +378,27 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             if user.default_template_id == 0:
                 await state.update_data(template_id=0, use_smart_selection=True)
                 await safe_edit_text(callback.message,
-                    "**Используется Умный выбор шаблона**\n\n"
+                    "<b>Используется Умный выбор шаблона</b>\n\n"
                     "ИИ автоматически подберёт подходящий шаблон после транскрипции.\n\n"
                     "⏳ Начинаю обработку...",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
             else:
                 # Используем конкретный шаблон
                 template = await template_service.get_template_by_id(user.default_template_id)
                 if not template:
                     await safe_edit_text(callback.message,
-                        "❌ **Ошибка**\n\n"
+                        "❌ <b>Ошибка</b>\n\n"
                         "Сохранённый шаблон не найден.",
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                     return
 
                 await state.update_data(template_id=template.id, use_smart_selection=False)
                 await safe_edit_text(callback.message,
-                    f"**Используется шаблон: {template.name}**\n\n"
+                    f"<b>Используется шаблон: {esc(template.name)}</b>\n\n"
                     "⏳ Начинаю обработку...",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
             # LLM selection removed (admin-only-model migration). Go straight to processing.
@@ -437,9 +440,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             )
 
             await safe_edit_text(callback.message,
-                f"**Все шаблоны**\n\nВыберите шаблон ({len(templates)}):",
+                f"<b>Все шаблоны</b>\n\nВыберите шаблон ({len(templates)}):",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
@@ -463,10 +466,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await state.update_data(template_id=0, use_smart_selection=True)
 
                 await safe_edit_text(callback.message,
-                    "✅ **Умный выбор установлен по умолчанию**\n\n"
+                    "✅ <b>Умный выбор установлен по умолчанию</b>\n\n"
                     "ИИ автоматически подберёт подходящий шаблон.\n\n"
                     "⏳ Начинаю обработку...",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
             else:
                 # Обрабатываем выбор конкретного шаблона
@@ -475,9 +478,9 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
                 if not template:
                     await safe_edit_text(callback.message,
-                        "❌ **Ошибка**\n\n"
+                        "❌ <b>Ошибка</b>\n\n"
                         "Шаблон не найден.",
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                     return
 
@@ -486,10 +489,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
                 await state.update_data(template_id=template_id, use_smart_selection=False)
 
                 await safe_edit_text(callback.message,
-                    f"✅ **Шаблон установлен: {template.name}**\n\n"
+                    f"✅ <b>Шаблон установлен: {esc(template.name)}</b>\n\n"
                     f"Шаблон сохранён по умолчанию и будет использован для обработки.\n\n"
                     "⏳ Начинаю обработку...",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
             # LLM selection removed (admin-only-model migration). Go straight to processing.

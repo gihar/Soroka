@@ -16,6 +16,7 @@ from src.handlers.participants_states import ParticipantsInput, ProtocolInfoStat
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.ux.html_text import esc
 
 
 async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
@@ -59,15 +60,15 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "**Участники встречи**\n\n"
+            "<b>Участники встречи</b>\n\n"
             "Укажите участников для точной атрибуции в протоколе.\n"
             "Введите имена в любом формате — по одному на строку."
         )
-        
-        await safe_answer(message, 
+
+        await safe_answer(message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
     except Exception as e:
@@ -91,17 +92,17 @@ async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dic
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "**Дополнительная информация к протоколу**\n\n"
+            "<b>Дополнительная информация к протоколу</b>\n\n"
             "Добавьте контекст для улучшения качества протокола:\n\n"
-            "**Повестка встречи** - основные темы и вопросы для обсуждения\n"
-            "**Список проектов** - названия проектов, упоминаемых во встрече\n\n"
+            "<b>Повестка встречи</b> - основные темы и вопросы для обсуждения\n"
+            "<b>Список проектов</b> - названия проектов, упоминаемых во встрече\n\n"
             "Выберите действие:"
         )
 
-        await safe_edit_text(callback_query.message, 
+        await safe_edit_text(callback_query.message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
     except Exception as e:
@@ -130,20 +131,20 @@ def setup_participants_handlers() -> Router:
             ])
 
             await safe_answer(callback.message, 
-                "**Автоматическое извлечение информации о встрече**\n\n"
+                "<b>Автоматическое извлечение информации о встрече</b>\n\n"
                 "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
-                "**Поддерживаемые форматы:**\n"
+                "<b>Поддерживаемые форматы:</b>\n"
                 "• Email с полями От, Кому, Копия, Тема, Когда\n"
                 "• Текст с информацией об участниках, дате и теме\n\n"
-                "**Пример:**\n"
-                "```\n"
+                "<b>Пример:</b>\n"
+                "<pre>"
                 "От: Иван Петров\n"
                 "Кому: Мария Иванова; Алексей Смирнов\n"
                 "Тема: Обсуждение проекта\n"
-                "Когда: 22 октября 2025 г. 15:00-16:00\n"
-                "```",
+                "Когда: 22 октября 2025 г. 15:00-16:00"
+                "</pre>",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
@@ -165,16 +166,16 @@ def setup_participants_handlers() -> Router:
             ])
 
             await safe_answer(callback.message, 
-                "**Введите список участников**\n\n"
+                "<b>Введите список участников</b>\n\n"
                 "Отправьте список участников текстом (один участник на строку).\n\n"
-                "**Примеры форматов:**\n"
-                "• `Иван Петров, руководитель`\n"
-                "• `Мария Иванова - разработчик`\n"
-                "• `Алексей Смирнов (тестировщик)`\n"
-                "• `Ольга Сидорова`\n\n"
+                "<b>Примеры форматов:</b>\n"
+                "• <code>Иван Петров, руководитель</code>\n"
+                "• <code>Мария Иванова - разработчик</code>\n"
+                "• <code>Алексей Смирнов (тестировщик)</code>\n"
+                "• <code>Ольга Сидорова</code>\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
@@ -196,22 +197,22 @@ def setup_participants_handlers() -> Router:
             ])
             
             await safe_answer(callback.message, 
-                "**Загрузите файл с участниками**\n\n"
+                "<b>Загрузите файл с участниками</b>\n\n"
                 "Отправьте файл в формате .txt или .csv\n\n"
-                "**Формат .txt:**\n"
-                "```\n"
+                "<b>Формат .txt:</b>\n"
+                "<pre>"
                 "Иван Петров, менеджер\n"
-                "Мария Иванова\n"
-                "```\n\n"
-                "**Формат .csv:**\n"
-                "```\n"
+                "Мария Иванова"
+                "</pre>\n\n"
+                "<b>Формат .csv:</b>\n"
+                "<pre>"
                 "name,role\n"
                 "Иван Петров,менеджер\n"
-                "Мария Иванова,\n"
-                "```\n\n"
+                "Мария Иванова,"
+                "</pre>\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -254,10 +255,10 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
             ])
             
-            await safe_answer(callback.message, 
-                f"{display_text}\n\n**Использовать этот список?**",
+            await safe_answer(callback.message,
+                f"{display_text}\n\n<b>Использовать этот список?</b>",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -332,20 +333,20 @@ def setup_participants_handlers() -> Router:
 
             # Проверяем, есть ли участники
             if not all_participants:
-                await safe_answer(message, 
+                await safe_answer(message,
                     "❌ Не удалось найти участников в этом тексте.\n"
                     "Пришлите список участников или отправьте /cancel.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
             # Валидируем объединенный список
             is_valid, error_message = participants_service.validate_participants(all_participants)
             if not is_valid:
-                await safe_answer(message, 
-                    f"❌ {error_message}\n"
+                await safe_answer(message,
+                    f"❌ {esc(error_message)}\n"
                     "Поправьте список и отправьте ещё раз или /cancel.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
@@ -383,11 +384,11 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await safe_answer(message, 
-                    f"**Автоматически извлечена информация о встрече:**\n\n"
-                    f"{display_text}{warning_text}\n\n**Использовать эту информацию?**",
+                await safe_answer(message,
+                    f"<b>Автоматически извлечена информация о встрече:</b>\n\n"
+                    f"{display_text}{warning_text}\n\n<b>Использовать эту информацию?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
             else:
@@ -409,10 +410,10 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await safe_answer(message, 
-                    f"{display_text}\n\n**Все верно?**",
+                await safe_answer(message,
+                    f"{display_text}\n\n<b>Все верно?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
         except Exception as e:
@@ -456,10 +457,10 @@ def setup_participants_handlers() -> Router:
                 is_valid, error_message = participants_service.validate_participants(participants)
                 
                 if not is_valid:
-                    await safe_answer(message, 
-                        f"❌ {error_message}\n"
+                    await safe_answer(message,
+                        f"❌ {esc(error_message)}\n"
                         "Поправьте список в файле и пришлите ещё раз.",
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                     return
                 
@@ -481,12 +482,12 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
                 
-                await safe_answer(message, 
-                    f"{display_text}\n\n**Все верно?**",
+                await safe_answer(message,
+                    f"{display_text}\n\n<b>Все верно?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
-                
+
             except FileError as e:
                 logger.warning(f"Не удалось разобрать файл участников: {e}")
                 await message.answer(
@@ -669,10 +670,10 @@ def setup_participants_handlers() -> Router:
             # Set FSM state for text input
             if info_type == "meeting_agenda":
                 await state.set_state(ProtocolInfoState.waiting_agenda)
-                prompt_text = "**Введите повестку встречи**\n\nПеречислите основные темы и вопросы для обсуждения:"
+                prompt_text = "<b>Введите повестку встречи</b>\n\nПеречислите основные темы и вопросы для обсуждения:"
             elif info_type == "project_list":
                 await state.set_state(ProtocolInfoState.waiting_project_list)
-                prompt_text = "**Введите список проектов**\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
+                prompt_text = "<b>Введите список проектов</b>\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
             else:
                 return
 
@@ -680,10 +681,10 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
             ])
 
-            await safe_answer(callback.message, 
+            await safe_answer(callback.message,
                 prompt_text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:

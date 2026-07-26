@@ -11,6 +11,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import category_label, sort_templates_by_name
+from src.ux.html_text import esc
 from src.ux.keyboards import build_template_picker
 
 from .helpers import _safe_callback_answer
@@ -50,7 +51,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             await safe_edit_text(callback.message,
                 f"{title} ({len(templates)})",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
 
@@ -71,7 +72,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 callback.message,
                 MessageBuilder.templates_help_message(),
                 reply_markup=keyboard,
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             await _safe_callback_answer(callback)
         except Exception as e:
@@ -95,11 +96,11 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             except Exception:
                 can_delete = False
 
-            text = f"**{template.name}**\n\n"
+            text = f"<b>{esc(template.name)}</b>\n\n"
             if template.description:
-                text += f"*Описание:* {template.description}\n\n"
+                text += f"<i>Описание:</i> {esc(template.description)}\n\n"
 
-            text += f"```\n{template.content}\n```"
+            text += f"<pre>{esc(template.content)}</pre>"
 
             # Кнопки: удалить показываем только владельцу
             rows = []
@@ -114,7 +115,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             )])
             keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
 
-            await safe_edit_text(callback.message, text, parse_mode="Markdown", reply_markup=keyboard)
+            await safe_edit_text(callback.message, text, parse_mode="HTML", reply_markup=keyboard)
             await callback.answer()
 
         except Exception as e:
@@ -161,9 +162,9 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ] + [[InlineKeyboardButton(text="Добавить шаблон", callback_data="add_template")]])
 
                 await safe_edit_text(callback.message,
-                    "Шаблон удалён.\n\n**Доступные шаблоны:**",
+                    "Шаблон удалён.\n\n<b>Доступные шаблоны:</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 await callback.answer()
             else:
@@ -224,10 +225,10 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                f"**Доступные шаблоны:** {len(templates)}\n\n"
+                f"<b>Доступные шаблоны:</b> {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
 
@@ -256,10 +257,11 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ])
 
                 await safe_edit_text(callback.message,
-                    "**Шаблон по умолчанию**\n\n"
+                    "<b>Шаблон по умолчанию</b>\n\n"
                     "У вас пока нет доступных шаблонов.\n"
                     "Создайте шаблон, чтобы установить его по умолчанию:",
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
                 )
             else:
                 # Единый пикер: умный выбор сверху, сетка 2 колонки, футер снизу.
@@ -283,10 +285,10 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 )
 
                 await safe_edit_text(callback.message,
-                    "**Шаблон по умолчанию**\n\n"
+                    "<b>Шаблон по умолчанию</b>\n\n"
                     "Выберите шаблон или доверьте выбор ИИ:",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
             await callback.answer()
@@ -315,20 +317,20 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 # Если template_id = 0, это "Умный выбор"
                 if template_id == 0:
                     await safe_edit_text(callback.message,
-                        "**Шаблон по умолчанию: умный выбор**\n"
+                        "<b>Шаблон по умолчанию: умный выбор</b>\n"
                         "Подходящий шаблон подбирается по содержанию каждой встречи.",
                         reply_markup=keyboard,
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                 else:
                     # Получаем информацию о конкретном шаблоне
                     template = await template_service.get_template_by_id(template_id)
 
                     await safe_edit_text(callback.message,
-                        f"**Шаблон по умолчанию: {template.name}**\n"
+                        f"<b>Шаблон по умолчанию: {esc(template.name)}</b>\n"
                         "Применяется автоматически при обработке записи.",
                         reply_markup=keyboard,
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
             else:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -339,10 +341,11 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ])
 
                 await safe_edit_text(callback.message,
-                    "❌ **Ошибка установки шаблона**\n\n"
+                    "❌ <b>Ошибка установки шаблона</b>\n\n"
                     "Не удалось установить шаблон по умолчанию.\n"
                     "Возможно, шаблон недоступен или произошла ошибка.",
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
                 )
 
             await callback.answer()
@@ -367,10 +370,10 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                 ])
 
                 await safe_edit_text(callback.message,
-                    "**Шаблон по умолчанию сброшен**\n"
+                    "<b>Шаблон по умолчанию сброшен</b>\n"
                     "Перед обработкой бот будет спрашивать шаблон.",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 await callback.answer()
             else:
@@ -392,9 +395,9 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ **Шаблоны не найдены**\n\n"
+                    "❌ <b>Шаблоны не найдены</b>\n\n"
                     "Обратитесь к администратору.",
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 return
 
@@ -429,10 +432,10 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_edit_text(callback.message,
-                "**Выберите шаблон по умолчанию:**\n\n"
+                "<b>Выберите шаблон по умолчанию:</b>\n\n"
                 "Выбранный шаблон будет сохранён и использован для обработки этого файла.",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:

@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
+from src.ux.html_text import esc
 
 
 class QueuePositionTracker:
@@ -55,13 +56,13 @@ class QueuePositionTracker:
         """
         if position == 0:
             return (
-                "**Задача готова к обработке**\n\n"
+                "<b>Задача готова к обработке</b>\n\n"
                 "Ожидаем освобождения ресурсов.\n"
                 f"Задач в очереди: {total_in_queue}"
             )
 
         lines = [
-            "**Задача в очереди**",
+            "<b>Задача в очереди</b>",
             "",
             f"Впереди: {position} {self._tasks_word(position)}",
             f"Всего в очереди: {total_in_queue}",
@@ -107,7 +108,7 @@ class QueuePositionTracker:
                     message_id=self.message_id,
                     text=text,
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 if result is not None:
                     self._last_text = text
@@ -117,7 +118,7 @@ class QueuePositionTracker:
                     chat_id=self.chat_id,
                     text=text,
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 if msg is not None:
                     self.message_id = msg.message_id
@@ -133,7 +134,7 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "**Начинаю обработку файла**\n\n"
+                "<b>Начинаю обработку файла</b>\n\n"
                 "⏳ Подготовка к обработке..."
             )
             
@@ -142,7 +143,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             if result is not None:
                 self._last_text = text
@@ -159,7 +160,7 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "**Задача отменена**\n\n"
+                "<b>Задача отменена</b>\n\n"
                 "Обработка файла была отменена по вашему запросу."
             )
             
@@ -168,7 +169,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -183,8 +184,8 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "❌ **Ошибка при обработке**\n\n"
-                f"{error_message}\n\n"
+                "❌ <b>Ошибка при обработке</b>\n\n"
+                f"{esc(error_message)}\n\n"
                 "Попробуйте загрузить файл снова."
             )
             
@@ -193,7 +194,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -243,7 +244,7 @@ class QueueTrackerFactory:
                 chat_id=chat_id,
                 text=text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             if msg is not None:
                 tracker.message_id = msg.message_id

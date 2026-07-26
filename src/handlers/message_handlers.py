@@ -49,7 +49,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "max_size": 20
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             except FileTypeError:
                 from src.ux.message_builder import MessageBuilder
@@ -60,12 +60,12 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "supported_formats": formats
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             except FileError as e:
                 from src.ux.message_builder import MessageBuilder
                 error_message = MessageBuilder.error_message("validation", str(e))
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             
             # Проверяем наличие file_id
@@ -89,7 +89,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
 
             # Меню действий с записью — единая точка правды для файла и ссылки
             text, keyboard = QuickActionsUI.create_record_actions_menu()
-            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="HTML")
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
@@ -551,16 +551,16 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             message_text = f"✅ Список участников сохранен ({participants_count} чел.)\n\n"
         
         message_text += (
-            "**Выберите способ создания протокола:**\n\n"
-            "**Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
-            "**По шаблону** - использовать сохранённый шаблон\n"
-            "**Выбрать шаблон** - выбрать шаблон для текущей обработки"
+            "<b>Выберите способ создания протокола:</b>\n\n"
+            "<b>Умный выбор</b> - ИИ автоматически подберёт подходящий шаблон\n"
+            "<b>По шаблону</b> - использовать сохранённый шаблон\n"
+            "<b>Выбрать шаблон</b> - выбрать шаблон для текущей обработки"
         )
         
-        await safe_answer(message, 
+        await safe_answer(message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
     except Exception as e:
@@ -647,7 +647,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
 
                 # Меню действий с записью — то же, что и для файла (единая точка правды)
                 text, keyboard = QuickActionsUI.create_record_actions_menu()
-                await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
+                await safe_answer(message, text, reply_markup=keyboard, parse_mode="HTML")
                 
             except FileSizeError:
                 from src.config import settings
@@ -659,7 +659,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     "max_size": settings.max_external_file_size // (1024 * 1024)  # В МБ
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="HTML")
                 
             except FileTypeError:
                 from src.ux.message_builder import MessageBuilder
@@ -673,7 +673,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     }
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="HTML")
                 
             except FileError as e:
                 logger.warning(f"Не удалось обработать файл по ссылке {url}: {e}")

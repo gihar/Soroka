@@ -59,7 +59,7 @@ def test_record_actions_menu_builder_text_and_buttons():
     """Билдер отдаёт текст «Файл получен» и ровно две кнопки быстрой обработки."""
     text, keyboard = QuickActionsUI.create_record_actions_menu()
 
-    assert "**Файл получен**" in text
+    assert "<b>Файл получен</b>" in text
     assert _callback_data_set(keyboard) == {
         "quick_process_file",
         "configure_file_processing",
@@ -182,7 +182,7 @@ async def test_link_shows_record_actions_menu_after_download(monkeypatch):
     menu = _menu_calls(safe_answer)
     assert len(menu) == 1
     text = menu[0].args[1]
-    assert "**Файл получен**" in text
+    assert "<b>Файл получен</b>" in text
     keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {
         "quick_process_file",

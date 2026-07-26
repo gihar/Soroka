@@ -12,6 +12,7 @@ from src.services.template_service import TemplateService
 from src.services.user_service import UserService
 from src.utils.telegram_safe import safe_answer
 from src.utils.template_sort import category_label
+from src.ux.html_text import esc
 
 
 def setup_command_handlers(user_service: UserService, template_service: TemplateService, 
@@ -37,10 +38,10 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             welcome_text = MessageBuilder.welcome_message()
             main_menu = QuickActionsUI.create_main_menu(message.from_user.id)
             
-            await safe_answer(message, 
+            await safe_answer(message,
                 welcome_text,
                 reply_markup=main_menu,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await state.clear()
             
@@ -56,7 +57,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         """Обработчик команды /help"""
         from src.ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
-        await safe_answer(message, help_text, parse_mode="Markdown")
+        await safe_answer(message, help_text, parse_mode="HTML")
     
     @router.message(Command("settings", "s"))
     async def settings_handler(message: Message):
@@ -68,7 +69,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             is_admin_user = _is_admin(message.from_user.id)
             keyboard = QuickActionsUI.create_settings_menu(is_admin=is_admin_user)
 
-            text = "⚙️ **Настройки бота**\n\n"
+            text = "⚙️ <b>Настройки бота</b>\n\n"
 
             if is_admin_user:
                 # Admins see the currently active model name (read-only line)
@@ -79,7 +80,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                     if active_key:
                         preset = await model_preset_repo.get_by_key(active_key)
                         if preset:
-                            text += f"Активная модель: {preset['name']}\n\n"
+                            text += f"Активная модель: {esc(preset['name'])}\n\n"
                         else:
                             text += "⚠️ Активная модель не найдена\n\n"
                     else:
@@ -89,7 +90,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
 
             text += "Настройте бота под ваши предпочтения:"
 
-            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка в settings_handler: {e}")
             await message.answer(
@@ -144,10 +145,10 @@ def setup_command_handlers(user_service: UserService, template_service: Template
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_answer(message,
-                f"**Доступные шаблоны:** {len(templates)}\n\n"
+                f"<b>Доступные шаблоны:</b> {len(templates)}\n\n"
                 "Выберите категорию для просмотра:",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -166,7 +167,7 @@ def setup_command_handlers(user_service: UserService, template_service: Template
         await safe_answer(message,
             FeedbackUI.feedback_intro_text(),
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     
     return router

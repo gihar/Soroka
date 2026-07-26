@@ -12,6 +12,7 @@ from loguru import logger
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
 from src.utils.telegram_safe import safe_edit_text, safe_send_message
+from src.ux.html_text import esc
 
 
 class ProgressStage:
@@ -247,7 +248,7 @@ class ProgressTracker:
                         logger.debug(f"⏭️ Троттлинг: слишком частое обновление (msg_id={message_id})")
                         return
 
-                    await safe_edit_text(self.message, text, parse_mode="Markdown")
+                    await safe_edit_text(self.message, text, parse_mode="HTML")
                     self._last_text = text
                     self._last_edit_at = now
                     
@@ -287,14 +288,14 @@ class ProgressTracker:
         сводку «Протокол готов» несёт отдельное сообщение доставки (ADR-0003),
         здесь остаётся лишь тихий тайминг — иначе два ✅-штампа подряд.
         """
-        lines = ["**Обработка файла**", ""]
+        lines = ["<b>Обработка файла</b>", ""]
 
         for stage in self.stages.values():
             if stage.is_completed:
                 lines.append(f"✅ {stage.name}{self._stage_duration_text(stage)}")
             elif stage.is_active and not final:
                 lines.append(f"⏳ {stage.name}")
-                lines.append(f"   _{stage.description}_")
+                lines.append(f"   <i>{stage.description}</i>")
             else:
                 lines.append(f"· {stage.name}")
 
@@ -389,29 +390,21 @@ class ProgressTracker:
         # PRODUCT.md «сырой машинный вывод»). Пользователь видит простую фразу.
         logger.error(f"Обработка прервалась на этапе {stage_id}: {error_message}")
 
-        safe_stage = self._escape_markdown(stage_name)
+        safe_stage = esc(stage_name)
         text = (
             f"❌ Обработка прервалась на этапе «{safe_stage}».\n"
             "Отправьте запись ещё раз — обычно повторная попытка помогает."
         )
-        
+
         try:
             if self.message is None:
                 logger.warning("Попытка отобразить ошибку без сообщения")
                 return
-            await safe_edit_text(self.message, text, parse_mode="Markdown")
+            await safe_edit_text(self.message, text, parse_mode="HTML")
             self._last_text = text
             self._last_edit_at = datetime.now()
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
-    
-    def _escape_markdown(self, text: str) -> str:
-        """Экранировать специальные символы Markdown"""
-        # Экранируем символы, которые могут вызвать проблемы с парсингом
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
-        return text
 
 
 class ProgressFactory:
@@ -424,8 +417,8 @@ class ProgressFactory:
         # Создаем начальное сообщение
         initial_message = await safe_send_message(
             bot, chat_id,
-            "**Обработка файла**\n\n⏳ Инициализация...",
-            parse_mode="Markdown"
+            "<b>Обработка файла</b>\n\n⏳ Инициализация...",
+            parse_mode="HTML"
         )
         
         # Если сообщение не удалось создать, логируем ошибку, но продолжаем

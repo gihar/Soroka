@@ -9,6 +9,7 @@ from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+from src.ux.html_text import esc
 
 from .helpers import _safe_callback_answer
 
@@ -223,9 +224,9 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             mode_name = mode_names.get(mode, mode)
 
             await safe_edit_text(callback.message,
-                f"✅ **Режим транскрипции изменен на:** {mode_name}\n\n"
+                f"✅ <b>Режим транскрипции изменен на:</b> {esc(mode_name)}\n\n"
                 f"Новый режим будет использоваться для всех последующих обработок файлов.",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
 
@@ -264,7 +265,8 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             )
 
             await safe_edit_text(callback.message,
-                "**Быстрая обработка**\n\n⏳ Начинаю обработку...")
+                "<b>Быстрая обработка</b>\n\n⏳ Начинаю обработку...",
+                parse_mode="HTML")
             await _safe_callback_answer(callback)
             await _process_file(callback, state, processing_service)
 

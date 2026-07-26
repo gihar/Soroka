@@ -18,6 +18,7 @@ from src.config import settings
 from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer
 from src.utils.template_sort import sort_templates_by_name
+from src.ux.html_text import esc
 
 
 class QuickActionsUI:
@@ -61,9 +62,9 @@ class QuickActionsUI:
         получен» и клавиатуру с кнопками быстрой обработки и настройки.
         """
         text = (
-            "**Файл получен**\n\n"
-            "**Быстрая обработка** — умный шаблон и сохранённые настройки\n"
-            "**Настроить** — выбрать участников, шаблон, модель"
+            "<b>Файл получен</b>\n\n"
+            "<b>Быстрая обработка</b> — умный шаблон и сохранённые настройки\n"
+            "<b>Настроить</b> — выбрать участников, шаблон, модель"
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
@@ -191,14 +192,15 @@ def setup_quick_actions_handlers() -> Router:
         """Обработчик кнопки загрузки файла"""
         max_mb = settings.telegram_max_file_size // (1024 * 1024)
         await message.answer(
-            "**Загрузка файла**\n\n"
+            "<b>Загрузка файла</b>\n\n"
             "Отправьте аудио или видео файл, либо ссылку на файл любым способом:\n"
             "• Как аудио сообщение\n"
             "• Как видео сообщение\n"
             "• Как документ\n"
             "• Голосовое сообщение\n\n"
             f"Максимальный размер: {max_mb} МБ.\n"
-            "Если файл превышает максимальный размер, отправьте, пожалуйста, ссылку на него (например, Google Drive, Яндекс.Диск или Synology Drive) с доступом на скачивание."
+            "Если файл превышает максимальный размер, отправьте, пожалуйста, ссылку на него (например, Google Drive, Яндекс.Диск или Synology Drive) с доступом на скачивание.",
+            parse_mode="HTML",
         )
     
     @router.message(F.text == "Мои шаблоны")
@@ -230,9 +232,9 @@ def setup_quick_actions_handlers() -> Router:
             keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
             await safe_answer(message,
-                f"**Доступные шаблоны ({len(templates)}):**",
+                f"<b>Доступные шаблоны ({len(templates)}):</b>",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -250,9 +252,10 @@ def setup_quick_actions_handlers() -> Router:
             is_admin=_is_admin(message.from_user.id)
         )
         await message.answer(
-            "⚙️ **Настройки бота**\n\n"
+            "⚙️ <b>Настройки бота</b>\n\n"
             "Настройте бота под ваши предпочтения:",
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            parse_mode="HTML",
         )
     
     @router.message(F.text == "📊 Статистика")
@@ -279,35 +282,35 @@ def setup_quick_actions_handlers() -> Router:
                 llm_providers = user_stats.get('llm_providers', [])
                 
                 # Строим сообщение
-                stats_text = "**Ваша статистика**\n\n"
-                stats_text += f"**Обработано файлов:** {total_files}\n"
-                stats_text += f"**Активных дней:** {active_days}\n"
+                stats_text = "<b>Ваша статистика</b>\n\n"
+                stats_text += f"<b>Обработано файлов:</b> {total_files}\n"
+                stats_text += f"<b>Активных дней:</b> {active_days}\n"
 
                 if user_stats.get('first_file_date'):
                     try:
                         first_date = datetime.fromisoformat(user_stats['first_file_date'].replace('Z', '+00:00'))
                         days_since_first = (datetime.now() - first_date.replace(tzinfo=None)).days
-                        stats_text += f"**Дней с начала использования:** {days_since_first}\n"
+                        stats_text += f"<b>Дней с начала использования:</b> {days_since_first}\n"
                     except:
                         pass
 
                 # Любимые шаблоны
                 if favorite_templates:
-                    stats_text += "\n**Популярные шаблоны:**\n"
+                    stats_text += "\n<b>Популярные шаблоны:</b>\n"
                     for template in favorite_templates[:3]:
-                        stats_text += f"• {template['name']}: {template['count']} раз\n"
+                        stats_text += f"• {esc(template['name'])}: {template['count']} раз\n"
 
                 # Модели ИИ
                 if llm_providers:
-                    stats_text += "\n**Используемые модели ИИ:**\n"
+                    stats_text += "\n<b>Используемые модели ИИ:</b>\n"
                     for provider in llm_providers[:3]:
                         provider_name = provider['llm_provider'].title() if provider['llm_provider'] else 'Неизвестно'
-                        stats_text += f"• {provider_name}: {provider['count']} раз\n"
+                        stats_text += f"• {esc(provider_name)}: {provider['count']} раз\n"
 
                 # System stats only for admins
                 from src.utils.admin_utils import is_admin
                 if is_admin(message.from_user.id):
-                    stats_text += "\n**Общая статистика системы:**\n"
+                    stats_text += "\n<b>Общая статистика системы:</b>\n"
                     stats_text += f"• Всего запросов: {system_stats.get('total_requests', 0)}\n"
                     stats_text += f"• Активных пользователей: {system_stats.get('active_users', 0)}\n"
                     stats_text += f"• Среднее время ответа: {system_stats.get('average_processing_time', 0):.2f}с\n"
@@ -318,20 +321,20 @@ def setup_quick_actions_handlers() -> Router:
 
             else:
                 stats_text = (
-                    "**Статистика**\n\n"
-                    "**Обработано файлов:** 0\n"
+                    "<b>Статистика</b>\n\n"
+                    "<b>Обработано файлов:</b> 0\n"
                     "Отправьте свой первый файл для обработки!"
                 )
 
-            await safe_answer(message, stats_text, parse_mode="Markdown")
+            await safe_answer(message, stats_text, parse_mode="HTML")
 
         except Exception as e:
             logger.error(f"Ошибка при получении статистики: {e}")
             await safe_answer(message,
-                "**Статистика**\n\n"
+                "<b>Статистика</b>\n\n"
                 "Временно недоступна статистика.\n"
                 "Попробуйте позже или обратитесь к администратору.",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
     
     @router.message(F.text == "Помощь")
@@ -339,7 +342,7 @@ def setup_quick_actions_handlers() -> Router:
         """Обработчик кнопки помощи"""
         from src.ux.message_builder import MessageBuilder
         help_text = MessageBuilder.help_message()
-        await safe_answer(message, help_text, parse_mode="Markdown")
+        await safe_answer(message, help_text, parse_mode="HTML")
     
     @router.message(F.text == "Обратная связь")
     async def feedback_button_handler(message: Message):
@@ -349,7 +352,7 @@ def setup_quick_actions_handlers() -> Router:
         await safe_answer(message,
             FeedbackUI.feedback_intro_text(),
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     
     @router.message(F.text == "🔧 Меню администратора")
@@ -364,11 +367,11 @@ def setup_quick_actions_handlers() -> Router:
         
         # Показываем меню администратора
         keyboard = QuickActionsUI.create_admin_menu()
-        await safe_answer(message, 
-            "🔧 **Меню администратора**\n\n"
+        await safe_answer(message,
+            "🔧 <b>Меню администратора</b>\n\n"
             "Выберите действие:",
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     
     return router
