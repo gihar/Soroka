@@ -2,7 +2,7 @@
 Конструктор красивых и информативных сообщений для пользователей
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 
 class MessageBuilder:
@@ -75,8 +75,7 @@ class MessageBuilder:
     )
 
     @classmethod
-    def error_message(cls, error_type: str, details: str = "",
-                     suggestions: Optional[List[str]] = None) -> str:
+    def error_message(cls, error_type: str, details: str = "") -> str:
         """Короткое сообщение об ошибке: что не получилось + следующий шаг.
 
         Внутренний код ошибки и exception-текст пользователю не показываются —
