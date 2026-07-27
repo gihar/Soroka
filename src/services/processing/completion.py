@@ -81,6 +81,7 @@ async def complete_processing(
     task_id: Optional[Any] = None,
     metrics: Any = None,
     temp_file_path: Optional[str] = None,
+    progress_tracker: Any = None,
 ) -> CompletionOutcome:
     """Довести обработку от генерации до доставки и учёта — единый хвост.
 
@@ -110,6 +111,7 @@ async def complete_processing(
 
     return await _record_and_deliver(
         result, request=request, deps=deps, delivery=delivery, task_id=task_id,
+        progress_tracker=progress_tracker,
     )
 
 
@@ -120,6 +122,7 @@ async def deliver_cached(
     deps: CompletionDeps,
     delivery: Delivery,
     task_id: Optional[Any] = None,
+    progress_tracker: Any = None,
 ) -> CompletionOutcome:
     """Хвост для кеш-хита: результат уже сгенерирован и закеширован.
 
@@ -130,7 +133,30 @@ async def deliver_cached(
     """
     return await _record_and_deliver(
         result, request=request, deps=deps, delivery=delivery, task_id=task_id,
+        progress_tracker=progress_tracker,
     )
+
+
+async def _finish_tracker(progress_tracker: Any) -> None:
+    """Погасить трекер прогресса — единая точка для всех путей хвоста.
+
+    Трекер живёт своей asyncio-задачей ``_auto_update`` и правит сообщение
+    прогресса, пока этап не снят. Раньше его гасили только ``finally`` воркера
+    (и там намеренно не гасят на паузе ради подтверждения сопоставления) и
+    ветка кеш-хита — поэтому возобновление после подтверждения оставляло трекер
+    живым: на проде он ~28 минут правил сообщение над уже доставленным
+    протоколом, пока его не добивал гард на 1800с.
+
+    Best-effort: сбой гашения не должен обрушить уже доставленный протокол.
+    ``complete_all()`` идемпотентен, так что второй вызов из ``finally``
+    воркера — no-op.
+    """
+    if progress_tracker is None:
+        return
+    try:
+        await progress_tracker.complete_all()
+    except Exception as e:
+        logger.warning(f"Не удалось закрыть трекер прогресса: {e}")
 
 
 async def _record_and_deliver(
@@ -140,17 +166,23 @@ async def _record_and_deliver(
     deps: CompletionDeps,
     delivery: Delivery,
     task_id: Optional[Any],
+    progress_tracker: Any = None,
 ) -> CompletionOutcome:
     """Учёт и доставка: история (всегда, до доставки) → доставка → статус задачи."""
     # История — всегда, до доставки: history_id садится на результат, поэтому
     # кнопки действий под доставленным протоколом ссылаются на свежую запись.
     result.history_id = await deps.history.save_processing_history(request, result)
 
-    delivered = await delivery(result)
+    # Гашение трекера — в finally: провал доставки не должен оставлять цикл
+    # автообновления живым (иначе те же 28 минут правок, но ещё и после ошибки).
+    try:
+        delivered = await delivery(result)
 
-    await _mark_queue_task(task_id, delivered)
+        await _mark_queue_task(task_id, delivered)
 
-    return CompletionOutcome(result=result, delivered=delivered)
+        return CompletionOutcome(result=result, delivered=delivered)
+    finally:
+        await _finish_tracker(progress_tracker)
 
 
 async def _assemble_result(

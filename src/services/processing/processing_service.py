@@ -187,6 +187,7 @@ class ProcessingService(BaseProcessingService):
                     deps=self._completion_deps(),
                     delivery=self._delivery_for(request, progress_tracker),
                     task_id=task_id,
+                    progress_tracker=progress_tracker,
                 )
                 return outcome.result
 
@@ -387,6 +388,7 @@ class ProcessingService(BaseProcessingService):
                 task_id=task_id,
                 metrics=processing_metrics,
                 temp_file_path=temp_file_path,
+                progress_tracker=progress_tracker,
             )
             return outcome.result
 
@@ -616,6 +618,10 @@ class ProcessingService(BaseProcessingService):
                 task_id=task_id,
                 metrics=session.metrics,
                 temp_file_path=session.temp_file_path,
+                # Трекер возобновления создан здесь и больше нигде не гасится:
+                # finally воркера сюда не доходит (задача снята с паузы вне
+                # воркера), а result_sender трогает трекер лишь в except.
+                progress_tracker=progress_tracker,
             )
 
             if outcome.delivered:
