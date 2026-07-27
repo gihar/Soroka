@@ -425,6 +425,45 @@ async def test_main_view_text_is_laid_out_over_unnamed(_patch_card_render):
     assert session.editing_speaker is None  # раскладка не открывает под-вид
 
 
+@pytest.mark.asyncio
+async def test_main_view_namesakes_land_on_separate_speakers(_patch_card_render):
+    """Тёзки двумя сообщениями подряд получают РАЗНЫЕ подписи (баг из прода).
+
+    Пользователь отправил «Алексей Шабловский», затем «Алексей Тимченко»: каждое
+    сообщение — одно имя на очередного неназванного спикера. Дедуп участников
+    матчил по общему токену «алексей», и Спикер 2 получал имя Спикера 1.
+    """
+    session = _make_session(participants=None, speaker_mapping={}, user_id=57)
+    session.confirmation_message = _FakeMessage(57)
+    mapping_sessions.save(57, session)
+    router = _mapping_router()
+
+    await _deliver_message(
+        [router], _FakeMessage(57, text="Алексей Шабловский"), _make_fsm(57)
+    )
+    await _deliver_message(
+        [router], _FakeMessage(57, text="Алексей Тимченко"), _make_fsm(57)
+    )
+
+    assert session.speaker_mapping["SPEAKER_1"] == "Алексей Шабловский"
+    assert session.speaker_mapping["SPEAKER_2"] == "Алексей Тимченко"
+
+
+@pytest.mark.asyncio
+async def test_main_view_namesakes_in_one_message(_patch_card_render):
+    """Тот же дедуп бьёт и по раскладке одним сообщением через запятую (#100)."""
+    session = _make_session(participants=None, speaker_mapping={}, user_id=58)
+    session.confirmation_message = _FakeMessage(58)
+    mapping_sessions.save(58, session)
+    router = _mapping_router()
+
+    message = _FakeMessage(58, text="Алексей Шабловский, Алексей Тимченко")
+    await _deliver_message([router], message, _make_fsm(58))
+
+    assert session.speaker_mapping["SPEAKER_1"] == "Алексей Шабловский"
+    assert session.speaker_mapping["SPEAKER_2"] == "Алексей Тимченко"
+
+
 # ---------------------------------------------------------------------------
 # Отказы в под-виде: несколько имён и имя вне планки — ничего не применяем
 # ---------------------------------------------------------------------------

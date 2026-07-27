@@ -179,6 +179,53 @@ def test_add_manual_participant_dedups_existing_participant():
     assert new_list == original
 
 
+def test_add_manual_participant_keeps_namesakes_apart():
+    """Тёзки по имени — разные люди: «Алексей Тимченко» не тот же участник, что
+    «Алексей Шабловский».
+
+    Баг из прода: дедуп матчил по ОДНОТОКЕННОМУ варианту («алексей»), поэтому
+    второе имя схлопывалось в первого участника и два спикера получали одну
+    подпись. Совпадение одного токена — не тот же человек.
+    """
+    original = [{"name": "Алексей Шабловский", "role": ""}]
+
+    new_list, display_name = participants_service.add_manual_participant(
+        original, "Алексей Тимченко"
+    )
+
+    assert display_name == "Алексей Тимченко"
+    assert len(new_list) == 2
+    assert {"name": "Алексей Тимченко", "role": ""} in new_list
+
+
+def test_add_manual_participant_keeps_same_surname_apart():
+    """Однофамильцы — тоже разные люди: совпадение фамилии не схлопывает."""
+    original = [{"name": "Алексей Тимченко", "role": ""}]
+
+    new_list, display_name = participants_service.add_manual_participant(
+        original, "Мария Тимченко"
+    )
+
+    assert display_name == "Мария Тимченко"
+    assert len(new_list) == 2
+
+
+def test_add_manual_participant_single_token_reuses_unambiguous_participant():
+    """Однословное имя — ссылка на существующего участника, а не новый человек.
+
+    Обратная сторона дедупа тёзок: «Алексей» при единственном Алексее в списке
+    по-прежнему переиспользует его, дубля не появляется.
+    """
+    original = [{"name": "Алексей Шабловский", "role": ""}]
+
+    new_list, display_name = participants_service.add_manual_participant(
+        original, "Алексей"
+    )
+
+    assert display_name == "Алексей Шабловский"
+    assert new_list == original
+
+
 def test_add_manual_participant_stores_raw_full_name_displays_short():
     """Полное ФИО хранится сырым; отображается «Имя Фамилия» без отчества.
 
