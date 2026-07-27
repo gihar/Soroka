@@ -24,6 +24,7 @@ from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
 from src.services.base_processing_service import BaseProcessingService
+from src.services.error_presentation import resume_failure_message
 from src.services.mapping_session import MappingSession
 from src.services.smart_template_selector import smart_selector
 
@@ -663,32 +664,24 @@ class ProcessingService(BaseProcessingService):
         или чистить нечего.
         """
         error_type = type(error).__name__
-        logger.error(
+        # opt(exception=True), а не exc_info=True: последнее — идиома stdlib
+        # logging, loguru её не печатает, зато ЛЮБОЙ kwarg включает у него
+        # message.format() — и текст ошибки с фигурными скобками (например сырой
+        # payload 402 с ключом 'error') ронял сам обработчик ошибок.
+        logger.opt(exception=True).error(
             f"Ошибка возобновления обработки для пользователя {user_id} "
-            f"({error_type}): {error}",
-            exc_info=True,
+            f"({error_type}): {error}"
         )
 
         await self._mark_queue_task(task_id, "failed", error_message=str(error))
-
-        lowered = str(error).lower()
-        is_api_error = any(
-            pattern in lowered for pattern in (
-                'rate limit', 'quota', 'service unavailable',
-                'connection', 'timeout', 'network',
-            )
-        )
-        hint = (
-            "Похоже на временную проблему с API — попробуйте через несколько минут."
-            if is_api_error
-            else "Пожалуйста, начните обработку заново."
-        )
 
         try:
             await safe_send_message(
                 bot=bot,
                 chat_id=chat_id,
-                text=f"Произошла ошибка при продолжении обработки:\n\n{str(error)}\n\n{hint}",
+                # Сырой str(error) сюда не идёт: у провайдера в payload бывают
+                # user_id и параметры запроса, а человеку они ничего не объясняют.
+                text=resume_failure_message(str(error)),
             )
         except Exception as notify_error:
             logger.error(f"Не удалось уведомить пользователя об ошибке: {notify_error}")
@@ -758,9 +751,7 @@ class ProcessingService(BaseProcessingService):
             return (speaker_mapping, meeting_type)
 
         except Exception as e:
-            logger.error(
-                f"ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}", exc_info=True
-            )
+            logger.opt(exception=True).error(f"ОШИБКА ПРИ СОПОСТАВЛЕНИИ СПИКЕРОВ: {e}")
             return ({}, None)
 
     # ------------------------------------------------------------------

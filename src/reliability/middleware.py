@@ -71,7 +71,7 @@ class ErrorHandlingMiddleware(BaseMiddleware):
             return
         
         except Exception as e:
-            logger.error(f"Unhandled exception: {e}", exc_info=True)
+            logger.opt(exception=True).error(f"Unhandled exception: {e}")
             if isinstance(event, Message):
                 # Используем безопасную отправку
                 try:

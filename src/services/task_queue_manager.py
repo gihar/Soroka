@@ -15,6 +15,7 @@ from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
+from src.services import error_presentation
 
 # Не чаще одного алерта админам об окончании кредитов LLM в этот интервал —
 # при исчерпании баланса падает каждая задача, иначе админов завалит сообщениями.
@@ -393,14 +394,11 @@ class TaskQueueManager:
     def _is_insufficient_credits(error_lower: str) -> bool:
         """Признак ошибки «закончились кредиты на LLM» (HTTP 402).
 
-        Срабатывает и на типизированном ``LLMInsufficientCreditsError`` (русское
-        «кредит»), и на сыром ответе провайдера (англ. «credits» / «402»).
+        Правило общее с путём возобновления — живёт в
+        ``src.services.error_presentation``, чтобы два пути не разошлись в том,
+        что считать исчерпанием кредитов.
         """
-        return (
-            "кредит" in error_lower
-            or "credit" in error_lower
-            or "error code: 402" in error_lower
-        )
+        return error_presentation.is_insufficient_credits(error_lower)
 
     @staticmethod
     def _build_admin_credits_alert(exc: Exception) -> str:
