@@ -17,6 +17,7 @@ from src.exceptions.template import TemplateNotFoundError
 from src.handlers.record_state import register_new_record
 from src.services import FileService, ProcessingService, TemplateService
 from src.services.url_service import URLService
+from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
 from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
@@ -172,24 +173,16 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         # Получаем данные из состояния
         data = await state.get_data()
         
-        # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info("🔍 Данные из state перед созданием request:")
-        participants_list = data.get('participants_list')
-        if participants_list:
-            logger.info(f"  participants_list: {len(participants_list)} чел.")
-            # Показываем первые 3 участника для проверки
-            for i, p in enumerate(participants_list[:3], 1):
-                logger.info(f"    {i}. {p.get('name')} ({p.get('role', 'без роли')})")
-            if len(participants_list) > 3:
-                logger.info(f"    ... и еще {len(participants_list) - 3} участников")
-        else:
-            logger.warning("  participants_list: None (НЕ ПЕРЕДАН!)")
-        logger.info(f"  meeting_topic: {data.get('meeting_topic')}")
-        logger.info(f"  meeting_date: {data.get('meeting_date')}")
-        logger.info(f"  meeting_time: {data.get('meeting_time')}")
         protocol_info = (data.get('protocol_info') or {})
-        logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
-        logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
+        log_meeting_inputs(
+            "очередь (message)",
+            participants_list=data.get('participants_list'),
+            meeting_topic=data.get('meeting_topic'),
+            meeting_date=data.get('meeting_date'),
+            meeting_time=data.get('meeting_time'),
+            meeting_agenda=protocol_info.get('meeting_agenda'),
+            project_list=protocol_info.get('project_list'),
+        )
         
         # Проверяем наличие модели (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
@@ -247,16 +240,6 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             meeting_agenda=protocol_info.get('meeting_agenda'),  # повестка встречи
             project_list=protocol_info.get('project_list')  # список проектов
         )
-        
-        # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info("🔍 ProcessingRequest создан, проверка полей (message):")
-        if request.participants_list:
-            logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
-        else:
-            logger.warning("  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
-        logger.info(f"  request.meeting_topic: {request.meeting_topic}")
-        logger.info(f"  request.meeting_date: {request.meeting_date}")
-        logger.info(f"  request.meeting_time: {request.meeting_time}")
         
         # Добавляем задачу в очередь
         queued_task = await task_queue_manager.add_task(

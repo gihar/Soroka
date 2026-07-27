@@ -29,6 +29,7 @@ from src.services.smart_template_selector import smart_selector
 
 # Новые сервисы для улучшения качества
 from src.services.transcription_preprocessor import get_preprocessor
+from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_send_message
 
 from .completion import CompletionDeps, complete_processing, deliver_cached
@@ -219,20 +220,17 @@ class ProcessingService(BaseProcessingService):
             raise
 
     def _log_request_diagnostics(self, request: ProcessingRequest) -> None:
-        """Залогировать поля входящего ProcessingRequest для диагностики."""
-        logger.info("Данные из ProcessingRequest при начале обработки:")
-        if request.participants_list:
-            logger.info(f"  participants_list: {len(request.participants_list)} чел.")
-            for i, p in enumerate(request.participants_list[:3], 1):
-                logger.info(f"    {i}. {p.get('name')} ({p.get('role', 'без роли')})")
-            if len(request.participants_list) > 3:
-                logger.info(f"    ... и еще {len(request.participants_list) - 3} участников")
-        else:
-            logger.warning("  participants_list: None (НЕ ПЕРЕДАН В REQUEST!)")
-        logger.info(f"  meeting_topic: {request.meeting_topic}")
-        logger.info(f"  meeting_date: {request.meeting_date}")
-        logger.info(f"  meeting_time: {request.meeting_time}")
-        logger.info(f"  speaker_mapping: {request.speaker_mapping}")
+        """Залогировать реквизиты входящего ProcessingRequest одной строкой."""
+        log_meeting_inputs(
+            "обработка",
+            participants_list=request.participants_list,
+            meeting_topic=request.meeting_topic,
+            meeting_date=request.meeting_date,
+            meeting_time=request.meeting_time,
+            meeting_agenda=request.meeting_agenda,
+            project_list=request.project_list,
+            speaker_mapping=request.speaker_mapping,
+        )
 
     async def _process_file_optimized(
         self,

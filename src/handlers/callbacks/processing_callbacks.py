@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery
 from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
+from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
 
@@ -27,24 +28,16 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         # Получаем данные из состояния
         data = await state.get_data()
 
-        # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info("Данные из state перед созданием request (callback):")
-        participants_list = data.get('participants_list')
-        if participants_list:
-            logger.info(f"  participants_list: {len(participants_list)} чел.")
-            # Показываем первые 3 участника для проверки
-            for i, p in enumerate(participants_list[:3], 1):
-                logger.info(f"    {i}. {p.get('name')} ({p.get('role', 'без роли')})")
-            if len(participants_list) > 3:
-                logger.info(f"    ... и еще {len(participants_list) - 3} участников")
-        else:
-            logger.warning("  participants_list: None (НЕ ПЕРЕДАН!)")
-        logger.info(f"  meeting_topic: {data.get('meeting_topic')}")
-        logger.info(f"  meeting_date: {data.get('meeting_date')}")
-        logger.info(f"  meeting_time: {data.get('meeting_time')}")
         protocol_info = (data.get('protocol_info') or {})
-        logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
-        logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
+        log_meeting_inputs(
+            "очередь (callback)",
+            participants_list=data.get('participants_list'),
+            meeting_topic=data.get('meeting_topic'),
+            meeting_date=data.get('meeting_date'),
+            meeting_time=data.get('meeting_time'),
+            meeting_agenda=protocol_info.get('meeting_agenda'),
+            project_list=protocol_info.get('project_list'),
+        )
 
         # Проверяем наличие модели (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
@@ -103,16 +96,6 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
             meeting_agenda=protocol_info.get('meeting_agenda'),
             project_list=protocol_info.get('project_list')
         )
-
-        # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info("ProcessingRequest создан, проверка полей:")
-        if request.participants_list:
-            logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
-        else:
-            logger.warning("  request.participants_list: None (НЕ ПОПАЛ В REQUEST!)")
-        logger.info(f"  request.meeting_topic: {request.meeting_topic}")
-        logger.info(f"  request.meeting_date: {request.meeting_date}")
-        logger.info(f"  request.meeting_time: {request.meeting_time}")
 
         # Добавляем задачу в очередь
         queued_task = await task_queue_manager.add_task(
