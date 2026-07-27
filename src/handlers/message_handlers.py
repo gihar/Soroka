@@ -19,7 +19,21 @@ from src.services import FileService, ProcessingService, TemplateService
 from src.services.url_service import URLService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
-from src.ux.quick_actions import QuickActionsUI
+from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
+
+
+def _menu_button_texts() -> list[str]:
+    """Подписи кнопок главного меню (create_main_menu).
+
+    Единый список зеркалит подписи главного меню: text_handler пропускает эти
+    тапы в свой роутер вместо разбора как URL. Вход в админку берётся из общей
+    константы ADMIN_MENU_BUTTON, чтобы подпись не разъехалась с кнопкой.
+    """
+    return [
+        "Мои шаблоны", "⚙️ Настройки",
+        "Помощь", "Обратная связь",
+        ADMIN_MENU_BUTTON,
+    ]
 
 
 def setup_message_handlers(file_service: FileService, template_service: TemplateService,
@@ -49,7 +63,7 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "max_size": 20
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             except FileTypeError:
                 from src.ux.message_builder import MessageBuilder
@@ -60,20 +74,20 @@ def setup_message_handlers(file_service: FileService, template_service: Template
                     "supported_formats": formats
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             except FileError as e:
                 from src.ux.message_builder import MessageBuilder
                 error_message = MessageBuilder.error_message("validation", str(e))
-                await safe_answer(message, error_message, parse_mode="Markdown")
+                await safe_answer(message, error_message, parse_mode="HTML")
                 return
             
             # Проверяем наличие file_id
             if not file_obj.file_id:
                 await safe_answer(
                     message,
-                    "❌ Ошибка: не удалось получить идентификатор файла. "
-                    "Попробуйте отправить файл еще раз."
+                    "❌ Не удалось распознать файл.\n"
+                    "Отправьте его ещё раз."
                 )
                 return
             
@@ -89,11 +103,15 @@ def setup_message_handlers(file_service: FileService, template_service: Template
 
             # Меню действий с записью — единая точка правды для файла и ссылки
             text, keyboard = QuickActionsUI.create_record_actions_menu()
-            await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_answer(message, text, reply_markup=keyboard, parse_mode="HTML")
             
         except Exception as e:
             logger.error(f"Ошибка в media_handler: {e}")
-            await safe_answer(message, "❌ Произошла ошибка при обработке файла. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось принять файл.\n"
+                "Отправьте его ещё раз — обычно повторная попытка помогает."
+            )
     
     # Обрабатываем текст только когда пользователь НЕ в FSM-состоянии
     @router.message(StateFilter(None), F.content_type == 'text')
@@ -102,13 +120,8 @@ def setup_message_handlers(file_service: FileService, template_service: Template
         try:
             text = message.text.strip()
             
-            # Исключаем обработку кнопок меню - они должны обрабатываться в quick_actions
-            menu_buttons = [
-                "📤 Загрузить файл", "📝 Мои шаблоны", "⚙️ Настройки", 
-                "📊 Статистика", "❓ Помощь", "💬 Обратная связь"
-            ]
-            
-            if text in menu_buttons:
+            # Исключаем обработку кнопок меню - они должны обрабатываться в quick_actions.
+            if text in _menu_button_texts():
                 # Пропускаем - пусть обрабатывает другой роутер
                 return
             
@@ -121,10 +134,10 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             if not _contains_url(text):
                 await safe_answer(
                     message,
-                    "📎 Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск/Synology Drive для обработки.\n\n"
+                    "Отправьте файл (аудио или видео) или ссылку на Google Drive/Яндекс.Диск/Synology Drive для обработки.\n\n"
                     "Поддерживаемые форматы:\n"
-                    "🎵 Аудио: MP3, WAV, M4A, OGG\n"
-                    "🎬 Видео: MP4, AVI, MOV, MKV"
+                    "Аудио: MP3, WAV, M4A, OGG\n"
+                    "Видео: MP4, AVI, MOV, MKV"
                 )
                 return
             
@@ -139,7 +152,11 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             
         except Exception as e:
             logger.error(f"Ошибка в text_handler: {e}")
-            await safe_answer(message, "❌ Произошла ошибка при обработке сообщения. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось обработать сообщение.\n"
+                "Отправьте запись или ссылку ещё раз."
+            )
     
     return router
 
@@ -174,36 +191,40 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
         logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
         
-        # Проверяем наличие LLM (template_id может быть None для умного выбора)
+        # Проверяем наличие модели (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
             await message.answer(
-                "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
+                "❌ Настройки обработки не сохранились.\n"
+                "Отправьте запись заново — и снова выберите способ обработки."
             )
             await state.clear()
             return
-        
+
         # Проверяем template_id только если не используется умный выбор
-        if (not data.get('use_smart_selection') and 
+        if (not data.get('use_smart_selection') and
             not data.get('template_id')):
             await message.answer(
-                "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
+                "❌ Шаблон не выбран.\n"
+                "Отправьте запись заново и выберите шаблон."
             )
             await state.clear()
             return
-        
+
         # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
         is_external_file = data.get('is_external_file', False)
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Пришлите ссылку ещё раз."
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Отправьте файл ещё раз."
                 )
                 await state.clear()
                 return
@@ -275,7 +296,10 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
             
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await message.answer("❌ Произошла ошибка при подготовке обработки файла.")
+        await message.answer(
+            "❌ Не получилось запустить обработку.\n"
+            "Отправьте запись заново."
+        )
         await state.clear()
 
 
@@ -307,100 +331,6 @@ async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
         logger.debug(f"Мониторинг позиции задачи {task_id} отменен")
     except Exception as e:
         logger.error(f"Ошибка в мониторинге позиции задачи {task_id}: {e}")
-
-
-def _fix_markdown_tags(text: str) -> str:
-    """Исправить незакрытые Markdown-теги в тексте"""
-    # Подсчитываем количество открытых/закрытых тегов
-    bold_count = text.count('**')
-    italic_count = text.count('_')
-    code_count = text.count('`')
-    
-    # Закрываем незакрытые теги
-    if bold_count % 2 != 0:
-        text = text + '**'
-    if italic_count % 2 != 0:
-        text = text + '_'
-    if code_count % 2 != 0:
-        text = text + '`'
-    
-    return text
-
-
-async def _send_long_protocol(message: Message, protocol_text: str):
-    """Отправить длинный протокол частями"""
-    try:
-        # Максимальная длина сообщения в Telegram (с запасом)
-        MAX_LENGTH = 4000
-        
-        logger.info(f"Начинаем разбивку протокола длиной {len(protocol_text)} символов на части")
-        
-        # Разбиваем протокол на части
-        parts = []
-        current_part = ""
-        
-        # Разбиваем по строкам, чтобы не разрывать слова
-        lines = protocol_text.split('\n')
-        logger.info(f"Разбиваем на {len(lines)} строк")
-        
-        for line_num, line in enumerate(lines):
-            # Проверяем, поместится ли строка в текущую часть
-            if len(current_part) + len(line) + 1 <= MAX_LENGTH:
-                current_part += line + '\n'
-            else:
-                # Если текущая часть не пустая, добавляем её в список частей
-                if current_part.strip():
-                    parts.append(current_part.strip())
-                    logger.debug(f"Добавлена часть {len(parts)} длиной {len(current_part.strip())} символов")
-                # Начинаем новую часть
-                current_part = line + '\n'
-        
-        # Добавляем последнюю часть, если она не пустая
-        if current_part.strip():
-            parts.append(current_part.strip())
-            logger.debug(f"Добавлена последняя часть {len(parts)} длиной {len(current_part.strip())} символов")
-        
-        logger.info(f"Протокол разбит на {len(parts)} частей")
-        
-        # Отправляем части
-        for i, part in enumerate(parts):
-            try:
-                if i == 0:
-                    # Первая часть
-                    part_text = f"📄 **Протокол встречи:**\n\n{part}"
-                else:
-                    # Остальные части с номером
-                    part_text = f"📄 **Протокол встречи (часть {i+1}):**\n\n{part}"
-                
-                # Исправляем незакрытые Markdown-теги
-                part_text = _fix_markdown_tags(part_text)
-                
-                logger.debug(f"Отправляем часть {i+1}/{len(parts)} длиной {len(part_text)} символов")
-                await safe_answer(message, part_text, parse_mode="Markdown")
-                
-                # Небольшая задержка между сообщениями
-                import asyncio
-                await asyncio.sleep(0.5)
-                
-            except Exception as part_error:
-                logger.error(f"Ошибка при отправке части {i+1}: {part_error}")
-                # Пытаемся отправить часть без Markdown
-                try:
-                    await message.answer(f"📄 Протокол (часть {i+1}):\n\n{part}")
-                except Exception as fallback_error:
-                    logger.error(f"Не удалось отправить часть {i+1} даже без Markdown: {fallback_error}")
-                    await message.answer(f"❌ Ошибка при отправке части {i+1} протокола")
-            
-    except Exception as e:
-        logger.error(f"Ошибка при отправке длинного протокола: {e}")
-        # Если не удалось разбить, отправляем как есть (может быть обрезано)
-        try:
-            truncated_text = protocol_text[:MAX_LENGTH] + "...\n\n(Протокол был обрезан из-за ограничений Telegram)"
-            logger.info(f"Отправляем обрезанный протокол длиной {len(truncated_text)} символов")
-            await safe_answer(message, truncated_text, parse_mode="Markdown")
-        except Exception as fallback_error:
-            logger.error(f"Не удалось отправить даже обрезанный протокол: {fallback_error}")
-            await message.answer("❌ Ошибка при отправке протокола. Попробуйте еще раз.")
 
 
 def _extract_file_info(message: Message) -> tuple:
@@ -491,23 +421,23 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         
         # Кнопка 1: Умный выбор (всегда показывать первой)
         keyboard_buttons.append([InlineKeyboardButton(
-            text="🤖 Протокол: Умный выбор шаблона",
+            text="Протокол: Умный выбор шаблона",
             callback_data="quick_smart_select"
         )])
-        
+
         # Кнопка 2: Сохранённый шаблон (если есть)
         if default_template_id is not None:
             default_id = default_template_id
             button_text = None
             try:
                 if default_id == 0:
-                    button_text = "🤖 Протокол: Умный выбор (по умолчанию)"
+                    button_text = "Протокол: Умный выбор (по умолчанию)"
                 else:
                     try:
                         default_template = await template_service.get_template_by_id(default_id)
-                        button_text = f"📋 По шаблону: {default_template.name}"
+                        button_text = f"По шаблону: {default_template.name}"
                     except TemplateNotFoundError:
-                        button_text = f"📋 По шаблону (ID {default_id})"
+                        button_text = f"По шаблону (ID {default_id})"
                 
                 if button_text:
                     keyboard_buttons.append([InlineKeyboardButton(
@@ -519,7 +449,7 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
         
         # Кнопка 4: Выбрать шаблон (для разового использования)
         keyboard_buttons.append([InlineKeyboardButton(
-            text="📋 Выбрать шаблон",
+            text="Выбрать шаблон",
             callback_data="select_template_once"
         )])
         
@@ -533,21 +463,24 @@ async def _show_template_selection_step2(message: Message, template_service: Tem
             message_text = f"✅ Список участников сохранен ({participants_count} чел.)\n\n"
         
         message_text += (
-            "📝 **Выберите способ создания протокола:**\n\n"
-            "🤖 **Умный выбор** - ИИ автоматически подберёт подходящий шаблон\n"
-            "📋 **По шаблону** - использовать сохранённый шаблон\n"
-            "📋 **Выбрать шаблон** - выбрать шаблон для текущей обработки"
+            "<b>Выберите способ создания протокола:</b>\n\n"
+            "<b>Умный выбор</b> - ИИ автоматически подберёт подходящий шаблон\n"
+            "<b>По шаблону</b> - использовать сохранённый шаблон\n"
+            "<b>Выбрать шаблон</b> - выбрать шаблон для текущей обработки"
         )
         
-        await safe_answer(message, 
+        await safe_answer(message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
     except Exception as e:
         logger.error(f"Ошибка при показе шаблонов: {e}")
-        await message.answer("❌ Произошла ошибка при загрузке шаблонов.")
+        await message.answer(
+            "❌ Не удалось загрузить шаблоны.\n"
+            "Попробуйте ещё раз — если повторится, откройте /templates."
+        )
 
 
 def _contains_url(text: str) -> bool:
@@ -569,7 +502,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
     status_message = None
     try:
         # Отправляем сообщение о начале обработки
-        status_message = await safe_answer(message, "🔍 Проверяю ссылку...")
+        status_message = await safe_answer(message, "Проверяю ссылку...")
         if not status_message:
             logger.warning("Не удалось отправить статусное сообщение")
             return
@@ -588,7 +521,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 return
             
             # Получаем информацию о файле
-            await safe_edit_text(status_message, "📊 Получаю информацию о файле...")
+            await safe_edit_text(status_message, "Получаю информацию о файле...")
             
             try:
                 filename, file_size, direct_url = await url_service.get_file_info(url)
@@ -601,9 +534,9 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 await safe_edit_text(
                     status_message,
                     f"✅ Файл найден!\n\n"
-                    f"📄 Имя: {filename}\n"
-                    f"📊 Размер: {size_mb:.1f} МБ\n\n"
-                    f"⬇️ Начинаю скачивание..."
+                    f"Имя: {filename}\n"
+                    f"Размер: {size_mb:.1f} МБ\n\n"
+                    f"Начинаю скачивание..."
                 )
                 
                 # Скачиваем файл (используем уже полученный direct_url, чтобы не делать повторный запрос)
@@ -626,7 +559,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
 
                 # Меню действий с записью — то же, что и для файла (единая точка правды)
                 text, keyboard = QuickActionsUI.create_record_actions_menu()
-                await safe_answer(message, text, reply_markup=keyboard, parse_mode="Markdown")
+                await safe_answer(message, text, reply_markup=keyboard, parse_mode="HTML")
                 
             except FileSizeError:
                 from src.config import settings
@@ -638,7 +571,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     "max_size": settings.max_external_file_size // (1024 * 1024)  # В МБ
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="HTML")
                 
             except FileTypeError:
                 from src.ux.message_builder import MessageBuilder
@@ -652,13 +585,22 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                     }
                 }
                 error_message = MessageBuilder.file_validation_error(error_details)
-                await safe_edit_text(status_message, error_message, parse_mode="Markdown")
+                await safe_edit_text(status_message, error_message, parse_mode="HTML")
                 
             except FileError as e:
-                await safe_edit_text(status_message, f"❌ Ошибка при обработке файла: {e}")
-                
+                logger.warning(f"Не удалось обработать файл по ссылке {url}: {e}")
+                await safe_edit_text(
+                    status_message,
+                    "❌ Не получилось обработать файл по ссылке.\n"
+                    "Проверьте, что файл доступен для скачивания, и пришлите ссылку ещё раз."
+                )
+
     except Exception as e:
         logger.error(f"Ошибка при обработке URL {url}: {e}")
         # Используем safe_answer только если не удалось создать status_message
         if not status_message:
-            await safe_answer(message, "❌ Произошла ошибка при обработке ссылки. Попробуйте еще раз.")
+            await safe_answer(
+                message,
+                "❌ Не получилось обработать ссылку.\n"
+                "Проверьте доступ по ссылке и отправьте её ещё раз."
+            )

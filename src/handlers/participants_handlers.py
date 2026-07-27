@@ -16,6 +16,7 @@ from src.handlers.participants_states import ParticipantsInput, ProtocolInfoStat
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.ux.html_text import esc
 
 
 async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
@@ -38,7 +39,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
                 saved = participants_service.participants_from_json(user.saved_participants)
                 if saved:
                     keyboard_buttons.append([InlineKeyboardButton(
-                        text=f"📋 Использовать сохраненный ({len(saved)} чел.)",
+                        text=f"Использовать сохраненный ({len(saved)} чел.)",
                         callback_data="use_saved_participants"
                     )])
             except Exception:
@@ -46,7 +47,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
 
         # Add new participants
         keyboard_buttons.append([InlineKeyboardButton(
-            text="👥 Добавить участников",
+            text="Добавить участников",
             callback_data="input_new_participants"
         )])
 
@@ -59,51 +60,57 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "👥 **Участники встречи**\n\n"
+            "<b>Участники встречи</b>\n\n"
             "Укажите участников для точной атрибуции в протоколе.\n"
             "Введите имена в любом формате — по одному на строку."
         )
-        
-        await safe_answer(message, 
+
+        await safe_answer(message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
     except Exception as e:
         logger.error(f"Ошибка при показе меню участников: {e}")
-        await message.answer("❌ Произошла ошибка при загрузке меню.")
+        await message.answer(
+            "❌ Не удалось открыть меню участников.\n"
+            "Отправьте запись заново."
+        )
 
 
 async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dict):
     """Menu for inputting additional protocol information"""
     try:
         keyboard_buttons = [
-            [InlineKeyboardButton(text="📋 Повестка встречи", callback_data="input_meeting_agenda")],
-            [InlineKeyboardButton(text="📊 Список проектов", callback_data="input_project_list")],
-            [InlineKeyboardButton(text="✅ Готово", callback_data="protocol_info_complete")],
+            [InlineKeyboardButton(text="Повестка встречи", callback_data="input_meeting_agenda")],
+            [InlineKeyboardButton(text="Список проектов", callback_data="input_project_list")],
+            [InlineKeyboardButton(text="Готово", callback_data="protocol_info_complete")],
             [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
         ]
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
         message_text = (
-            "📝 **Дополнительная информация к протоколу**\n\n"
+            "<b>Дополнительная информация к протоколу</b>\n\n"
             "Добавьте контекст для улучшения качества протокола:\n\n"
-            "📋 **Повестка встречи** - основные темы и вопросы для обсуждения\n"
-            "📊 **Список проектов** - названия проектов, упоминаемых во встрече\n\n"
+            "<b>Повестка встречи</b> - основные темы и вопросы для обсуждения\n"
+            "<b>Список проектов</b> - названия проектов, упоминаемых во встрече\n\n"
             "Выберите действие:"
         )
 
-        await safe_edit_text(callback_query.message, 
+        await safe_edit_text(callback_query.message,
             message_text,
             reply_markup=keyboard,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
     except Exception as e:
         logger.error(f"Ошибка при показе меню доп. информации: {e}")
-        await callback_query.message.edit_text("❌ Произошла ошибка при загрузке меню.")
+        await callback_query.message.edit_text(
+            "❌ Не удалось открыть меню.\n"
+            "Попробуйте ещё раз."
+        )
 
 
 def setup_participants_handlers() -> Router:
@@ -120,29 +127,32 @@ def setup_participants_handlers() -> Router:
 
             # Создаем клавиатуру с кнопками навигации
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_participants")]
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel_participants")]
             ])
 
             await safe_answer(callback.message, 
-                "🔍 **Автоматическое извлечение информации о встрече**\n\n"
+                "<b>Автоматическое извлечение информации о встрече</b>\n\n"
                 "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
-                "**Поддерживаемые форматы:**\n"
+                "<b>Поддерживаемые форматы:</b>\n"
                 "• Email с полями От, Кому, Копия, Тема, Когда\n"
                 "• Текст с информацией об участниках, дате и теме\n\n"
-                "**Пример:**\n"
-                "```\n"
+                "<b>Пример:</b>\n"
+                "<pre>"
                 "От: Иван Петров\n"
                 "Кому: Мария Иванова; Алексей Смирнов\n"
                 "Тема: Обсуждение проекта\n"
-                "Когда: 22 октября 2025 г. 15:00-16:00\n"
-                "```",
+                "Когда: 22 октября 2025 г. 15:00-16:00"
+                "</pre>",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
             logger.error(f"Ошибка при запросе автоизвлечения: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
 
     @router.callback_query(F.data == "input_new_participants")
     async def prompt_participants_input(callback: CallbackQuery, state: FSMContext):
@@ -156,21 +166,24 @@ def setup_participants_handlers() -> Router:
             ])
 
             await safe_answer(callback.message, 
-                "📝 **Введите список участников**\n\n"
+                "<b>Введите список участников</b>\n\n"
                 "Отправьте список участников текстом (один участник на строку).\n\n"
-                "**Примеры форматов:**\n"
-                "• `Иван Петров, руководитель`\n"
-                "• `Мария Иванова - разработчик`\n"
-                "• `Алексей Смирнов (тестировщик)`\n"
-                "• `Ольга Сидорова`\n\n"
+                "<b>Примеры форматов:</b>\n"
+                "• <code>Иван Петров, руководитель</code>\n"
+                "• <code>Мария Иванова - разработчик</code>\n"
+                "• <code>Алексей Смирнов (тестировщик)</code>\n"
+                "• <code>Ольга Сидорова</code>\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:
             logger.error(f"Ошибка при запросе ввода участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "upload_participants_file")
     async def prompt_file_upload(callback: CallbackQuery, state: FSMContext):
@@ -184,27 +197,30 @@ def setup_participants_handlers() -> Router:
             ])
             
             await safe_answer(callback.message, 
-                "📎 **Загрузите файл с участниками**\n\n"
+                "<b>Загрузите файл с участниками</b>\n\n"
                 "Отправьте файл в формате .txt или .csv\n\n"
-                "**Формат .txt:**\n"
-                "```\n"
+                "<b>Формат .txt:</b>\n"
+                "<pre>"
                 "Иван Петров, менеджер\n"
-                "Мария Иванова\n"
-                "```\n\n"
-                "**Формат .csv:**\n"
-                "```\n"
+                "Мария Иванова"
+                "</pre>\n\n"
+                "<b>Формат .csv:</b>\n"
+                "<pre>"
                 "name,role\n"
                 "Иван Петров,менеджер\n"
-                "Мария Иванова,\n"
-                "```\n\n"
+                "Мария Иванова,"
+                "</pre>\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
             logger.error(f"Ошибка при запросе файла: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось открыть форму.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "use_saved_participants")
     async def use_saved_participants(callback: CallbackQuery, state: FSMContext):
@@ -239,15 +255,18 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
             ])
             
-            await safe_answer(callback.message, 
-                f"{display_text}\n\n**Использовать этот список?**",
+            await safe_answer(callback.message,
+                f"{display_text}\n\n<b>Использовать этот список?</b>",
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
             logger.error(f"Ошибка при загрузке сохраненного списка: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось загрузить сохранённый список.\n"
+                "Введите участников заново или пропустите шаг."
+            )
     
     @router.callback_query(F.data == "skip_participants")
     async def skip_participants(callback: CallbackQuery, state: FSMContext):
@@ -267,7 +286,10 @@ def setup_participants_handlers() -> Router:
             
         except Exception as e:
             logger.error(f"Ошибка при пропуске участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
     
     @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "text")
     async def handle_participants_text(message: Message, state: FSMContext):
@@ -278,7 +300,7 @@ def setup_participants_handlers() -> Router:
             # Проверка на команду отмены
             if text.startswith('/cancel'):
                 await state.clear()
-                await message.answer("❌ Ввод участников отменен.")
+                await message.answer("Ввод участников отменен.")
                 return
 
             # Гибридный подход: пробуем автоизвлечение, затем обычный парсинг
@@ -311,20 +333,20 @@ def setup_participants_handlers() -> Router:
 
             # Проверяем, есть ли участники
             if not all_participants:
-                await safe_answer(message, 
-                    "❌ **Ошибка извлечения:**\nНе удалось найти участников встречи\n\n"
-                    "Попробуйте другой текст или отправьте /cancel для отмены.",
-                    parse_mode="Markdown"
+                await safe_answer(message,
+                    "❌ Не удалось найти участников в этом тексте.\n"
+                    "Пришлите список участников или отправьте /cancel.",
+                    parse_mode="HTML"
                 )
                 return
 
             # Валидируем объединенный список
             is_valid, error_message = participants_service.validate_participants(all_participants)
             if not is_valid:
-                await safe_answer(message, 
-                    f"❌ **Ошибка валидации:**\n{error_message}\n\n"
-                    f"Попробуйте еще раз или отправьте /cancel для отмены.",
-                    parse_mode="Markdown"
+                await safe_answer(message,
+                    f"❌ {esc(error_message)}\n"
+                    "Поправьте список и отправьте ещё раз или /cancel.",
+                    parse_mode="HTML"
                 )
                 return
 
@@ -354,7 +376,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_meeting_info"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_meeting_info")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_meeting_info")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
@@ -362,11 +384,11 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await safe_answer(message, 
-                    f"🔍 **Автоматически извлечена информация о встрече:**\n\n"
-                    f"{display_text}{warning_text}\n\n**Использовать эту информацию?**",
+                await safe_answer(message,
+                    f"<b>Автоматически извлечена информация о встрече:</b>\n\n"
+                    f"{display_text}{warning_text}\n\n<b>Использовать эту информацию?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
             else:
@@ -380,7 +402,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
@@ -388,16 +410,17 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
 
-                await safe_answer(message, 
-                    f"{display_text}\n\n**Все верно?**",
+                await safe_answer(message,
+                    f"{display_text}\n\n<b>Все верно?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
         except Exception as e:
             logger.error(f"Ошибка при обработке текста участников: {e}")
             await message.answer(
-                "❌ Произошла ошибка при обработке списка. Попробуйте еще раз."
+                "❌ Не удалось разобрать список участников.\n"
+                "Проверьте формат и отправьте ещё раз."
             )
     
     @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "document")
@@ -434,10 +457,10 @@ def setup_participants_handlers() -> Router:
                 is_valid, error_message = participants_service.validate_participants(participants)
                 
                 if not is_valid:
-                    await safe_answer(message, 
-                        f"❌ **Ошибка валидации:**\n{error_message}\n\n"
-                        f"Попробуйте еще раз.",
-                        parse_mode="Markdown"
+                    await safe_answer(message,
+                        f"❌ {esc(error_message)}\n"
+                        "Поправьте список в файле и пришлите ещё раз.",
+                        parse_mode="HTML"
                     )
                     return
                 
@@ -451,7 +474,7 @@ def setup_participants_handlers() -> Router:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
-                        InlineKeyboardButton(text="💾 Сохранить и использовать", callback_data="save_and_confirm_participants")
+                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
                         InlineKeyboardButton(text="⬅️ Назад", callback_data="upload_participants_file"),
@@ -459,14 +482,18 @@ def setup_participants_handlers() -> Router:
                     ]
                 ])
                 
-                await safe_answer(message, 
-                    f"{display_text}\n\n**Все верно?**",
+                await safe_answer(message,
+                    f"{display_text}\n\n<b>Все верно?</b>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
-                
+
             except FileError as e:
-                await message.answer(f"❌ Ошибка при обработке файла: {e}")
+                logger.warning(f"Не удалось разобрать файл участников: {e}")
+                await message.answer(
+                    "❌ Не удалось разобрать файл.\n"
+                    "Проверьте формат (.txt или .csv) и пришлите ещё раз."
+                )
             finally:
                 # Убеждаемся что файл удален
                 if os.path.exists(temp_file_path):
@@ -478,7 +505,8 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при обработке файла участников: {e}")
             await message.answer(
-                "❌ Произошла ошибка при обработке файла. Попробуйте еще раз."
+                "❌ Не удалось разобрать файл участников.\n"
+                "Проверьте формат (.txt или .csv) и отправьте ещё раз."
             )
     
     @router.callback_query(F.data == "confirm_meeting_info")
@@ -505,7 +533,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
 
     @router.callback_query(F.data == "save_meeting_info")
     async def save_meeting_info(callback: CallbackQuery, state: FSMContext):
@@ -543,7 +574,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении информации о встрече: {e}")
-            await callback.message.answer("❌ Произошла ошибка при сохранении.")
+            await callback.message.answer(
+                "❌ Не удалось сохранить информацию.\n"
+                "Попробуйте ещё раз."
+            )
 
     @router.callback_query(F.data == "confirm_participants")
     async def confirm_participants(callback: CallbackQuery, state: FSMContext):
@@ -565,7 +599,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка.")
+            await callback.message.answer(
+                "❌ Не удалось продолжить.\n"
+                "Отправьте запись заново."
+            )
     
     @router.callback_query(F.data == "save_and_confirm_participants")
     async def save_and_confirm_participants(callback: CallbackQuery, state: FSMContext):
@@ -597,7 +634,10 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении участников: {e}")
-            await callback.message.answer("❌ Произошла ошибка при сохранении.")
+            await callback.message.answer(
+                "❌ Не удалось сохранить список.\n"
+                "Попробуйте ещё раз."
+            )
     
     @router.callback_query(F.data == "cancel_participants")
     async def cancel_participants(callback: CallbackQuery, state: FSMContext):
@@ -605,7 +645,7 @@ def setup_participants_handlers() -> Router:
         try:
             await callback.answer("Ввод отменен")
             await state.clear()
-            await callback.message.answer("❌ Ввод участников отменен.")
+            await callback.message.answer("Ввод участников отменен.")
             
         except Exception as e:
             logger.error(f"Ошибка при отмене: {e}")
@@ -630,10 +670,10 @@ def setup_participants_handlers() -> Router:
             # Set FSM state for text input
             if info_type == "meeting_agenda":
                 await state.set_state(ProtocolInfoState.waiting_agenda)
-                prompt_text = "📋 **Введите повестку встречи**\n\nПеречислите основные темы и вопросы для обсуждения:"
+                prompt_text = "<b>Введите повестку встречи</b>\n\nПеречислите основные темы и вопросы для обсуждения:"
             elif info_type == "project_list":
                 await state.set_state(ProtocolInfoState.waiting_project_list)
-                prompt_text = "📊 **Введите список проектов**\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
+                prompt_text = "<b>Введите список проектов</b>\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
             else:
                 return
 
@@ -641,10 +681,10 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
             ])
 
-            await safe_answer(callback.message, 
+            await safe_answer(callback.message,
                 prompt_text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
         except Exception as e:

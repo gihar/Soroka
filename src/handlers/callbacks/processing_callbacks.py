@@ -9,6 +9,7 @@ from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
+from src.ux.html_text import esc
 
 from .helpers import _safe_callback_answer
 
@@ -27,7 +28,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         data = await state.get_data()
 
         # ДОБАВЛЕНО: Логирование данных из state для диагностики
-        logger.info("🔍 Данные из state перед созданием request (callback):")
+        logger.info("Данные из state перед созданием request (callback):")
         participants_list = data.get('participants_list')
         if participants_list:
             logger.info(f"  participants_list: {len(participants_list)} чел.")
@@ -45,10 +46,11 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         logger.info(f"  meeting_agenda set: {bool(protocol_info.get('meeting_agenda'))}")
         logger.info(f"  project_list set: {bool(protocol_info.get('project_list'))}")
 
-        # Проверяем наличие LLM (template_id может быть None для умного выбора)
+        # Проверяем наличие модели (template_id может быть None для умного выбора)
         if not data.get('llm_provider'):
             await safe_edit_text(callback.message,
-                "❌ Ошибка: не выбран LLM провайдер. Пожалуйста, повторите процесс."
+                "❌ Настройки обработки не сохранились.\n"
+                "Отправьте запись заново — и снова выберите способ обработки."
             )
             await state.clear()
             return
@@ -57,7 +59,8 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         if (not data.get('use_smart_selection') and
             not data.get('template_id')):
             await safe_edit_text(callback.message,
-                "❌ Ошибка: не выбран шаблон. Пожалуйста, повторите процесс."
+                "❌ Шаблон не выбран.\n"
+                "Отправьте запись заново и выберите шаблон."
             )
             await state.clear()
             return
@@ -67,14 +70,16 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await safe_edit_text(callback.message,
-                    "❌ Ошибка: отсутствуют данные о внешнем файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Пришлите ссылку ещё раз."
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await safe_edit_text(callback.message,
-                    "❌ Ошибка: отсутствуют данные о файле. Пожалуйста, повторите процесс."
+                    "❌ Запись потерялась.\n"
+                    "Отправьте файл ещё раз."
                 )
                 await state.clear()
                 return
@@ -100,7 +105,7 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         )
 
         # ДОБАВЛЕНО: Логирование ProcessingRequest сразу после создания
-        logger.info("🔍 ProcessingRequest создан, проверка полей:")
+        logger.info("ProcessingRequest создан, проверка полей:")
         if request.participants_list:
             logger.info(f"  request.participants_list: {len(request.participants_list)} чел.")
         else:
@@ -154,7 +159,11 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
 
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await safe_edit_text(callback.message, "❌ Произошла ошибка при подготовке обработки файла.")
+        await safe_edit_text(
+            callback.message,
+            "❌ Не получилось запустить обработку.\n"
+            "Отправьте запись заново."
+        )
         await state.clear()
 
 
@@ -215,15 +224,15 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             mode_name = mode_names.get(mode, mode)
 
             await safe_edit_text(callback.message,
-                f"✅ **Режим транскрипции изменен на:** {mode_name}\n\n"
+                f"✅ <b>Режим транскрипции изменен на:</b> {esc(mode_name)}\n\n"
                 f"Новый режим будет использоваться для всех последующих обработок файлов.",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await callback.answer()
 
         except Exception as e:
             logger.error(f"Ошибка в set_transcription_mode_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при изменении режима транскрипции")
+            await callback.answer("Не удалось изменить режим, попробуйте ещё раз")
 
     @router.callback_query(F.data == "quick_process_file")
     async def quick_process_file_callback(callback: CallbackQuery, state: FSMContext):
@@ -256,13 +265,14 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             )
 
             await safe_edit_text(callback.message,
-                "🚀 **Быстрая обработка**\n\n⏳ Начинаю обработку...")
+                "<b>Быстрая обработка</b>\n\n⏳ Начинаю обработку...",
+                parse_mode="HTML")
             await _safe_callback_answer(callback)
             await _process_file(callback, state, processing_service)
 
         except Exception as e:
             logger.error(f"Ошибка в quick_process_file_callback: {e}")
-            await callback.answer("❌ Ошибка при запуске обработки")
+            await callback.answer("Не удалось запустить обработку, попробуйте ещё раз")
 
     @router.callback_query(F.data == "configure_file_processing")
     async def configure_file_processing_callback(callback: CallbackQuery):
@@ -276,7 +286,7 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в configure_file_processing_callback: {e}")
-            await callback.answer("❌ Ошибка при загрузке настроек")
+            await callback.answer("Не удалось открыть настройки, попробуйте ещё раз")
 
     @router.callback_query(F.data.startswith("cancel_task_"))
     async def cancel_task_handler(callback: CallbackQuery, state: FSMContext):

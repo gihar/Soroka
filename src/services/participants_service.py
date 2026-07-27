@@ -295,36 +295,32 @@ class ParticipantsService:
         
         return True, None
     
-    def _escape_markdown(self, text: str) -> str:
-        """Экранирование специальных символов Markdown"""
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
-        return text
-
     def format_participants_for_display(self, participants: List[Dict[str, str]]) -> str:
         """
-        Форматирование списка участников для отображения пользователю
-        
+        Форматирование списка участников для отображения пользователю (Telegram HTML).
+
+        Экран интерактивный (ADR-0005): разметка — Telegram HTML, а имена и роли
+        (ввод пользователя) экранируются каноном escape_telegram_html.
+
         Args:
             participants: Список участников
-            
+
         Returns:
             Форматированная строка
         """
-        lines = ["📋 **Список участников:**\n"]
-        
+        from src.services.protocol_render.telegram_html import escape_telegram_html
+
+        lines = ["📋 <b>Список участников:</b>\n"]
+
         for i, participant in enumerate(participants, 1):
-            name = participant["name"]
+            name = escape_telegram_html(participant["name"])
             role = participant.get("role", "")
-            
-            escaped_name = self._escape_markdown(name)
+
             if role:
-                escaped_role = self._escape_markdown(role)
-                lines.append(f"{i}. {escaped_name} — {escaped_role}")
+                lines.append(f"{i}. {name} — {escape_telegram_html(role)}")
             else:
-                lines.append(f"{i}. {escaped_name}")
-        
+                lines.append(f"{i}. {name}")
+
         return "\n".join(lines)
     
     def _is_patronymic(self, word: str) -> bool:

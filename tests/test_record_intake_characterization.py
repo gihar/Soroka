@@ -124,7 +124,7 @@ async def test_document_intake_saves_file_and_shows_action_menu(monkeypatch):
     menu = _menu_calls(safe_answer)
     assert len(menu) == 1
     text = menu[0].args[1]
-    assert "📎 **Файл получен**" in text
+    assert "<b>Файл получен</b>" in text
     keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 
@@ -313,7 +313,7 @@ async def test_supported_link_downloads_and_shows_record_actions_menu(monkeypatc
     menu = _menu_calls(safe_answer)
     assert len(menu) == 1
     menu_text = menu[0].args[1]
-    assert "📎 **Файл получен**" in menu_text
+    assert "<b>Файл получен</b>" in menu_text
     keyboard = menu[0].kwargs["reply_markup"]
     assert _callback_data_set(keyboard) == {"quick_process_file", "configure_file_processing"}
 

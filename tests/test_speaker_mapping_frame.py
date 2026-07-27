@@ -144,7 +144,7 @@ async def test_frame_take_removes_session():
 
 @pytest.mark.asyncio
 async def test_frame_answer_error_on_body_exception():
-    """Исключение сути при on_error='answer' → лог + «Произошла ошибка» тостом."""
+    """Исключение сути при on_error='answer' → лог + короткий тост «не получилось»."""
     import src.handlers.callbacks.speaker_mapping_callbacks as cb
 
     mapping_sessions.save(USER, SimpleNamespace())
@@ -156,7 +156,7 @@ async def test_frame_answer_error_on_body_exception():
     callback = _FakeCallback(from_user_id=USER)
     await handler(callback, _cbdata(), _FakeState())  # не пробрасывает
 
-    assert "❌ Произошла ошибка" in callback.answers
+    assert callback.answers and "не получилось" in callback.answers[-1].lower()
 
 
 @pytest.mark.asyncio
@@ -179,4 +179,4 @@ async def test_frame_edit_error_on_body_exception(monkeypatch):
 
     await handler(_FakeCallback(from_user_id=USER), _cbdata(), _FakeState())
 
-    assert edited and "ошибка при продолжении обработки" in edited[-1]
+    assert edited and "продолжить обработку" in edited[-1]

@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
 from src.services.protocol_render.telegram_html import escape_telegram_html
+from src.ux.speaker_label import humanize_speaker_label
 
-_SEPARATOR = "────────────────────────"
 _NOT_DEFINED = "Не определен"
 
 
@@ -43,20 +43,27 @@ class MappingCard:
 
     Заголовок ветвится вызывающим (ADR-0002): «Проверьте сопоставление» при
     наличии списка участников, «Назовите спикеров (по желанию)» без него.
+    ``intro`` — необязательная вводная строка под заголовком: одним предложением
+    объясняет новичку, зачем шаг (задаёт её вызывающий только в главном виде).
     ``hint`` — необязательная строка-следствие внизу карточки (nudge о том, что
     неназванные спикеры уйдут метками); задаёт её вызывающий, только когда есть
-    несопоставленные спикеры. Пустая подсказка строк не добавляет.
+    несопоставленные спикеры. Пустые вводная и подсказка строк не добавляют.
     """
 
     header: str
     rows: tuple[SpeakerRow, ...] = ()
     hint: Optional[str] = None
+    intro: Optional[str] = None
 
     def to_html(self) -> str:
         """Разметка Telegram HTML: жирные заголовок и спикеры, цитаты в кавычках."""
-        lines = [f"🎭 <b>{escape_telegram_html(self.header)}</b>", ""]
+        lines = [f"<b>{escape_telegram_html(self.header)}</b>"]
+        if self.intro:
+            lines.append(escape_telegram_html(self.intro))
+        lines.append("")
         for row in self.rows:
-            speaker = f"<b>{escape_telegram_html(row.speaker_id)}</b>"
+            label = humanize_speaker_label(row.speaker_id)
+            speaker = f"<b>{escape_telegram_html(label)}</b>"
             if row.display_name:
                 lines.append(f"{speaker} → {escape_telegram_html(row.display_name)} ✓")
             else:
@@ -66,24 +73,26 @@ class MappingCard:
             lines.append("")
         if self.hint:
             lines.append(f"<i>{escape_telegram_html(self.hint)}</i>")
-        lines.append(_SEPARATOR)
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip("\n")
 
     def to_plain(self) -> str:
         """Plain-страховка: то же содержимое без тегов и без экранирования."""
-        lines = [f"🎭 {self.header}", ""]
+        lines = [self.header]
+        if self.intro:
+            lines.append(self.intro)
+        lines.append("")
         for row in self.rows:
+            label = humanize_speaker_label(row.speaker_id)
             if row.display_name:
-                lines.append(f"{row.speaker_id} → {row.display_name} ✓")
+                lines.append(f"{label} → {row.display_name} ✓")
             else:
-                lines.append(f"{row.speaker_id} → {_NOT_DEFINED} ❓")
+                lines.append(f"{label} → {_NOT_DEFINED} ❓")
             if row.quote:
                 lines.append(f'  "{row.quote}"')
             lines.append("")
         if self.hint:
             lines.append(self.hint)
-        lines.append(_SEPARATOR)
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip("\n")
 
 
 @dataclass(frozen=True)

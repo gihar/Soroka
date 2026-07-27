@@ -12,14 +12,14 @@ from loguru import logger
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
 from src.utils.telegram_safe import safe_edit_text, safe_send_message
+from src.ux.html_text import esc
 
 
 class ProgressStage:
     """Упрощенный этап обработки"""
-    
-    def __init__(self, name: str, emoji: str, description: str):
+
+    def __init__(self, name: str, description: str):
         self.name = name
-        self.emoji = emoji  
         self.description = description
         self.started_at: Optional[datetime] = None
         self.completed_at: Optional[datetime] = None
@@ -46,8 +46,6 @@ class ProgressTracker:
         self.update_task: Optional[asyncio.Task] = None
         # Интервал автообновления (увеличен для снижения нагрузки на API)
         self.update_interval = 2.5
-        self._spinner_frames = ["|", "/", "-", "\\"]  # Кадры спиннера
-        self._spinner_index = 0
         # Поля для дедупликации и троттлинга обновлений сообщения
         self._last_text: str = ""
         self._last_edit_at: datetime = datetime.min
@@ -83,25 +81,25 @@ class ProgressTracker:
         # Ограничиваем максимальным значением
         return min(adaptive_interval, self._adaptive_interval_max)
         
-    def add_stage(self, stage_id: str, name: str, emoji: str, description: str):
+    def add_stage(self, stage_id: str, name: str, description: str):
         """Добавить этап обработки"""
-        self.stages[stage_id] = ProgressStage(name, emoji, description)
-    
+        self.stages[stage_id] = ProgressStage(name, description)
+
     def setup_default_stages(self):
         """Настройка упрощенных этапов обработки"""
         self.stages = {}
-        
+
         # Объединили технические этапы в более понятные для пользователя
         self.add_stage(
-            "preparation", "Подготовка", "📁", 
+            "preparation", "Подготовка",
             "Подготавливаю файл к обработке..."
         )
         self.add_stage(
-            "transcription", "Транскрипция", "🎯", 
+            "transcription", "Транскрипция",
             "Преобразую аудио в текст..."
         )
         self.add_stage(
-            "analysis", "Анализ", "🤖", 
+            "analysis", "Анализ",
             "Анализирую содержание и создаю протокол..."
         )
     
@@ -235,12 +233,7 @@ class ProgressTracker:
             try:
                 # Исключаем гонки между параллельными вызовами
                 async with self._edit_lock:
-                    # Планируем следующий кадр спиннера, но применяем его только при реальном редактировании
-                    planned_index = None
-                    if not final and any(s.is_active for s in self.stages.values()):
-                        planned_index = (self._spinner_index + 1) % len(self._spinner_frames)
-
-                    text = self._format_progress_text(final, spinner_index=planned_index)
+                    text = self._format_progress_text(final)
 
                     # Дедупликация текста: пропускаем, если текст не изменился
                     if text == self._last_text:
@@ -255,17 +248,13 @@ class ProgressTracker:
                         logger.debug(f"⏭️ Троттлинг: слишком частое обновление (msg_id={message_id})")
                         return
 
-                    await safe_edit_text(self.message, text, parse_mode="Markdown")
+                    await safe_edit_text(self.message, text, parse_mode="HTML")
                     self._last_text = text
                     self._last_edit_at = now
                     
                     # Постепенно снижаем интервал после flood control
                     if self._post_flood_interval > self._adaptive_interval_base:
                         self._post_flood_interval = max(self._adaptive_interval_base, self._post_flood_interval - 0.5)
-                    
-                    # Фиксируем смену кадра спиннера только если действительно отредактировали сообщение
-                    if planned_index is not None:
-                        self._spinner_index = planned_index
             finally:
                 async with ProgressTracker._updates_lock:
                     ProgressTracker._active_updates -= 1
@@ -277,52 +266,48 @@ class ProgressTracker:
                 return
             logger.error(f"❌ Ошибка обновления прогресса (msg_id={message_id}): {e}")
     
-    def _format_progress_text(self, final: bool = False, spinner_index: Optional[int] = None) -> str:
-        """Сформировать упрощенный текст с прогрессом"""
-        if final:
-            total_time = datetime.now() - self.start_time
-            return (
-                "✅ **Обработка завершена!**\n\n"
-                f"⏱️ Время: {total_time.total_seconds():.0f}с"
-            )
-        
-        text = "🔄 **Обработка файла**\n\n"
-        
-        for stage_id, stage in self.stages.items():
-            if stage.is_completed:
-                # Добавляем длительность выполнения, если доступна
-                duration_text = ""
-                if stage.started_at and stage.completed_at:
-                    total_sec = int((stage.completed_at - stage.started_at).total_seconds())
-                    if total_sec < 60:
-                        duration_text = f" · {total_sec}с"
-                    else:
-                        minutes = total_sec // 60
-                        seconds = total_sec % 60
-                        if minutes < 60:
-                            duration_text = f" · {minutes}м" + (f" {seconds}с" if seconds else "")
-                        else:
-                            hours = minutes // 60
-                            rem_min = minutes % 60
-                            duration_text = f" · {hours}ч" + (f" {rem_min}м" if rem_min else "")
+    @staticmethod
+    def _stage_duration_text(stage: ProgressStage) -> str:
+        """Длительность завершённого этапа как тихий хвост « · 12с» (без эмодзи)."""
+        if not (stage.started_at and stage.completed_at):
+            return ""
+        total_sec = int((stage.completed_at - stage.started_at).total_seconds())
+        if total_sec < 60:
+            return f" · {total_sec}с"
+        minutes, seconds = divmod(total_sec, 60)
+        if minutes < 60:
+            return f" · {minutes}м" + (f" {seconds}с" if seconds else "")
+        hours, rem_min = divmod(minutes, 60)
+        return f" · {hours}ч" + (f" {rem_min}м" if rem_min else "")
 
-                text += f"✅ {stage.emoji} {stage.name}{duration_text}\n"
-            elif stage.is_active:
-                idx = self._spinner_index if spinner_index is None else spinner_index
-                spinner = self._spinner_frames[idx]
-                # Заголовок активного этапа (без процентов)
-                text += f"🔄 {stage.emoji} {stage.name} {spinner}\n"
-                # Краткое описание этапа (без прогресс-бара)
-                text += f"   _{stage.description}_\n"
+    def _format_progress_text(self, final: bool = False) -> str:
+        """Спокойный экран прогресса: один статусный глиф на строку.
+
+        ✅ — завершённый этап, ⏳ — текущий, «·» — будущий. Пер-этапных эмодзи и
+        ASCII-спиннера нет. Финальный кадр не кричит вторым штампом «готово»:
+        сводку «Протокол готов» несёт отдельное сообщение доставки (ADR-0003),
+        здесь остаётся лишь тихий тайминг — иначе два ✅-штампа подряд.
+        """
+        lines = ["<b>Обработка файла</b>", ""]
+
+        for stage in self.stages.values():
+            if stage.is_completed:
+                lines.append(f"✅ {stage.name}{self._stage_duration_text(stage)}")
+            elif stage.is_active and not final:
+                lines.append(f"⏳ {stage.name}")
+                lines.append(f"   <i>{stage.description}</i>")
             else:
-                text += f"⏳ {stage.emoji} {stage.name}\n"
-        
-        # Показываем общее время только если прошло больше 10 секунд
+                lines.append(f"· {stage.name}")
+
         total_elapsed = (datetime.now() - self.start_time).total_seconds()
-        if total_elapsed > 10:
-            text += f"\n⏱️ {total_elapsed:.0f}с"
-        
-        return text
+        if final:
+            lines.append("")
+            lines.append(f"Время обработки: {total_elapsed:.0f}с")
+        elif total_elapsed > 10:
+            lines.append("")
+            lines.append(f"Прошло: {total_elapsed:.0f}с")
+
+        return "\n".join(lines)
     
     async def _auto_update(self):
         """Автоматическое обновление дисплея с учётом flood control"""
@@ -400,34 +385,26 @@ class ProgressTracker:
         self._last_text = ""
         
         stage_name = stage.name if stage else stage_id
-        
-        # Экранируем специальные символы Markdown для безопасного отображения
-        safe_error_message = self._escape_markdown(error_message)
-        
+
+        # Сырой текст исключения — только в лог, не пользователю (анти-референс
+        # PRODUCT.md «сырой машинный вывод»). Пользователь видит простую фразу.
+        logger.error(f"Обработка прервалась на этапе {stage_id}: {error_message}")
+
+        safe_stage = esc(stage_name)
         text = (
-            f"❌ **Ошибка при обработке**\n\n"
-            f"Этап: {stage_name}\n"
-            f"Ошибка: {safe_error_message}\n\n"
-            f"Попробуйте загрузить файл еще раз."
+            f"❌ Обработка прервалась на этапе «{safe_stage}».\n"
+            "Отправьте запись ещё раз — обычно повторная попытка помогает."
         )
-        
+
         try:
             if self.message is None:
                 logger.warning("Попытка отобразить ошибку без сообщения")
                 return
-            await safe_edit_text(self.message, text, parse_mode="Markdown")
+            await safe_edit_text(self.message, text, parse_mode="HTML")
             self._last_text = text
             self._last_edit_at = datetime.now()
         except Exception as e:
             logger.error(f"Ошибка отображения ошибки: {e}")
-    
-    def _escape_markdown(self, text: str) -> str:
-        """Экранировать специальные символы Markdown"""
-        # Экранируем символы, которые могут вызвать проблемы с парсингом
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
-        return text
 
 
 class ProgressFactory:
@@ -439,9 +416,9 @@ class ProgressFactory:
         """Создать трекер для обработки файлов"""
         # Создаем начальное сообщение
         initial_message = await safe_send_message(
-            bot, chat_id, 
-            "🔄 **Начинаю обработку файла...**\n\n⏳ Инициализация...",
-            parse_mode="Markdown"
+            bot, chat_id,
+            "<b>Обработка файла</b>\n\n⏳ Инициализация...",
+            parse_mode="HTML"
         )
         
         # Если сообщение не удалось создать, логируем ошибку, но продолжаем

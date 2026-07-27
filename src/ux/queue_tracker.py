@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
+from src.ux.html_text import esc
 
 
 class QueuePositionTracker:
@@ -28,39 +29,47 @@ class QueuePositionTracker:
         self._last_text = ""
     
     def create_cancel_button(self) -> InlineKeyboardMarkup:
-        """Создать кнопку отмены задачи"""
+        """Создать кнопку отмены задачи (без эмодзи: отмена — не ошибка)."""
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
-                text="❌ Отменить задачу",
+                text="Отменить задачу",
                 callback_data=f"cancel_task_{self.task_id}"
             )]
         ])
-    
+
+    @staticmethod
+    def _tasks_word(position: int) -> str:
+        """Русское склонение «задача/задачи/задач» по числу впереди стоящих."""
+        if position % 100 in (11, 12, 13, 14):
+            return "задач"
+        if position % 10 == 1:
+            return "задача"
+        if position % 10 in (2, 3, 4):
+            return "задачи"
+        return "задач"
+
     def _format_queue_message(self, position: int, total_in_queue: int) -> str:
-        """Форматировать сообщение о позиции в очереди"""
+        """Сообщение о позиции в очереди: факты без SMM-тона.
+
+        Позиция, всего в очереди и оценка ожидания — этого достаточно; отмена
+        всегда доступна кнопкой ниже. Никаких «Скоро начнём!» и советов-подсказок.
+        """
         if position == 0:
-            # Задача на первом месте - скоро начнется обработка
             return (
-                "🔄 **Ваша задача готова к обработке**\n\n"
-                "⏳ Ожидаем освобождения ресурсов...\n"
-                f"📊 Задач в очереди: {total_in_queue}"
+                "<b>Задача готова к обработке</b>\n\n"
+                "Ожидаем освобождения ресурсов.\n"
+                f"Задач в очереди: {total_in_queue}"
             )
-        elif position == 1:
-            return (
-                "🕐 **Задача в очереди**\n\n"
-                f"📍 Впереди: **{position} задача**\n"
-                f"📊 Всего в очереди: {total_in_queue}\n\n"
-                "⚡ Скоро начнем обработку!"
-            )
-        elif position <= 3:
-            return (
-                "🕐 **Задача в очереди**\n\n"
-                f"📍 Впереди: **{position} задачи**\n"
-                f"📊 Всего в очереди: {total_in_queue}\n\n"
-                "⚡ Ваша очередь скоро подойдет!"
-            )
-        else:
-            # Определяем примерное время ожидания (приблизительно 2-3 минуты на задачу)
+
+        lines = [
+            "<b>Задача в очереди</b>",
+            "",
+            f"Впереди: {position} {self._tasks_word(position)}",
+            f"Всего в очереди: {total_in_queue}",
+        ]
+
+        if position > 3:
+            # Примерное время ожидания (приблизительно 2-3 минуты на задачу).
             estimated_minutes = position * 2.5
             if estimated_minutes < 60:
                 time_estimate = f"~{int(estimated_minutes)} мин"
@@ -68,18 +77,9 @@ class QueuePositionTracker:
                 hours = int(estimated_minutes / 60)
                 minutes = int(estimated_minutes % 60)
                 time_estimate = f"~{hours}ч {minutes}мин" if minutes > 0 else f"~{hours}ч"
-            
-            tasks_word = "задач" if position % 10 == 0 or position % 10 >= 5 or (position % 100 >= 11 and position % 100 <= 14) else (
-                "задача" if position % 10 == 1 else "задачи"
-            )
-            
-            return (
-                "🕐 **Задача в очереди**\n\n"
-                f"📍 Впереди: **{position} {tasks_word}**\n"
-                f"📊 Всего в очереди: {total_in_queue}\n"
-                f"⏱️ Примерное время ожидания: {time_estimate}\n\n"
-                "💡 Вы можете отменить задачу кнопкой ниже"
-            )
+            lines.append(f"Примерное время ожидания: {time_estimate}")
+
+        return "\n".join(lines)
     
     async def update_position(self, position: int, total_in_queue: int, force: bool = False):
         """Обновить позицию в очереди (обновляется только при изменении)"""
@@ -108,7 +108,7 @@ class QueuePositionTracker:
                     message_id=self.message_id,
                     text=text,
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 if result is not None:
                     self._last_text = text
@@ -118,7 +118,7 @@ class QueuePositionTracker:
                     chat_id=self.chat_id,
                     text=text,
                     reply_markup=keyboard,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 if msg is not None:
                     self.message_id = msg.message_id
@@ -134,7 +134,7 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "🔄 **Начинаю обработку файла**\n\n"
+                "<b>Начинаю обработку файла</b>\n\n"
                 "⏳ Подготовка к обработке..."
             )
             
@@ -143,7 +143,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             if result is not None:
                 self._last_text = text
@@ -160,7 +160,7 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "❌ **Задача отменена**\n\n"
+                "<b>Задача отменена</b>\n\n"
                 "Обработка файла была отменена по вашему запросу."
             )
             
@@ -169,7 +169,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -184,8 +184,8 @@ class QueuePositionTracker:
         
         try:
             text = (
-                "❌ **Ошибка при обработке**\n\n"
-                f"{error_message}\n\n"
+                "❌ <b>Ошибка при обработке</b>\n\n"
+                f"{esc(error_message)}\n\n"
                 "Попробуйте загрузить файл снова."
             )
             
@@ -194,7 +194,7 @@ class QueuePositionTracker:
                 chat_id=self.chat_id,
                 message_id=self.message_id,
                 text=text,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
@@ -244,7 +244,7 @@ class QueueTrackerFactory:
                 chat_id=chat_id,
                 text=text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             if msg is not None:
                 tracker.message_id = msg.message_id

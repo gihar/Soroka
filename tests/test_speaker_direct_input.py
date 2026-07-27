@@ -243,7 +243,8 @@ def test_subview_header_names_speaker_without_participants():
         current_editing_speaker="SPEAKER_2",
     )
 
-    assert "SPEAKER_2" in card.header
+    assert "Спикер 2" in card.header
+    assert "SPEAKER_2" not in card.header
     assert "отправьте сообщением" in card.header
     assert "выберите ниже" not in card.header
 
@@ -257,7 +258,8 @@ def test_subview_header_names_speaker_with_participants():
         current_editing_speaker="SPEAKER_2",
     )
 
-    assert "SPEAKER_2" in card.header
+    assert "Спикер 2" in card.header
+    assert "SPEAKER_2" not in card.header
     assert "отправьте сообщением" in card.header
     assert "выберите ниже" in card.header
 

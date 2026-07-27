@@ -82,7 +82,7 @@ class TestParticipantsService(unittest.TestCase):
         self.assertIn('дубл', error)
 
     def test_formatting(self):
-        """Тест форматирования для отображения"""
+        """Тест форматирования для отображения (Telegram HTML, ADR-0005)."""
         participants = [
             {'name': 'Иван Петров', 'role': 'менеджер'},
             {'name': 'Мария Иванова', 'role': ''}
@@ -93,6 +93,20 @@ class TestParticipantsService(unittest.TestCase):
         self.assertIn('Иван Петров', display_text)
         self.assertIn('менеджер', display_text)
         self.assertIn('Мария Иванова', display_text)
+        # Разметка — Telegram HTML, а не Markdown.
+        self.assertIn('<b>Список участников:</b>', display_text)
+        self.assertNotIn('**', display_text)
+
+    def test_formatting_escapes_html_special_chars(self):
+        """Имя с `<`, `&`, `**` рендерится как текст: HTML-спецсимволы экранированы."""
+        participants = [{'name': 'A<b>&** 🎯', 'role': 'C&D'}]
+
+        display_text = participants_service.format_participants_for_display(participants)
+
+        self.assertIn('A&lt;b&gt;&amp;** 🎯', display_text)
+        self.assertIn('C&amp;D', display_text)
+        # Сырой тег из имени не просочился как разметка.
+        self.assertNotIn('<b>&', display_text)
 
 
 class TestTextProcessing(unittest.TestCase):

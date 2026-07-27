@@ -1,4 +1,4 @@
-"""Колбэки действий с готовым протоколом: «📄 PDF», «📝 Word» и «🔁 Другой шаблон».
+"""Колбэки действий с готовым протоколом: «PDF», «Word» и «Другой шаблон».
 
 history_id приходит из callback_data — принадлежность записи пользователю
 проверяется в репозитории (get_result_for_user), чужой id получает отказ.
@@ -184,6 +184,6 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             await _safe_callback_answer(callback)
         except Exception as e:
             logger.error(f"Ошибка в protocol_regen_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка")
+            await _safe_callback_answer(callback, "Не получилось, попробуйте ещё раз")
 
     return router

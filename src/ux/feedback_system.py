@@ -145,7 +145,15 @@ class FeedbackCollector:
 
 class FeedbackUI:
     """Пользовательский интерфейс для сбора обратной связи"""
-    
+
+    @staticmethod
+    def feedback_intro_text() -> str:
+        """Единый текст-приглашение к обратной связи (один слоган во всём боте)."""
+        return (
+            "<b>Обратная связь</b>\n\n"
+            "Помогите сделать бота лучше. Выберите тип обратной связи:"
+        )
+
     @staticmethod
     def create_rating_keyboard(feedback_type: str = "protocol_quality") -> InlineKeyboardMarkup:
         """Создать клавиатуру для оценки"""
@@ -154,19 +162,18 @@ class FeedbackUI:
         # Рейтинг от 1 до 5
         rating_row = []
         for i in range(1, 6):
-            emoji = "⭐" * i
             rating_row.append(
                 InlineKeyboardButton(
-                    text=f"{i} {emoji}",
+                    text=str(i),
                     callback_data=f"feedback_rating_{feedback_type}_{i}"
                 )
             )
         buttons.append(rating_row)
-        
+
         # Кнопка пропуска
         buttons.append([
             InlineKeyboardButton(
-                text="⏭️ Пропустить оценку",
+                text="⏭ Пропустить оценку",
                 callback_data=f"feedback_skip_{feedback_type}"
             )
         ])
@@ -179,31 +186,31 @@ class FeedbackUI:
         buttons = [
             [
                 InlineKeyboardButton(
-                    text="📋 Качество протокола",
+                    text="Качество протокола",
                     callback_data="feedback_type_protocol_quality"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="⚡ Скорость обработки",
+                    text="Скорость обработки",
                     callback_data="feedback_type_processing_speed"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🎨 Удобство использования",
+                    text="Удобство использования",
                     callback_data="feedback_type_user_experience"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🐛 Сообщить об ошибке",
+                    text="Сообщить об ошибке",
                     callback_data="feedback_type_bug_report"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="💡 Предложение улучшения",
+                    text="Предложение улучшения",
                     callback_data="feedback_type_suggestion"
                 )
             ]
@@ -216,27 +223,27 @@ class FeedbackUI:
         """Сформировать запрос обратной связи"""
         type_messages = {
             "protocol_quality": (
-                "📋 **Оценка качества протокола**\n\n"
+                "<b>Оценка качества протокола</b>\n\n"
                 "Насколько вы довольны качеством созданного протокола?\n"
                 "Учитывайте структуру, полноту информации и точность транскрипции."
             ),
             "processing_speed": (
-                "⚡ **Оценка скорости обработки**\n\n"
+                "<b>Оценка скорости обработки</b>\n\n"
                 "Как вы оцениваете скорость обработки вашего файла?\n"
                 "Было ли время ожидания приемлемым?"
             ),
             "user_experience": (
-                "🎨 **Оценка удобства использования**\n\n"
+                "<b>Оценка удобства использования</b>\n\n"
                 "Насколько удобно было использовать бота?\n"
                 "Понятен ли интерфейс и логика работы?"
             ),
             "bug_report": (
-                "🐛 **Сообщение об ошибке**\n\n"
+                "<b>Сообщение об ошибке</b>\n\n"
                 "Оцените серьезность проблемы и опишите что произошло.\n"
                 "Ваш отзыв поможет нам исправить ошибки."
             ),
             "suggestion": (
-                "💡 **Предложение улучшения**\n\n"
+                "<b>Предложение улучшения</b>\n\n"
                 "Есть идеи как сделать бота лучше?\n"
                 "Оцените важность вашего предложения."
             )
@@ -275,24 +282,24 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             feedback_collector.add_feedback(feedback)
             
             # Подтверждаем без фанфар: оценка — служебное действие
-            rating_emoji = "⭐" * rating
             await safe_edit_text(
                 callback.message,
-                f"Оценка записана: {rating}/5 {rating_emoji}",
-                parse_mode="Markdown"
+                f"Оценка записана: {rating}/5",
+                parse_mode="HTML"
             )
             
         except Exception as e:
             logger.error(f"Ошибка обработки рейтинга: {e}")
-            await callback.answer("❌ Ошибка при сохранении оценки")
+            await callback.answer("Не удалось сохранить оценку, попробуйте ещё раз")
     
     @router.callback_query(F.data.startswith("feedback_skip_"))
     async def handle_skip_feedback(callback: CallbackQuery):
         """Обработчик пропуска оценки"""
         await safe_edit_text(
             callback.message,
-            "👌 **Оценка пропущена**\n\n"
-            "Вы всегда можете оставить обратную связь командой /feedback"
+            "<b>Оценка пропущена</b>\n\n"
+            "Вы всегда можете оставить обратную связь командой /feedback",
+            parse_mode="HTML",
         )
     
     @router.callback_query(F.data.startswith("feedback_type_"))
@@ -314,12 +321,12 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
                 callback.message,
                 message_text,
                 reply_markup=keyboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             
         except Exception as e:
             logger.error(f"Ошибка выбора типа обратной связи: {e}")
-            await callback.answer("❌ Ошибка при обработке")
+            await callback.answer("Не удалось открыть форму, попробуйте ещё раз")
     
     return router
 

@@ -52,7 +52,7 @@ class ErrorHandlingMiddleware(BaseMiddleware):
             if e.retry_after < 5 and isinstance(event, Message):
                 try:
                     await event.answer(
-                        f"⏱️ Слишком много запросов. Попробуйте через {e.retry_after:.0f} секунд."
+                        f"⚠️ Слишком много запросов. Попробуйте через {e.retry_after:.0f} секунд."
                     )
                 except TelegramRetryAfter:
                     # Игнорируем, если и это вызвало flood control

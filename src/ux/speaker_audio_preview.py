@@ -22,6 +22,7 @@ from src.config import settings
 from src.models.diarization import Diarization
 from src.services.audio_fragment_service import cut_voice_fragment, select_fragment_window
 from src.utils.telegram_safe import safe_send_audio, safe_send_voice
+from src.ux.speaker_label import humanize_speaker_label
 
 # Подпись фрагмента — единственная цитата спикера, тот же лимит, что был у карточной.
 _MAX_CAPTION_SNIPPET = 200
@@ -33,8 +34,8 @@ def _preview_dir() -> str:
 
 
 def _build_caption(speaker_id: str, speakers_text: Optional[Dict[str, str]]) -> str:
-    """Подпись фрагмента: '🔊 SPEAKER_N' + короткий однострочный сниппет текста."""
-    caption = f"🔊 {speaker_id}"
+    """Подпись фрагмента записи: '🔊 Спикер N' + цитата спикера одной строкой."""
+    caption = f"🔊 {humanize_speaker_label(speaker_id)}"
     if speakers_text:
         text = (speakers_text.get(speaker_id) or "").strip().replace("\n", " ")
         if text:
