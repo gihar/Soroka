@@ -80,6 +80,20 @@ def effective_stage1_outcome(
     return speaker_mapping, meeting_type
 
 
+def record_metric(processing_metrics: Any, field: str, value: Any) -> None:
+    """Записать замер, если метрики вообще ведутся.
+
+    Перегенерация метрик не ведёт и передаёт ``None`` (ADR-0003: она выровнена
+    по основному пути, но замеры принадлежат первичной обработке). Раньше запись
+    шла напрямую, и каждое нажатие «Другой шаблон» падало на
+    ``None.llm_duration``. Единая точка записи: новый замер не воспроизведёт это
+    падение, забыв про guard.
+    """
+    if processing_metrics is None:
+        return
+    setattr(processing_metrics, field, value)
+
+
 async def resolve_active_preset(app_settings_repo, preset_repo) -> Dict[str, Any]:
     """Return the currently active model preset.
 
@@ -174,7 +188,7 @@ class LLMGenerationService:
                 project_list=request.project_list,
             )
 
-            processing_metrics.llm_duration = time.time() - start_time
+            record_metric(processing_metrics, 'llm_duration', time.time() - start_time)
 
             # Валидация протокола
             if settings.enable_protocol_validation:
@@ -201,7 +215,11 @@ class LLMGenerationService:
                     f"структура {validation_result.structure_score}"
                 )
 
-                processing_metrics.protocol_quality_score = validation_result.overall_score
+                record_metric(
+                    processing_metrics,
+                    'protocol_quality_score',
+                    validation_result.overall_score,
+                )
 
                 if validation_result.overall_score < 0.7:
                     logger.warning(
