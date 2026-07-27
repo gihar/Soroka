@@ -556,10 +556,18 @@ class ParticipantsService:
 
         current = participants or []
 
-        # Дедуп: если имя совпадает с уже имеющимся участником по нормализованным
-        # вариантам — переиспользуем его, не плодя дубль.
+        # Дедуп: имя может ссылаться на уже добавленного участника — тогда
+        # переиспользуем его, не плодя дубль. Сверяем варианты одной размерности:
+        # многословное имя («Алексей Тимченко») — только с многословными, иначе
+        # общий токен «алексей» схлопнул бы тёзку в Алексея Шабловского, и два
+        # спикера получили бы одну подпись. Однословное имя — ссылка на уже
+        # известного участника, там однотокенный матч и нужен (неоднозначные
+        # варианты build_name_lookup из карты уже убрал).
         lookup, _ambiguous = self.build_name_lookup(current)
-        for variant in self.generate_name_variants(trimmed):
+        is_multiword = len(self.normalize_name_for_matching(trimmed).split()) > 1
+        variants = self.generate_name_variants(trimmed)
+        # sorted — чтобы выбор совпадения не зависел от порядка обхода set.
+        for variant in sorted(v for v in variants if (" " in v) is is_multiword):
             match = lookup.get(variant)
             if match:
                 return current, match["display_name"]
