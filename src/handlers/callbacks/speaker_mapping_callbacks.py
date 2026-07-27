@@ -170,7 +170,7 @@ def card_handler(
                 await core(callback, callback_data, state, user_id, current_session)
 
             except Exception as e:
-                logger.error(f"Ошибка в {core.__name__}: {e}", exc_info=True)
+                logger.opt(exception=True).error(f"Ошибка в {core.__name__}: {e}")
                 if on_error == "edit":
                     await safe_edit_text(callback.message, _PROCESSING_ERROR_TEXT)
                 else:
@@ -356,7 +356,7 @@ async def receive_speaker_name(message: Message) -> None:
             await _apply_main_view_names(message, session, user_id)
 
     except Exception as e:
-        logger.error(f"Ошибка в receive_speaker_name: {e}", exc_info=True)
+        logger.opt(exception=True).error(f"Ошибка в receive_speaker_name: {e}")
         await message.answer(
             "❌ Не получилось обработать имя.\n"
             "Отправьте его ещё раз."

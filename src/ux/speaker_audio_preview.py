@@ -158,6 +158,6 @@ async def send_speaker_audio_previews(
                     logger.debug(f"Аудиопревью: не удалось удалить клип {clip}: {rm_error}")
 
     except Exception as e:
-        logger.error(f"Аудиопревью: непредвиденная ошибка, пропускаю превью: {e}", exc_info=True)
+        logger.opt(exception=True).error(f"Аудиопревью: непредвиденная ошибка, пропускаю превью: {e}")
 
     return delivered
