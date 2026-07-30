@@ -233,7 +233,12 @@ def test_file_too_big_has_no_contradiction_and_uses_mb():
 
 
 async def test_progress_error_frame_hides_raw_exception(monkeypatch):
-    """Сырой exception-текст не доезжает до пользователя; есть следующий шаг."""
+    """Сырой exception-текст не доезжает до пользователя; есть следующий шаг.
+
+    Шаг с 30.07.2026 зависит от причины: здесь таймаут сети, и честный совет —
+    подождать, а не слать запись заново. Универсальное «отправьте ещё раз»
+    осталось только для неопознанных сбоев (см. test_failure_voice).
+    """
     from src.ux import progress_tracker as pt
 
     captured = {}
@@ -254,7 +259,33 @@ async def test_progress_error_frame_hides_raw_exception(monkeypatch):
     assert "Timeout after 30s" not in text
     assert "HTTPSConnectionPool" not in text
     assert "❌" in text
-    assert "ещё раз" in text or "еще раз" in text
+    assert "через несколько минут" in text
+
+
+async def test_progress_error_frame_step_matches_cause(monkeypatch):
+    """Перегрузка сервера не выдаётся за проблему файла (прод 30.07.2026)."""
+    from src.ux import progress_tracker as pt
+
+    captured = {}
+
+    async def fake_edit(message, text, **kwargs):
+        captured["text"] = text
+        return message
+
+    monkeypatch.setattr(pt, "safe_edit_text", fake_edit)
+
+    tracker = pt.ProgressTracker(MagicMock(), 1, MagicMock())
+    tracker.setup_default_stages()
+    await tracker.error(
+        "transcription",
+        "Ошибка при транскрипции",
+        "Файл не может быть обработан: Высокое использование памяти: 91.1% >= 90.0%",
+    )
+
+    text = captured.get("text", "")
+    assert "91.1%" not in text
+    assert "обычно повторная попытка помогает" not in text
+    assert "нашей стороне" in text
 
 
 # ---------------------------------------------------------------------------

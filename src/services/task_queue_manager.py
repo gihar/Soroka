@@ -352,8 +352,10 @@ class TaskQueueManager:
                     
                     # Форматируем понятное сообщение об ошибке
                     error_message = self._format_error_message(str(e))
-                    
-                    await progress_tracker.error(current_stage, error_message)
+
+                    # Сырой текст нужен трекеру, чтобы подобрать шаг по причине;
+                    # пользователю он не показывается.
+                    await progress_tracker.error(current_stage, error_message, str(e))
                 except Exception as tracker_error:
                     logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
             
@@ -461,7 +463,7 @@ class TaskQueueManager:
 
         if self._is_insufficient_credits(error_lower):
             return "Сервис временно недоступен"
-        elif "память" in error_lower or "memory" in error_lower:
+        elif error_presentation.is_memory_pressure(error_lower):
             return "Недостаточно памяти для обработки"
         elif "размер" in error_lower or "size" in error_lower:
             return "Файл слишком большой"
@@ -489,7 +491,7 @@ class TaskQueueManager:
                 "• Файл менять или пересжимать не нужно\n\n"
                 "🔄 Просто отправьте его снова через некоторое время."
             )
-        elif "память" in error_lower or "memory" in error_lower:
+        elif error_presentation.is_memory_pressure(error_lower):
             return (
                 "💡 **Рекомендации:**\n\n"
                 "Система перегружена. Попробуйте:\n"

@@ -16,6 +16,7 @@ from src.exceptions.processing import (
 )
 from src.models.processing import TranscriptionResult
 from src.performance.oom_protection import get_oom_protection, oom_protected
+from src.services import error_presentation
 from src.services.transcription_backends import build_backends
 
 # Leopard (Picovoice) STT — lazy import for faster startup
@@ -291,12 +292,34 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Ошибка при транскрибации файла {file_path}: {e}")
-            if "ffmpeg" in str(e).lower():
-                raise TranscriptionError(
-                    "ffmpeg не найден. Установите ffmpeg для обработки аудио/видео файлов",
-                    file_path
-                )
-            raise TranscriptionError(str(e), file_path)
+            raise self._classify_transcription_failure(e, file_path)
+
+    def _classify_transcription_failure(
+        self, error: Exception, file_path: str
+    ) -> TranscriptionError:
+        """Назвать настоящую причину сбоя, а не первую похожую.
+
+        ffmpeg печатает свой баннер в stderr на любой ошибке, поэтому подстрока
+        "ffmpeg" в тексте ничего не доказывает. На проде 29.07 битый файл,
+        отвергнутый Deepgram, объявлялся отсутствующим ffmpeg — при живом
+        /usr/bin/ffmpeg. Обвиняем окружение только подтвердив через which.
+        """
+        text = str(error)
+
+        if "ffmpeg" in text.lower() and not self._check_ffmpeg():
+            return TranscriptionError(
+                "ffmpeg не найден. Установите ffmpeg для обработки аудио/видео файлов",
+                file_path,
+            )
+
+        if error_presentation.is_unsupported_media(text):
+            return TranscriptionError(
+                "Не удалось декодировать запись: файл повреждён или в "
+                "неподдерживаемом формате",
+                file_path,
+            )
+
+        return TranscriptionError(text, file_path)
 
     async def _run_with_fallback(self, backend, file_path: str, language: str) -> TranscriptionResult:
         """Единая политика: недоступен или типизированная ошибка → локальный Whisper."""
