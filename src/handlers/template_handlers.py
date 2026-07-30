@@ -277,7 +277,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Сохранить", callback_data="save_template"),
+                InlineKeyboardButton(text="Сохранить", callback_data="save_template"),
                 InlineKeyboardButton(text="Изменить", callback_data="edit_template")
             ],
             [

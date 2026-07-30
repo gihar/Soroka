@@ -259,7 +259,7 @@ def setup_participants_handlers() -> Router:
             display_text = participants_service.format_participants_for_display(participants)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
+                [InlineKeyboardButton(text="Использовать", callback_data="confirm_participants")]
             ])
             
             await safe_answer(callback.message,
@@ -386,7 +386,7 @@ def setup_participants_handlers() -> Router:
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_meeting_info"),
+                        InlineKeyboardButton(text="Использовать", callback_data="confirm_meeting_info"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_meeting_info")
                     ],
                     [
@@ -412,7 +412,7 @@ def setup_participants_handlers() -> Router:
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
+                        InlineKeyboardButton(text="Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
@@ -484,7 +484,7 @@ def setup_participants_handlers() -> Router:
                 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
+                        InlineKeyboardButton(text="Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
@@ -624,7 +624,7 @@ def setup_participants_handlers() -> Router:
             participants_count = len(participants)
 
             if not participants:
-                await callback.answer("❌ Список участников пуст", show_alert=True)
+                await callback.answer("Список участников пуст", show_alert=True)
                 return
 
             # Сохраняем список для пользователя

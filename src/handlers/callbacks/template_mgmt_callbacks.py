@@ -131,7 +131,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
+                    InlineKeyboardButton(text="Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
                     InlineKeyboardButton(text="Отмена", callback_data=f"view_template_{template_id}")
                 ]
             ])
@@ -395,7 +395,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ <b>Шаблоны не найдены</b>\n\n"
+                    "<b>Шаблоны не найдены</b>\n\n"
                     "Обратитесь к администратору.",
                     parse_mode="HTML"
                 )

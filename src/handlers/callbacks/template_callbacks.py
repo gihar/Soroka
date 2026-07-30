@@ -58,7 +58,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ <b>Шаблоны не найдены</b>\n\n"
+                    "<b>Шаблоны не найдены</b>\n\n"
                     "Обратитесь к администратору.",
                     parse_mode="HTML"
                 )
@@ -95,7 +95,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ <b>Шаблоны не найдены</b>\n\nОбратитесь к администратору.",
+                    "<b>Шаблоны не найдены</b>\n\nОбратитесь к администратору.",
                     parse_mode="HTML"
                 )
                 return
@@ -197,7 +197,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             templates = await template_service_local.get_all_templates()
 
             if not templates:
-                await safe_edit_text(callback.message, "❌ Шаблоны не найдены. Обратитесь к администратору.")
+                await safe_edit_text(callback.message, "Шаблоны не найдены. Обратитесь к администратору.")
                 return
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[

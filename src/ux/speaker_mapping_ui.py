@@ -21,6 +21,12 @@ from src.ux.speaker_mapping_callback_data import (
     SmSkipConfirm,
 )
 
+# Маркер «это выбрано» — один на весь чат (критика v10). Отличается от ✅:
+# тот значит «сделано», терминальный успех. Раньше маркер выбора был ✅ на
+# четырёх экранах и ✓ на пятом, а на кнопках-действиях ✅ обещал «готово»
+# до того, как что-либо произошло.
+SELECTED_MARK = "✓"
+
 # Подсказка-следствие внизу карточки: показывается, только когда в карточке есть
 # несопоставленные спикеры. Одна строка, без назидательности — читателю видно,
 # во что превратятся неназванные спикеры в готовом протоколе.
@@ -273,7 +279,7 @@ def create_mapping_keyboard(
             
             # Проверяем, не используется ли уже этот участник
             is_used = participant_name in used_participants
-            button_text = f"{'✓ ' if is_used else ''}{short_name}"
+            button_text = f"{SELECTED_MARK + ' ' if is_used else ''}{short_name}"
             
             keyboard_buttons.append([InlineKeyboardButton(
                 text=button_text,
@@ -318,7 +324,7 @@ def create_mapping_keyboard(
         keyboard_buttons.append([])  # Пустая строка для разделения
 
         keyboard_buttons.append([InlineKeyboardButton(
-            text="✅ Подтвердить и продолжить",
+            text="Подтвердить и продолжить",
             callback_data=SmConfirm(user_id=user_id).pack()
         )])
 
@@ -350,7 +356,7 @@ def create_skip_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="✅ Да, продолжить",
+            text="Да, продолжить",
             callback_data=SmSkipConfirm(user_id=user_id).pack(),
         )],
         [InlineKeyboardButton(

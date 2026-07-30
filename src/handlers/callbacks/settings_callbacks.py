@@ -9,6 +9,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
+from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 
 def setup_settings_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
@@ -25,19 +26,19 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'messages' else ''}В сообщение",
+                    text=f"{SELECTED_MARK + ' ' if current == 'messages' else ''}В сообщение",
                     callback_data="set_protocol_output_messages"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'file' else ''}В файл Markdown",
+                    text=f"{SELECTED_MARK + ' ' if current == 'file' else ''}В файл Markdown",
                     callback_data="set_protocol_output_file"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'pdf' else ''}В файл PDF",
+                    text=f"{SELECTED_MARK + ' ' if current == 'pdf' else ''}В файл PDF",
                     callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'docx' else ''}В файл Word",
+                    text=f"{SELECTED_MARK + ' ' if current == 'docx' else ''}В файл Word",
                     callback_data="set_protocol_output_docx"
                 )],
                 [InlineKeyboardButton(
@@ -111,11 +112,11 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if enabled else ''}Спрашивать",
+                    text=f"{SELECTED_MARK + ' ' if enabled else ''}Спрашивать",
                     callback_data="set_speaker_mapping_on"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if not enabled else ''}Не спрашивать",
+                    text=f"{SELECTED_MARK + ' ' if not enabled else ''}Не спрашивать",
                     callback_data="set_speaker_mapping_off"
                 )],
                 [InlineKeyboardButton(
@@ -325,7 +326,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             active_key = await app_settings_repo.get_active_model_key()
             rows = []
             for p in presets:
-                marker = "✅ " if p["key"] == active_key else ""
+                marker = SELECTED_MARK + " " if p["key"] == active_key else ""
                 rows.append([InlineKeyboardButton(
                     text=f"{marker}{p['name']}",
                     callback_data=f"set_active_model_{p['key']}",
