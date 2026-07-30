@@ -33,6 +33,7 @@ from src.utils.text_processing import (
 
 from .llm_generation import (
     effective_stage1_outcome,
+    protocol_date_source,
     with_protocol_date_fallback,
     with_protocol_title_fallback,
 )
@@ -219,8 +220,15 @@ async def _assemble_result(
     # «Резюме встречи». Единый момент обработки на оба поля — источник согласован.
     # Здесь — единственный шов всех путей генерации (основной, возобновление,
     # перегенерация), поэтому реквизиты гарантированы каждому.
+    date_is_assumed = False
     if isinstance(llm_result, dict):
         processing_moment = datetime.now()
+        # Источник считается ДО фолбэка: после него поле всегда непустое и
+        # «знаем» уже не отличить от «подставили».
+        date_is_assumed = (
+            protocol_date_source(llm_result, meeting_date=request.meeting_date)
+            == "processing"
+        )
         llm_result = with_protocol_date_fallback(
             llm_result,
             meeting_date=request.meeting_date,
@@ -291,6 +299,7 @@ async def _assemble_result(
         warnings=user_warnings,
         meeting_type=effective_meeting_type,
         speaker_mapping=effective_speaker_mapping,
+        date_is_assumed=date_is_assumed,
     )
 
 

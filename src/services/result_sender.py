@@ -51,6 +51,10 @@ def _build_result_dict(request: ProcessingRequest, result: ProcessingResult) -> 
         },
         "processing_duration": getattr(result, "processing_duration", None),
         "speaker_mapping": getattr(request, "speaker_mapping", None),
+        # Оговорки едут в сводке ПЕРЕД протоколом (см. _document_notes), а не
+        # отдельными пузырями после него.
+        "warnings": getattr(result, "warnings", None) or [],
+        "date_is_assumed": getattr(result, "date_is_assumed", False),
     }
 
 
@@ -103,6 +107,12 @@ def _protocol_actions_keyboard(history_id, output_mode: str):
         rows.append(file_row)
     rows.append([InlineKeyboardButton(
         text="Другой шаблон", callback_data=f"proto_regen_{history_id}"
+    )])
+    # Дату и название нельзя достать из аудио: когда их подставили днём
+    # обработки, документ уходит «наверх» с неверной шапкой. Правка живёт рядом
+    # с остальными действиями и не требует ни расшифровки, ни повторной генерации.
+    rows.append([InlineKeyboardButton(
+        text="Дата и название", callback_data=f"proto_header_{history_id}"
     )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -237,6 +247,25 @@ async def _send_protocol_as_messages(bot, chat_id: int, protocol_text: str,
     return delivered
 
 
+async def send_protocol_body(bot, chat_id: int, protocol_text: str,
+                             source_file_name: str, output_mode: str,
+                             reply_markup=None) -> bool:
+    """Доставить тело протокола в формате, который выбрал пользователь.
+
+    Единственный шов «файл или сообщения» для всех, кто отдаёт готовый протокол:
+    первичная доставка и переотправка после правки шапки идут одним путём, чтобы
+    исправленный документ выглядел ровно так же, как исходный.
+    """
+    if output_mode in ("file", "pdf", "docx"):
+        return await send_protocol_file(
+            bot, chat_id, protocol_text, source_file_name, output_mode,
+            reply_markup=reply_markup,
+        )
+    return await _send_protocol_as_messages(
+        bot, chat_id, protocol_text, reply_markup=reply_markup
+    )
+
+
 async def send_result_to_user(
     bot,
     chat_id: int,
@@ -287,15 +316,10 @@ async def send_result_to_user(
         actions_keyboard = _protocol_actions_keyboard(
             getattr(result, "history_id", None), output_mode
         )
-        if output_mode in ("file", "pdf", "docx"):
-            delivered = await send_protocol_file(
-                bot, chat_id, result.protocol_text, request.file_name,
-                output_mode, reply_markup=actions_keyboard,
-            )
-        else:
-            delivered = await _send_protocol_as_messages(
-                bot, chat_id, result.protocol_text, reply_markup=actions_keyboard
-            )
+        delivered = await send_protocol_body(
+            bot, chat_id, result.protocol_text, request.file_name,
+            output_mode, reply_markup=actions_keyboard,
+        )
 
         if not delivered:
             await safe_send_message(
@@ -306,11 +330,10 @@ async def send_result_to_user(
                 ),
             )
 
-        # Предупреждения конвейера (например, слабая совместимость шаблона)
-        # должны дойти до пользователя, а не остаться в логах.
-        for warning in getattr(result, "warnings", None) or []:
-            await safe_send_message(bot, chat_id, text=warning)
-
+        # Предупреждения конвейера уже доставлены в составе сводки (она идёт
+        # перед протоколом и пересылается вместе с ним) — второй раз после тела
+        # они не отправляются: разговор заканчивается артефактом, а не
+        # дисклеймером о нём.
         return delivered
 
     except Exception as e:

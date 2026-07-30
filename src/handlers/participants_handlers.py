@@ -15,6 +15,7 @@ from src.exceptions.file import FileError
 from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
+from src.utils.date_format import format_russian_date
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux.html_text import esc
 
@@ -165,14 +166,20 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
 
-            await safe_answer(callback.message, 
-                "<b>Введите список участников</b>\n\n"
-                "Отправьте список участников текстом (один участник на строку).\n\n"
-                "<b>Примеры форматов:</b>\n"
+            # Дата встречи — единственный реквизит, которого нет в аудио: без
+            # неё в шапку уходит день обработки. Приглашение отдаёт её вместе с
+            # темой и участниками, поэтому подсказка про него стоит первой —
+            # раньше эта возможность работала, но нигде не была описана.
+            await safe_answer(callback.message,
+                "<b>Кто был на встрече и когда она была?</b>\n\n"
+                "Пришлите приглашение или письмо целиком — возьму оттуда "
+                "участников, дату и тему.\n\n"
+                "Или просто список участников, по одному на строку:\n"
                 "• <code>Иван Петров, руководитель</code>\n"
                 "• <code>Мария Иванова - разработчик</code>\n"
-                "• <code>Алексей Смирнов (тестировщик)</code>\n"
                 "• <code>Ольга Сидорова</code>\n\n"
+                "Без даты в шапку протокола попадёт день обработки — "
+                "поправить можно и после готового протокола.\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
                 parse_mode="HTML"
@@ -360,7 +367,11 @@ def setup_participants_handlers() -> Router:
                 if meeting_info.topic:
                     await state.update_data(meeting_topic=meeting_info.topic)
                 if meeting_info.start_time:
-                    await state.update_data(meeting_date=meeting_info.start_time.strftime("%d.%m.%Y"))
+                    # Русский формат: дата встаёт в шапку рядом с датой обработки
+                    # («30 июля 2026»), и «27.07.2026» читался бы разнобоем.
+                    await state.update_data(meeting_date=format_russian_date(
+                        meeting_info.start_time
+                    ))
                     await state.update_data(meeting_time=meeting_info.start_time.strftime("%H:%M"))
 
                 await state.set_state(ParticipantsInput.confirm_meeting_info)

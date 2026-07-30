@@ -24,6 +24,11 @@ class SpeakerMappingStates(StatesGroup):
     waiting_confirmation = State()  # Ожидание подтверждения сопоставления
 
 
+class ProtocolHeaderEdit(StatesGroup):
+    """Правка шапки доставленного протокола («Дата и название»)."""
+    waiting_for_header = State()  # Ожидание даты и (необязательно) названия
+
+
 class ProtocolInfoState(StatesGroup):
     """Состояния для ввода дополнительной информации о протоколе"""
     waiting_agenda = State()  # Ожидание ввода повестки встречи

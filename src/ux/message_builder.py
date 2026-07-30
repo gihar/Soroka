@@ -114,7 +114,33 @@ class MessageBuilder:
         if duration:
             lines.append(f"Обработка: {cls._format_duration(duration)}")
 
+        notes = cls._document_notes(result)
+        if notes:
+            # Пустая строка отделяет «что это» от «что с этим не так»: сводка
+            # остаётся сканируемой, оговорки не сливаются со статусом.
+            lines.append("")
+            lines.extend(notes)
+
         return "\n".join(lines)
+
+    @staticmethod
+    def _document_notes(result: Dict[str, Any]) -> list:
+        """Оговорки о документе — в сводку ПЕРЕД протоколом, не после него.
+
+        Раньше они уходили отдельными пузырями после тела, и каждый прогон
+        заканчивался сомнением в вещи, которую пользователь сейчас перешлёт. В
+        режимах ``pdf``/``docx`` такой пузырь вдобавок оставался в чате и с
+        файлом не ехал — читатель «наверху» получал поручения «Участнику N» без
+        объяснения. Сводка пересылается вместе с протоколом, поэтому место
+        оговорки здесь.
+        """
+        notes = list(result.get("warnings") or [])
+        if result.get("date_is_assumed"):
+            notes.append(
+                "📅 Дата в шапке — день обработки: в записи её не нашлось. "
+                "Поправить: кнопка «Дата и название» под протоколом."
+            )
+        return notes
 
     @staticmethod
     def _format_duration(seconds: float) -> str:

@@ -83,6 +83,13 @@ class ProcessingResult(BaseModel):
         None,
         description="Сопоставление спикеров (итог ЭТАПА 1) — для консистентной перегенерации",
     )
+    date_is_assumed: bool = Field(
+        False,
+        description=(
+            "Дата в шапке — день обработки, а не дата встречи: ни LLM, ни запрос "
+            "её не дали. Сводка обязана сказать об этом читателю"
+        ),
+    )
 
 
 class ProcessingHistory(BaseModel):
