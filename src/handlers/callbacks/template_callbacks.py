@@ -312,7 +312,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             await state.update_data(template_id=0, use_smart_selection=True)
 
             await safe_edit_text(callback.message,
-                "<b>Умный выбор шаблона активирован!</b>\n\n"
+                "<b>Умный выбор шаблона включён</b>\n\n"
                 "ИИ проанализирует содержание вашей встречи и автоматически подберёт "
                 "наиболее подходящий шаблон после транскрипции.\n\n"
                 "⏳ Начинаю обработку...",

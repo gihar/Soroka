@@ -516,7 +516,7 @@ async def _process_url(message: Message, url: str, state: FSMContext, template_s
                 size_mb = file_size / (1024 * 1024)
                 await safe_edit_text(
                     status_message,
-                    f"✅ Файл найден!\n\n"
+                    f"✅ Файл найден.\n\n"
                     f"Имя: {filename}\n"
                     f"Размер: {size_mb:.1f} МБ\n\n"
                     f"Начинаю скачивание..."

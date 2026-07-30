@@ -67,7 +67,7 @@ class QuickActionsUI:
         text = (
             "<b>Файл получен</b>\n\n"
             "<b>Быстрая обработка</b> — умный шаблон и сохранённые настройки\n"
-            "<b>Настроить</b> — выбрать участников, шаблон, модель"
+            "<b>Настроить</b> — выбрать участников и шаблон"
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
