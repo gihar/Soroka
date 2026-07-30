@@ -13,6 +13,7 @@ import psutil
 from loguru import logger
 
 from src.config import settings
+from src.performance.callback_registry import CallbackRegistry
 
 
 @dataclass
@@ -56,10 +57,11 @@ class OOMProtection:
         self.memory_warnings: list = []
         self.cleanup_events: list = []
         
-        # Callbacks для уведомлений
-        self.warning_callbacks: list = []
-        self.critical_callbacks: list = []
-        self.cleanup_callbacks: list = []
+        # Callbacks для уведомлений (слабые ссылки на связанные методы —
+        # синглтон не должен пинить сервисы, живущие одну задачу)
+        self.warning_callbacks = CallbackRegistry("warning")
+        self.critical_callbacks = CallbackRegistry("critical")
+        self.cleanup_callbacks = CallbackRegistry("cleanup")
         
         # Флаг активной защиты
         self.protection_enabled = True
@@ -103,24 +105,43 @@ class OOMProtection:
             return "normal"
     
     def can_process_file(self, file_size_mb: float) -> tuple[bool, str]:
-        """Проверить, можно ли обработать файл"""
-        memory_status = self.get_memory_status()
-        
-        # Проверяем размер файла
+        """Проверить, можно ли обработать файл.
+
+        Нехватка памяти лечится выгрузкой моделей, поэтому отказ выносится
+        только после агрессивной очистки и перепроверки: иначе бот навсегда
+        застревает в коридоре между max_memory_usage_percent и critical.
+        """
+        # Размер файла памятью не лечится — отказ без очистки
         if file_size_mb > self.limits.max_file_size_mb:
             return False, f"Файл слишком большой: {file_size_mb:.1f}MB > {self.limits.max_file_size_mb}MB"
-        
-        # Проверяем доступную память
+
+        verdict = self._check_memory_for_file()
+        if verdict is None:
+            return True, "OK"
+
+        logger.warning(f"Память не позволяет принять файл ({verdict}) — пробуем освободить")
+        self._aggressive_cleanup()
+
+        verdict_after_cleanup = self._check_memory_for_file()
+        if verdict_after_cleanup is None:
+            logger.info("Очистка освободила память, файл принят в обработку")
+            return True, "OK"
+
+        return False, verdict_after_cleanup
+
+    def _check_memory_for_file(self) -> Optional[str]:
+        """Причина, по которой памяти не хватает; None — памяти достаточно."""
+        memory_status = self.get_memory_status()
+
         available_mb = memory_status["system"]["available_mb"]
         if available_mb < self.limits.min_available_memory_mb:
-            return False, f"Недостаточно памяти: {available_mb:.1f}MB < {self.limits.min_available_memory_mb}MB"
-        
-        # Проверяем использование памяти
+            return f"Недостаточно памяти: {available_mb:.1f}MB < {self.limits.min_available_memory_mb}MB"
+
         memory_percent = memory_status["system"]["percent"]
         if memory_percent >= self.limits.max_memory_usage_percent:
-            return False, f"Высокое использование памяти: {memory_percent:.1f}% >= {self.limits.max_memory_usage_percent}%"
-        
-        return True, "OK"
+            return f"Высокое использование памяти: {memory_percent:.1f}% >= {self.limits.max_memory_usage_percent}%"
+
+        return None
     
     def check_memory_before_operation(self, operation_name: str, estimated_memory_mb: float = 0) -> bool:
         """Проверить память перед операцией"""
@@ -152,14 +173,10 @@ class OOMProtection:
     def _trigger_warning_cleanup(self):
         """Запустить очистку при предупреждении"""
         logger.info("Запуск очистки памяти при предупреждении")
-        
+
         # Запускаем callbacks
-        for callback in self.warning_callbacks:
-            try:
-                callback()
-            except Exception as e:
-                logger.error(f"Ошибка в warning callback: {e}")
-        
+        self.warning_callbacks.invoke()
+
         # Мягкая очистка
         self._soft_cleanup()
         
@@ -175,12 +192,8 @@ class OOMProtection:
         logger.critical("Запуск критической очистки памяти")
         
         # Запускаем callbacks
-        for callback in self.critical_callbacks:
-            try:
-                callback()
-            except Exception as e:
-                logger.error(f"Ошибка в critical callback: {e}")
-        
+        self.critical_callbacks.invoke()
+
         # Агрессивная очистка
         self._aggressive_cleanup()
         
@@ -196,13 +209,9 @@ class OOMProtection:
         # Сборка мусора
         collected = gc.collect()
         logger.debug(f"Мягкая очистка: собрано {collected} объектов")
-        
+
         # Запускаем callbacks очистки
-        for callback in self.cleanup_callbacks:
-            try:
-                callback("soft")
-            except Exception as e:
-                logger.error(f"Ошибка в cleanup callback: {e}")
+        self.cleanup_callbacks.invoke("soft")
     
     def _aggressive_cleanup(self):
         """Агрессивная очистка памяти"""
@@ -215,12 +224,11 @@ class OOMProtection:
             total_collected += collected
         
         # Запускаем callbacks очистки
-        for callback in self.cleanup_callbacks:
-            try:
-                callback("aggressive")
-            except Exception as e:
-                logger.error(f"Ошибка в cleanup callback: {e}")
-        
+        self.cleanup_callbacks.invoke("aggressive")
+
+        # Модели выгружены — добираем освободившиеся объекты
+        total_collected += gc.collect()
+
         logger.info(f"Агрессивная очистка завершена: собрано {total_collected} объектов")
         
         # Записываем событие
@@ -233,15 +241,19 @@ class OOMProtection:
     
     def add_warning_callback(self, callback: Callable):
         """Добавить callback для предупреждений"""
-        self.warning_callbacks.append(callback)
-    
+        self.warning_callbacks.add(callback)
+
     def add_critical_callback(self, callback: Callable):
         """Добавить callback для критических ситуаций"""
-        self.critical_callbacks.append(callback)
-    
+        self.critical_callbacks.add(callback)
+
     def add_cleanup_callback(self, callback: Callable):
         """Добавить callback для очистки"""
-        self.cleanup_callbacks.append(callback)
+        self.cleanup_callbacks.add(callback)
+
+    def remove_cleanup_callback(self, callback: Callable):
+        """Снять callback очистки с регистрации"""
+        self.cleanup_callbacks.remove(callback)
     
     def get_statistics(self) -> Dict[str, Any]:
         """Получить статистику OOM защиты"""
