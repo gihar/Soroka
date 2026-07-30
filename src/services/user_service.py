@@ -84,6 +84,29 @@ class UserService:
             logger.error(f"Ошибка при обновлении режима вывода протокола для пользователя {telegram_id}: {e}")
             raise
 
+    async def update_speaker_mapping_preference(self, telegram_id: int,
+                                                enabled: Optional[bool]) -> User:
+        """Обновить выключатель карточки сопоставления (None — как у всех)."""
+        try:
+            user = await self.get_user_by_telegram_id(telegram_id)
+            if not user:
+                raise UserNotFoundError(telegram_id)
+            await self._users.update_speaker_mapping_preference(telegram_id, enabled)
+            updated_user = await self.get_user_by_telegram_id(telegram_id)
+            if not updated_user:
+                raise UserNotFoundError(telegram_id)
+            logger.info(
+                f"Обновлено сопоставление спикеров для пользователя {telegram_id}: {enabled}"
+            )
+            return updated_user
+        except UserNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Ошибка при обновлении настройки сопоставления для {telegram_id}: {e}"
+            )
+            raise
+
     async def get_or_create_user(self, telegram_id: int, username: str = None,
                                  first_name: str = None, last_name: str = None) -> User:
         """Получить пользователя или создать нового, если не существует"""

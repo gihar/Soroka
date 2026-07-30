@@ -109,6 +109,12 @@ class QuickActionsUI:
             ],
             [
                 InlineKeyboardButton(
+                    text="Сопоставление спикеров",
+                    callback_data="settings_speaker_mapping",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="Статистика",
                     callback_data="settings_stats",
                 )

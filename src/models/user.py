@@ -22,6 +22,13 @@ class UserBase(BaseModel):
         description="Режим вывода протокола: 'messages', 'file' (.md), 'pdf' или 'docx' (Word)"
     )
     saved_participants: Optional[str] = Field(None, description="Сохраненный список участников в JSON")
+    speaker_mapping_enabled: Optional[bool] = Field(
+        None,
+        description=(
+            "Показывать карточку сопоставления спикеров: None — как решил "
+            "администратор, True/False — явный выбор пользователя"
+        ),
+    )
 
 
 class UserCreate(UserBase):

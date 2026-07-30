@@ -357,7 +357,7 @@ class ProcessingService(BaseProcessingService):
             # и без списка участников (там имена вводятся вручную).
             speaker_mapping, request_meeting_type = mapping_result
             if _should_show_mapping_card(transcription_result.diarization):
-                if settings.enable_speaker_mapping_confirmation:
+                if await self._mapping_confirmation_enabled(request.user_id):
                     # task_id передаём ДО показа кнопок подтверждения, чтобы он
                     # был в сохранённом состоянии к моменту, когда пользователь
                     # сможет нажать «Подтвердить» (иначе — гонка с attach).
@@ -392,6 +392,24 @@ class ProcessingService(BaseProcessingService):
                 progress_tracker=progress_tracker,
             )
             return outcome.result
+
+    async def _mapping_confirmation_enabled(self, telegram_user_id: int) -> bool:
+        """Спрашивать ли имена спикеров у этого пользователя.
+
+        Настройка из /settings перекрывает глобальный флаг администратора: тот,
+        кто жмёт «Пропустить» каждую неделю, говорит это один раз. Сбой чтения
+        пользователя не должен менять поведение обработки — падаем в общий флаг.
+        """
+        from src.services.mapping_preference import should_confirm_mapping
+
+        try:
+            user = await self.user_service.get_user_by_telegram_id(telegram_user_id)
+        except Exception as e:
+            logger.warning(f"Не удалось прочитать настройку сопоставления: {e}")
+            user = None
+        return should_confirm_mapping(
+            user, global_default=settings.enable_speaker_mapping_confirmation
+        )
 
     async def _handle_speaker_mapping_confirmation(
         self, request, transcription_result, speaker_mapping,
@@ -537,6 +555,25 @@ class ProcessingService(BaseProcessingService):
                 logger.info(
                     "Обработка приостановлена - ожидаю подтверждения от пользователя"
                 )
+
+                # Пауза больше не бессрочна: если карточку не закроют, протокол
+                # доедет сам с «Участник N». Раньше сессия молча истекала, и
+                # готовая расшифровка — самая дорогая часть конвейера — пропадала.
+                # Таймер безопасен при штатном исходе: take атомарен, изъятая
+                # пользователем сессия вернёт таймеру None.
+                from src.services.mapping_timeout import (
+                    auto_deliver_delay_seconds,
+                    deliver_on_timeout,
+                )
+
+                asyncio.create_task(deliver_on_timeout(
+                    self,
+                    mapping_sessions,
+                    user_id=request.user_id,
+                    bot=progress_tracker.bot,
+                    chat_id=progress_tracker.chat_id,
+                    delay_seconds=auto_deliver_delay_seconds(mapping_sessions),
+                ))
                 return None  # pause processing
 
         logger.warning(
