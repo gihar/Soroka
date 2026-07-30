@@ -20,6 +20,14 @@ async def register_new_record(state: FSMContext, **values) -> None:
     Сбрасывает все ключи записи (`RECORD_KEYS`) в ``None`` и следом применяет
     переданные значения — одним ``update_data``. Прочие ключи состояния
     (участники, тема встречи и т. п.) не затрагиваются.
+
+    Вместе с ключами снимается и висящий шаг диалога. Файл, присланный посреди
+    ввода участников, ловит ``media_handler`` (его роутер включён раньше
+    participants_router): запись регистрировалась, а состояние
+    ``waiting_for_participants`` оставалось — и следующий текст пользователя
+    разбирался как список участников, хотя он уже начал новый прогон.
     """
+    if await state.get_state() is not None:
+        await state.set_state(None)
     reset = {key: None for key in RECORD_KEYS}
     await state.update_data(**{**reset, **values})

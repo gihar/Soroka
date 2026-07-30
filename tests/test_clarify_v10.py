@@ -147,6 +147,19 @@ def test_no_exclamation_marks_left(module):
     assert offenders == []
 
 
+def test_templates_help_fits_one_readable_bubble():
+    """1308 символов — вдвое длиннее следующего сообщения продукта."""
+    text = MessageBuilder.templates_help_message()
+    assert len(text) < 900, f"справка снова разрослась: {len(text)}"
+
+
+def test_templates_help_keeps_its_reference_value():
+    """Сокращать нужно воду, а не справочник переменных."""
+    text = MessageBuilder.templates_help_message()
+    for essential in ("{{ meeting_title }}", "{{ decisions }}", "{% if", "<pre>"):
+        assert essential in text, f"из справки пропало важное: {essential}"
+
+
 def test_api_leak_is_translated():
     from src.services import error_presentation
 

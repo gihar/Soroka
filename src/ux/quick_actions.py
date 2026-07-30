@@ -17,6 +17,7 @@ from loguru import logger
 from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer
 from src.utils.template_sort import sort_templates_by_name
+from src.ux.admin_views import ACCESS_DENIED
 
 # Единый источник подписи входа в меню админа: кнопка главного меню, фильтр
 # текст-хендлера и зеркало в message_handlers ссылаются сюда, чтобы подпись не
@@ -276,7 +277,7 @@ def setup_quick_actions_handlers() -> Router:
 
         # Проверяем права администратора
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
 
         # Показываем меню администратора
