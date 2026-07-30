@@ -46,6 +46,92 @@ def is_transient_api_error(error_text: str) -> bool:
     )
 
 
+def is_memory_pressure(error_text: str) -> bool:
+    """Признак нехватки памяти на сервере — виноват не файл, а нагрузка.
+
+    Ищем по основе «памят», а не по слову «память»: прод-текст говорит
+    «использование памяти», и точное совпадение слова его не ловило — сбой
+    уходил в общую ветку, а пользователь получал совет, который не помогал.
+    """
+    lowered = (error_text or "").lower()
+    return any(
+        pattern in lowered
+        for pattern in ('памят', 'memory', 'перегруж', 'oom')
+    )
+
+
+def is_file_too_large(error_text: str) -> bool:
+    """Признак превышения допустимого размера — лечится сжатием, не повтором."""
+    lowered = (error_text or "").lower()
+    return 'слишком большой' in lowered or 'too large' in lowered
+
+
+def is_unsupported_media(error_text: str) -> bool:
+    """Признак нечитаемой записи: битый контейнер или неподдерживаемый кодек.
+
+    Отсутствие ffmpeg сюда не относится — это сбой окружения, а не файла.
+    """
+    lowered = (error_text or "").lower()
+    return any(
+        pattern in lowered
+        for pattern in (
+            'corrupt', 'unsupported data', 'invalid data',
+            'moov atom', 'failed to load audio', 'failed to process audio',
+            'неподдерживаемый формат', 'повреждён', 'повреждена',
+        )
+    )
+
+
+def processing_failure_step(error_text: str) -> str:
+    """Следующий шаг для пользователя, соответствующий причине сбоя.
+
+    Порядок веток — от «виноваты мы» к «виноват файл»: сбой на нашей стороне
+    важнее сообщить честно, потому что там повтор не помогает и совет
+    «отправьте ещё раз» превращается в замкнутый круг (прод 30.07: 27 отказов
+    подряд с обещанием, что повтор поможет).
+    """
+    if is_insufficient_credits(error_text):
+        return (
+            "Это временная проблема на нашей стороне, файл менять не нужно — "
+            "отправьте запись снова позже."
+        )
+
+    if is_memory_pressure(error_text):
+        return (
+            "Сервис перегружен — это на нашей стороне, с файлом всё в порядке. "
+            "Отправьте запись через несколько минут."
+        )
+
+    if is_transient_api_error(error_text):
+        return "Похоже на временный сбой сервиса — попробуйте через несколько минут."
+
+    if is_file_too_large(error_text):
+        return "Запись слишком большая — сожмите её или разделите на части."
+
+    if is_unsupported_media(error_text):
+        return (
+            "Не удалось прочитать запись — пришлите её в другом формате "
+            "(MP3, MP4 или WAV) или запишите заново."
+        )
+
+    return "Отправьте запись ещё раз — обычно повторная попытка помогает."
+
+
+def processing_failure_message(stage_name: str, error_text: str) -> str:
+    """Текст трекера о сбое: что случилось + шаг, зависящий от причины.
+
+    Сырой текст исключения сюда не попадает — он остаётся в логах; наружу идёт
+    только имя этапа и подобранный шаг (анти-референс PRODUCT.md про «сырой
+    машинный вывод»). Имя этапа экранируется: сообщение уходит с parse_mode=HTML.
+    """
+    from src.ux.html_text import esc
+
+    return (
+        f"❌ Обработка прервалась на этапе «{esc(stage_name)}».\n"
+        f"{processing_failure_step(error_text)}"
+    )
+
+
 def resume_failure_message(error_text: str) -> str:
     """Сообщение о сбое возобновления: что случилось + следующий шаг.
 

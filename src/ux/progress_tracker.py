@@ -11,8 +11,8 @@ from aiogram.types import Message
 from loguru import logger
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
+from src.services import error_presentation
 from src.utils.telegram_safe import safe_edit_text, safe_send_message
-from src.ux.html_text import esc
 
 
 class ProgressStage:
@@ -392,8 +392,13 @@ class ProgressTracker:
         except Exception as e:
             logger.error(f"❌ Ошибка в авто-обновлении прогресса: {e}")
     
-    async def error(self, stage_id: str, error_message: str):
-        """Отметить ошибку на этапе"""
+    async def error(self, stage_id: str, error_message: str, raw_error: str = ""):
+        """Отметить ошибку на этапе.
+
+        ``raw_error`` — исходный текст исключения; по нему подбирается шаг для
+        пользователя. Наружу он не уходит, только в лог: см.
+        ``error_presentation.processing_failure_message``.
+        """
         # НЕМЕДЛЕННО устанавливаем флаг ошибки и останавливаем автообновление
         self._has_error = True
         # Трекер погашен сообщением об ошибке: последующий complete_all() из
@@ -427,13 +432,13 @@ class ProgressTracker:
         stage_name = stage.name if stage else stage_id
 
         # Сырой текст исключения — только в лог, не пользователю (анти-референс
-        # PRODUCT.md «сырой машинный вывод»). Пользователь видит простую фразу.
+        # PRODUCT.md «сырой машинный вывод»). Пользователь видит простую фразу,
+        # но шаг в ней подобран по причине сбоя: при перегрузке сервера совет
+        # «отправьте ещё раз» замыкал круг (прод 30.07, 27 отказов подряд).
         logger.error(f"Обработка прервалась на этапе {stage_id}: {error_message}")
 
-        safe_stage = esc(stage_name)
-        text = (
-            f"❌ Обработка прервалась на этапе «{safe_stage}».\n"
-            "Отправьте запись ещё раз — обычно повторная попытка помогает."
+        text = error_presentation.processing_failure_message(
+            stage_name, raw_error or error_message
         )
 
         try:
