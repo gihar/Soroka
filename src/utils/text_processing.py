@@ -89,14 +89,51 @@ def humanize_speaker_labels(text: str) -> Tuple[str, int]:
     return _SPEAKER_LABEL_RE.sub(r"Участник \1", text), len(numbers)
 
 
+_UNMAPPED_NOTE = (
+    "_Часть говорящих не удалось сопоставить с именами — "
+    "они обозначены как «Участник N»._"
+)
+
+
+def with_unmapped_speakers_note(protocol_text: str, unmapped_count: int) -> str:
+    """Вписать пояснение про «Участник N» в сам документ, под шапку.
+
+    Раньше пояснение жило отдельным пузырём в чате — и в режимах PDF/Word
+    отваливалось при пересылке файла, ровно когда нужнее всего: читатель
+    «наверху» получал поручения безымянным «Участникам» без объяснения.
+
+    Место — до первой секции: «Участник 2» встречается в середине документа, и
+    сноска в конце опаздывает. Возвращает новый текст (вход не мутируется).
+    """
+    if not unmapped_count or _UNMAPPED_NOTE in protocol_text:
+        return protocol_text
+
+    lines = protocol_text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("## "):
+            head = lines[:index]
+            # Пустая строка перед секцией принадлежит ей — пометка встаёт до неё.
+            while head and not head[-1].strip():
+                head = head[:-1]
+            body = lines[index:]
+            return "\n".join([*head, "", _UNMAPPED_NOTE, "", *body])
+
+    # Секций нет (короткий или нестандартный протокол) — пометка в конец.
+    return "\n".join([*lines, "", _UNMAPPED_NOTE])
+
+
 def humanize_speaker_labels_for_reader(protocol_text: str, warnings: list) -> str:
     """Финальный проход перед доставкой: SPEAKER_N -> «Участник N» + пометка.
 
     Единая точка для обоих путей генерации (пайплайн и перегенерация из
     истории): текст пометки владельцу не должен разъезжаться между ними.
+
+    Пометка идёт в два адреса: в документ (едет с файлом при пересылке) и в
+    сводку чата (видна до того, как файл открыли).
     """
     protocol_text, unmapped_count = humanize_speaker_labels(protocol_text)
     if unmapped_count:
+        protocol_text = with_unmapped_speakers_note(protocol_text, unmapped_count)
         warnings.append(
             "ℹ️ Не всех говорящих удалось сопоставить с именами — "
             "в протоколе они обозначены как «Участник N»."
