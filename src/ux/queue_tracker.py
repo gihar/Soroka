@@ -175,31 +175,6 @@ class QueuePositionTracker:
         except Exception as e:
             logger.error(f"Ошибка отображения отмены: {e}")
     
-    async def show_error(self, error_message: str):
-        """Показать ошибку"""
-        if not self.is_active or not self.message_id:
-            return
-        
-        self.is_active = False
-        
-        try:
-            text = (
-                "❌ <b>Ошибка при обработке</b>\n\n"
-                f"{esc(error_message)}\n\n"
-                "Попробуйте загрузить файл снова."
-            )
-            
-            await safe_bot_edit_message(
-                self.bot,
-                chat_id=self.chat_id,
-                message_id=self.message_id,
-                text=text,
-                parse_mode="HTML"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка отображения ошибки: {e}")
-    
     async def delete_message(self):
         """Удалить сообщение трекера"""
         if not self.message_id:

@@ -350,25 +350,13 @@ class TaskQueueManager:
                     # Определяем текущий этап для отображения ошибки
                     current_stage = progress_tracker.current_stage or "preparation"
                     
-                    # Форматируем понятное сообщение об ошибке
-                    error_message = self._format_error_message(str(e))
-
-                    # Сырой текст нужен трекеру, чтобы подобрать шаг по причине;
-                    # пользователю он не показывается.
-                    await progress_tracker.error(current_stage, error_message, str(e))
+                    # Трекер сам подбирает пользовательский текст по причине
+                    # сбоя (error_presentation): сюда идёт сырой текст — он
+                    # нужен для выбора шага и уходит в лог, не пользователю.
+                    await progress_tracker.error(current_stage, str(e), str(e))
                 except Exception as tracker_error:
                     logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
             
-            # Отправляем пользователю дополнительное сообщение с рекомендациями
-            try:
-                recommendation = self._get_error_recommendation(str(e))
-                await self.bot.send_message(
-                    chat_id=task.chat_id,
-                    text=recommendation
-                )
-            except Exception as send_error:
-                logger.error(f"Не удалось отправить рекомендации пользователю: {send_error}")
-
             # При исчерпании кредитов LLM — алертим админов (это сбой на нашей
             # стороне, который ломает обработку у всех пользователей).
             if self._is_insufficient_credits(str(e).lower()):
@@ -457,85 +445,6 @@ class TaskQueueManager:
             f"Алерт об окончании кредитов LLM отправлен админам: {settings.admins}"
         )
 
-    def _format_error_message(self, error_text: str) -> str:
-        """Форматировать сообщение об ошибке для пользователя"""
-        error_lower = error_text.lower()
-
-        if self._is_insufficient_credits(error_lower):
-            return "Сервис временно недоступен"
-        elif error_presentation.is_memory_pressure(error_lower):
-            return "Недостаточно памяти для обработки"
-        elif "размер" in error_lower or "size" in error_lower:
-            return "Файл слишком большой"
-        elif "формат" in error_lower or "format" in error_lower:
-            return "Неподдерживаемый формат файла"
-        elif "сеть" in error_lower or "network" in error_lower or "timeout" in error_lower:
-            return "Ошибка сети или сервиса"
-        elif "транскрипц" in error_lower or "transcription" in error_lower:
-            return "Ошибка при транскрипции"
-        else:
-            # Ограничиваем длину сообщения
-            return error_text[:100] if len(error_text) <= 100 else error_text[:97] + "..."
-    
-    def _get_error_recommendation(self, error_text: str) -> str:
-        """Получить рекомендации по устранению ошибки"""
-        error_lower = error_text.lower()
-
-        if self._is_insufficient_credits(error_lower):
-            return (
-                "⚠️ **Сервис временно недоступен**\n\n"
-                "На сервисе обработки закончились ресурсы (кредиты LLM). "
-                "Это временная проблема на нашей стороне — с вашим файлом всё в порядке.\n\n"
-                "Что делать:\n"
-                "• Повторите попытку позже — мы пополним баланс\n"
-                "• Файл менять или пересжимать не нужно\n\n"
-                "🔄 Просто отправьте его снова через некоторое время."
-            )
-        elif error_presentation.is_memory_pressure(error_lower):
-            return (
-                "💡 **Рекомендации:**\n\n"
-                "Система перегружена. Попробуйте:\n"
-                "• Повторить через несколько минут\n"
-                "• Использовать файл меньшего размера\n"
-                "• Сжать файл перед отправкой\n\n"
-                "🔄 Отправьте файл снова, когда система будет готова."
-            )
-        elif "размер" in error_lower or "size" in error_lower:
-            return (
-                "💡 **Рекомендации:**\n\n"
-                "Файл превышает допустимый размер. Попробуйте:\n"
-                "• Сжать файл (максимум 20MB)\n"
-                "• Использовать формат с лучшим сжатием (MP3 вместо WAV)\n"
-                "• Разделить запись на части\n\n"
-                "🔄 Отправьте оптимизированный файл."
-            )
-        elif "формат" in error_lower or "format" in error_lower:
-            return (
-                "💡 **Рекомендации:**\n\n"
-                "Формат файла не поддерживается. Попробуйте:\n"
-                "• Конвертировать в MP3, MP4 или WAV\n"
-                "• Отправить файл как документ\n"
-                "• Проверить, что файл не поврежден\n\n"
-                "🔄 Отправьте файл в поддерживаемом формате."
-            )
-        elif "сеть" in error_lower or "network" in error_lower or "timeout" in error_lower:
-            return (
-                "💡 **Рекомендации:**\n\n"
-                "Проблемы с сетевым подключением. Попробуйте:\n"
-                "• Повторить через несколько минут\n"
-                "• Проверить интернет-соединение\n"
-                "• Использовать другую сеть\n\n"
-                "🔄 Отправьте файл снова."
-            )
-        else:
-            return (
-                "💡 **Что делать:**\n\n"
-                "• Попробуйте отправить файл еще раз\n"
-                "• Проверьте качество и размер файла\n"
-                "• Используйте /help для справки\n\n"
-                "🔄 Если проблема повторяется, попробуйте другой файл."
-            )
-    
     async def _check_resources_available(self) -> bool:
         """Проверить доступность ресурсов для обработки"""
         if not self.oom_protection:
