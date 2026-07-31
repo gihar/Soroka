@@ -20,6 +20,7 @@ from src.services.url_service import URLService
 from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
+from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
 
 
@@ -208,16 +209,14 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Запись потерялась.\n"
-                    "Пришлите ссылку ещё раз."
+                    RECORD_LOST_LINK
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Запись потерялась.\n"
-                    "Отправьте файл ещё раз."
+                    RECORD_LOST_FILE
                 )
                 await state.clear()
                 return

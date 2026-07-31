@@ -12,8 +12,8 @@ from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import category_label, sort_templates_by_name
 from src.ux.html_text import esc
-from src.ux.keyboards import build_template_picker
-from src.ux.message_builder import TEMPLATES_EMPTY, TEMPLATES_LOAD_FAILED
+from src.ux.keyboards import BACK_TO_SETTINGS, build_template_picker
+from src.ux.message_builder import SOMETHING_WENT_WRONG, TEMPLATES_EMPTY, TEMPLATES_LOAD_FAILED
 
 from .helpers import _safe_callback_answer
 
@@ -78,7 +78,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
             await _safe_callback_answer(callback)
         except Exception as e:
             logger.error(f"Ошибка в templates_help_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка")
+            await _safe_callback_answer(callback, SOMETHING_WENT_WRONG)
 
     @router.callback_query(F.data.startswith("view_template_"))
     async def view_template_callback(callback: CallbackQuery):
@@ -251,10 +251,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                         text="Создать шаблон",
                         callback_data="create_template"
                     )],
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings"
-                    )]
+                    [BACK_TO_SETTINGS]
                 ])
 
                 await safe_edit_text(callback.message,
@@ -278,10 +275,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                             text="Сбросить шаблон по умолчанию",
                             callback_data="reset_default_template",
                         )],
-                        [InlineKeyboardButton(
-                            text="⬅️ Назад к настройкам",
-                            callback_data="back_to_settings",
-                        )],
+                        [BACK_TO_SETTINGS],
                     ],
                 )
 
@@ -309,10 +303,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             if success:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings"
-                    )]
+                    [BACK_TO_SETTINGS]
                 ])
 
                 # Если template_id = 0, это "Умный выбор"
@@ -335,10 +326,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
                     )
             else:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings"
-                    )]
+                    [BACK_TO_SETTINGS]
                 ])
 
                 await safe_edit_text(callback.message,
@@ -364,10 +352,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             if success:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings"
-                    )]
+                    [BACK_TO_SETTINGS]
                 ])
 
                 await safe_edit_text(callback.message,

@@ -9,6 +9,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
+from src.ux.keyboards import BACK_TO_SETTINGS
 from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 
@@ -41,10 +42,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{SELECTED_MARK + ' ' if current == 'docx' else ''}В файл Word",
                     callback_data="set_protocol_output_docx"
                 )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -82,10 +80,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -119,10 +114,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{SELECTED_MARK + ' ' if not enabled else ''}Не спрашивать",
                     callback_data="set_speaker_mapping_off"
                 )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -150,10 +142,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             )
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -204,10 +193,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 logger.warning(f"Сброс: настройка сопоставления не сброшена: {e}")
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             if done:
@@ -283,7 +269,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 )
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message, stats_text,
@@ -342,10 +328,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     "❌ Нет доступных моделей.\n\n"
                     "Используйте /add_model чтобы добавить модель.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="⬅️ Назад к настройкам",
-                            callback_data="back_to_settings",
-                        )]
+                        [BACK_TO_SETTINGS]
                     ]),
                 )
                 await callback.answer()
@@ -359,10 +342,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{marker}{p['name']}",
                     callback_data=f"set_active_model_{p['key']}",
                 )])
-            rows.append([InlineKeyboardButton(
-                text="⬅️ Назад к настройкам",
-                callback_data="back_to_settings",
-            )])
+            rows.append([BACK_TO_SETTINGS])
 
             await safe_edit_text(
                 callback.message,
@@ -413,10 +393,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 f"✅ Активная модель: <b>{esc(model_name)}</b>\n\n"
                 "Бот будет использовать эту модель для всех обработок.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings",
-                    )]
+                    [BACK_TO_SETTINGS]
                 ]),
                 parse_mode="HTML",
             )

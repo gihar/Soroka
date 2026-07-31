@@ -326,9 +326,7 @@ def create_mapping_keyboard(
                 ).pack()
             )])
 
-        # Разделитель и основные действия
-        keyboard_buttons.append([])  # Пустая строка для разделения
-
+        # Основные действия
         keyboard_buttons.append([InlineKeyboardButton(
             text="Подтвердить и продолжить",
             callback_data=SmConfirm(user_id=user_id).pack()

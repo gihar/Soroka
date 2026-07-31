@@ -13,6 +13,7 @@ from src.models.template import TemplateCreate
 from src.services import TemplateService
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux.html_text import esc
+from src.ux.message_builder import SOMETHING_WENT_WRONG
 
 
 class TemplateStates(StatesGroup):
@@ -52,7 +53,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в add_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
 
     @router.callback_query(F.data == "create_template")
     async def create_template_callback(callback: CallbackQuery, state: FSMContext):
@@ -69,7 +70,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в create_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
 
     @router.callback_query(F.data == "cancel_template_creation")
     async def cancel_template_creation_callback(callback: CallbackQuery, state: FSMContext):
@@ -80,7 +81,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в cancel_template_creation_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
     
     @router.message(TemplateStates.waiting_for_name)
     async def template_name_handler(message: Message, state: FSMContext):
@@ -225,7 +226,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в edit_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
     
     @router.callback_query(TemplateStates.preview_template, F.data == "cancel_template")
     async def cancel_template_callback(callback: CallbackQuery, state: FSMContext):
@@ -239,7 +240,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             await callback.answer()
         except Exception as e:
             logger.error(f"Ошибка в cancel_template_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
     
     return router
 

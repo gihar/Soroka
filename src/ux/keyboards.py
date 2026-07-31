@@ -12,6 +12,17 @@ from src.utils.template_sort import sort_templates_by_name
 
 _Row = List[InlineKeyboardButton]
 
+# Кнопка возврата в настройки: 14 копий одного литерала в двух модулях
+# (критика v11). Кнопка неизменяемая по смыслу, поэтому живёт готовым объектом.
+BACK_TO_SETTINGS = InlineKeyboardButton(
+    text="⬅️ Назад к настройкам", callback_data="back_to_settings"
+)
+
+
+def back_to_settings_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура из одной кнопки возврата — самая частая раскладка настроек."""
+    return InlineKeyboardMarkup(inline_keyboard=[[BACK_TO_SETTINGS]])
+
 
 def build_template_picker(
     templates: Sequence,

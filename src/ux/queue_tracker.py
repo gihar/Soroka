@@ -126,30 +126,6 @@ class QueuePositionTracker:
         except Exception as e:
             logger.error(f"Ошибка обновления трекера очереди: {e}")
     
-    async def show_processing_started(self):
-        """Показать, что обработка началась"""
-        if not self.is_active or not self.message_id:
-            return
-        
-        try:
-            text = (
-                "<b>Начинаю обработку файла</b>\n\n"
-                "⏳ Подготовка к обработке..."
-            )
-            
-            result = await safe_bot_edit_message(
-                self.bot,
-                chat_id=self.chat_id,
-                message_id=self.message_id,
-                text=text,
-                parse_mode="HTML"
-            )
-            if result is not None:
-                self._last_text = text
-            
-        except Exception as e:
-            logger.error(f"Ошибка отображения начала обработки: {e}")
-    
     async def show_cancelled(self):
         """Показать, что задача отменена"""
         if not self.is_active or not self.message_id:

@@ -11,7 +11,7 @@ from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import sort_templates_by_name
 from src.ux.html_text import esc
-from src.ux.message_builder import TEMPLATES_EMPTY, TEMPLATES_LOAD_FAILED
+from src.ux.message_builder import SOMETHING_WENT_WRONG, TEMPLATES_EMPTY, TEMPLATES_LOAD_FAILED
 
 from .helpers import _safe_callback_answer
 
@@ -297,7 +297,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
         except Exception as e:
             logger.error(f"Ошибка в back_to_template_categories_callback: {e}")
-            await callback.answer("❌ Произошла ошибка")
+            await callback.answer(SOMETHING_WENT_WRONG)
 
     @router.callback_query(F.data == "smart_template_selection")
     async def smart_template_selection_callback(callback: CallbackQuery, state: FSMContext):
@@ -425,7 +425,7 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
 
         except Exception as e:
             logger.error(f"Ошибка в back_to_template_selection_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка")
+            await _safe_callback_answer(callback, SOMETHING_WENT_WRONG)
 
     @router.callback_query(F.data.startswith("quick_category_"))
     async def quick_category_callback(callback: CallbackQuery, state: FSMContext):

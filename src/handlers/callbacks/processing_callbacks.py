@@ -12,6 +12,7 @@ from src.services.participants_service import participants_service
 from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
+from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 
 from .helpers import _safe_callback_answer
 
@@ -64,16 +65,14 @@ async def _process_file(callback: CallbackQuery, state: FSMContext, processing_s
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await safe_edit_text(callback.message,
-                    "❌ Запись потерялась.\n"
-                    "Пришлите ссылку ещё раз."
+                    RECORD_LOST_LINK
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await safe_edit_text(callback.message,
-                    "❌ Запись потерялась.\n"
-                    "Отправьте файл ещё раз."
+                    RECORD_LOST_FILE
                 )
                 await state.clear()
                 return
@@ -276,8 +275,14 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
         """Configure: show participants menu (full flow)"""
         try:
             from src.handlers.participants_handlers import show_participants_menu
-            # Remove original keyboard to prevent re-triggering quick_process
-            await safe_edit_text(callback.message, "⚙️ Настройка обработки...")
+
+            # Кнопки «Файл получен» должны перестать работать, но подменять его
+            # текст служебным огрызком незачем: тот оставался в чате навсегда и
+            # ничего не сообщал (критика v11). Снимаем клавиатуру, текст живёт.
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.debug(f"Клавиатуру записи уже не убрать: {e}")
             # callback.message принадлежит боту — передаём реального пользователя явно
             await show_participants_menu(
                 callback.message, user_service,

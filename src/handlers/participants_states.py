@@ -37,11 +37,3 @@ class FeedbackInput(StatesGroup):
     (критика v11).
     """
     waiting_for_comment = State()  # Ожидание одного сообщения текстом
-
-
-class ProtocolInfoState(StatesGroup):
-    """Состояния для ввода дополнительной информации о протоколе"""
-    waiting_agenda = State()  # Ожидание ввода повестки встречи
-    waiting_project_list = State()  # Ожидание ввода списка проектов
-
-
