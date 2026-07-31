@@ -36,6 +36,7 @@ class Database:
                     preferred_openai_model_key TEXT,
                     default_template_id INTEGER,
                     protocol_output_mode TEXT DEFAULT 'messages',
+                    speaker_mapping_enabled INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (default_template_id) REFERENCES templates (id)
@@ -151,6 +152,14 @@ class Database:
             try:
                 await db.execute("ALTER TABLE users ADD COLUMN protocol_output_mode TEXT DEFAULT 'messages'")
                 logger.info("Добавлено поле protocol_output_mode в таблицу users (по умолчанию 'messages')")
+            except Exception:
+                # Поле уже существует, пропускаем
+                pass
+            # Миграция: выключатель карточки сопоставления (NULL — как решил
+            # администратор; 0/1 — явный выбор пользователя)
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN speaker_mapping_enabled INTEGER")
+                logger.info("Добавлено поле speaker_mapping_enabled в таблицу users")
             except Exception:
                 # Поле уже существует, пропускаем
                 pass

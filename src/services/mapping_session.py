@@ -89,6 +89,25 @@ class MappingSessionStore:
         self._timestamps.pop(user_id, None)
         return self._sessions.pop(user_id, None)
 
+    def take_regardless(self, user_id: int) -> Optional[MappingSession]:
+        """Изъять сессию, не проверяя TTL — для авто-доставки по таймауту.
+
+        ``peek``/``take`` считают просроченную сессию мёртвой, и это правильно
+        для карточки. Но внутри неё лежит готовая расшифровка — самая дорогая
+        часть конвейера, и выбрасывать её нельзя: по таймауту обработка
+        доводится до конца с тем сопоставлением, что успел ввести пользователь.
+
+        Атомарность та же, что у ``take``: успел пользователь подтвердить —
+        таймер получит None и второй доставки не будет.
+        """
+        self._timestamps.pop(user_id, None)
+        return self._sessions.pop(user_id, None)
+
+    @property
+    def ttl_seconds(self) -> float:
+        """TTL хранилища в секундах — таймер авто-доставки считает срок от него."""
+        return self._ttl.total_seconds()
+
     def discard(self, user_id: int) -> None:
         """Выбросить сессию (UI не показался — пауза не состоялась)."""
         self._sessions.pop(user_id, None)

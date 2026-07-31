@@ -40,6 +40,17 @@ class UserRepository:
             )
             await db.commit()
 
+    async def update_speaker_mapping_preference(self, telegram_id: int,
+                                                enabled: Optional[bool]) -> None:
+        """Выключатель карточки сопоставления. ``None`` — вернуться к общему правилу."""
+        async with self._db.connect() as db:
+            await db.execute(
+                "UPDATE users SET speaker_mapping_enabled = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
+                (None if enabled is None else int(enabled), telegram_id)
+            )
+            await db.commit()
+
     async def set_default_template(self, telegram_id: int, template_id: int) -> bool:
         """Set default template for user."""
         async with self._db.connect() as db:

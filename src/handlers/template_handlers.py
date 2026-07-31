@@ -191,7 +191,7 @@ def setup_template_handlers(template_service: TemplateService) -> Router:
             
             await safe_edit_text(
                 callback.message,
-                f"✅ <b>Шаблон успешно создан!</b>\n\n"
+                f"✅ <b>Шаблон создан</b>\n\n"
                 f"<b>Название:</b> {esc(created_template.name)}\n"
                 f"<b>ID:</b> {esc(created_template.id)}\n\n"
                 f"Теперь вы можете использовать этот шаблон при обработке файлов.",
@@ -277,7 +277,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Сохранить", callback_data="save_template"),
+                InlineKeyboardButton(text="Сохранить", callback_data="save_template"),
                 InlineKeyboardButton(text="Изменить", callback_data="edit_template")
             ],
             [

@@ -16,14 +16,16 @@ from src.utils.template_sort import category_label  # noqa: E402
 
 
 def test_known_categories_have_house_labels():
-    assert category_label("general") == "📋 Общие"
-    assert category_label("technical") == "⚙️ Технические"
-    assert category_label("management") == "👔 Управленческие"
-    assert category_label("educational") == "🎓 Образовательные"
+    # Глифы сняты (критика v10): 📋 уже значит «Повестка дня» в протоколе,
+    # ⚙️ — «Настройки». Глиф с двумя значениями не маркирует ничего.
+    assert category_label("general") == "Общие"
+    assert category_label("technical") == "Технические"
+    assert category_label("management") == "Управленческие"
+    assert category_label("educational") == "Образовательные"
 
 
 def test_all_category_label():
-    assert category_label("all") == "📝 Все шаблоны"
+    assert category_label("all") == "Все шаблоны"
 
 
 def test_unknown_category_keeps_original_case():

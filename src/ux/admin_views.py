@@ -11,6 +11,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.ux.html_text import esc
 
+# Отказ в доступе был размножен по четырнадцати местам админской поверхности
+# (критика v10). Одна формулировка — одно место.
+ACCESS_DENIED = "❌ Недостаточно прав для выполнения команды."
+
 # Статус здоровья компонента → лексиконный глиф (один глиф = одно значение).
 _HEALTH_GLYPH = {
     "healthy": "✅",

@@ -11,6 +11,7 @@ from loguru import logger
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import template_name_of
 from src.ux.keyboards import build_template_picker
+from src.ux.message_builder import PROTOCOL_GONE
 
 from .helpers import _safe_callback_answer
 
@@ -35,7 +36,7 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             )
             if not row or not (row.get("result_text") or "").strip():
                 await _safe_callback_answer(
-                    callback, "Протокол не найден — возможно, история очищена."
+                    callback, PROTOCOL_GONE
                 )
                 return
 
@@ -70,7 +71,7 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             )
             if not row or not (row.get("result_text") or "").strip():
                 await _safe_callback_answer(
-                    callback, "Протокол не найден — возможно, история очищена."
+                    callback, PROTOCOL_GONE
                 )
                 return
 
@@ -162,7 +163,7 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             )
             if not row:
                 await _safe_callback_answer(
-                    callback, "Протокол не найден — возможно, история очищена."
+                    callback, PROTOCOL_GONE
                 )
                 return
             if not (row.get("transcription_text") or "").strip():

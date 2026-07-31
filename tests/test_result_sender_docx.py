@@ -107,8 +107,11 @@ async def test_primary_delivery_in_docx_mode_sends_word_file(monkeypatch):
     assert filename.endswith(".docx")
     doc = Document(io.BytesIO(data))
     assert any(p.style.name == "List Number" for p in doc.paragraphs)
-    # Матрица кнопок: Word уже доставлен — прячем его, оставляем PDF + перегенерацию.
-    assert _keyboard_datas(markup) == {"proto_pdf_7", "proto_regen_7"}
+    # Матрица кнопок: Word уже доставлен — прячем его, оставляем PDF,
+    # перегенерацию и правку шапки (критика v10: дату надо чем-то чинить).
+    assert _keyboard_datas(markup) == {
+        "proto_pdf_7", "proto_regen_7", "proto_header_7",
+    }
 
 
 @pytest.mark.asyncio

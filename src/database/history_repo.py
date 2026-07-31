@@ -57,6 +57,26 @@ class HistoryRepository:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    async def update_result_text(self, history_id: int, telegram_id: int,
+                                 result_text: str) -> bool:
+        """Заменить текст протокола в записи истории. Возвращает факт правки.
+
+        Нужна правке шапки («Дата и название»): исправленный документ должен
+        стать каноном, иначе следующий «PDF» отдаст прежнюю неверную дату.
+        Владение проверяется в самом UPDATE — ``history_id`` приходит из
+        callback_data, как и в ``get_result_for_user``.
+        """
+        async with self._db.connect() as db:
+            cursor = await db.execute("""
+                UPDATE processing_history
+                SET result_text = ?
+                WHERE id = ? AND user_id = (
+                    SELECT id FROM users WHERE telegram_id = ?
+                )
+            """, (result_text, history_id, telegram_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
     async def get_user_stats(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """Get user statistics computed from processing history."""
         async with self._db.connect() as db:

@@ -39,6 +39,30 @@ def with_protocol_date_fallback(
     return {**protocol_data, "date": fallback}
 
 
+def protocol_date_source(
+    protocol_data: Dict[str, Any],
+    *,
+    meeting_date: Optional[str],
+) -> str:
+    """Откуда взялась дата протокола: ``llm`` / ``request`` / ``processing``.
+
+    Читатель пересылает протокол «наверх» и не может отличить дату встречи от
+    дня обработки — а по признанию самого фолбэка (см.
+    ``with_protocol_date_fallback``) день обработки это штатный путь. Различить
+    «знаем» и «подставили» нужно ДО фолбэка, поэтому источник считается
+    отдельной чистой функцией, а не выводится из уже заполненного поля.
+
+    Порядок веток обязан совпадать с ``with_protocol_date_fallback``, иначе
+    метка соврёт о том, что в итоге попало в шапку.
+    """
+    existing = protocol_data.get("date")
+    if isinstance(existing, str) and existing.strip():
+        return "llm"
+    if (meeting_date or "").strip():
+        return "request"
+    return "processing"
+
+
 def with_protocol_title_fallback(
     protocol_data: Dict[str, Any],
     *,

@@ -35,6 +35,7 @@ from src.ux.speaker_mapping_callback_data import (
     SmSkip,
     SmSkipConfirm,
 )
+from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_ui import (
     create_skip_confirm_keyboard,
     format_skip_confirm_message,
@@ -262,8 +263,9 @@ async def _apply_subview_name(
     names = participants_service.parse_manual_names(message.text)
     if len(names) >= 2:
         await message.answer(
-            f"Здесь ждём одно имя — для {speaker_id}. Несколько имён можно "
-            "отправить из общего вида карточки (◀️ Назад)."
+            f"Здесь ждём одно имя — для «{humanize_speaker_label(speaker_id)}». "
+            "Несколько имён можно отправить из общего вида карточки "
+            "(«⬅️ Назад»)."
         )
         return
 
@@ -275,7 +277,7 @@ async def _apply_subview_name(
     if new_list is None:
         await message.answer(
             "Имя должно быть 2–50 символов и не начинаться с «/».\n"
-            "Отправьте имя ещё раз или нажмите «◀️ Назад»."
+            "Отправьте имя ещё раз или нажмите «⬅️ Назад»."
         )
         return
 
@@ -368,7 +370,7 @@ async def speaker_mapping_cancel_callback(
     callback: CallbackQuery, callback_data: SmCancel, state: FSMContext,
     user_id: int, session: MappingSession,
 ) -> None:
-    """sm_cancel: «◀️ Назад» — закрыть под-вид спикера, вернуться к главному виду.
+    """sm_cancel: «⬅️ Назад» — закрыть под-вид спикера, вернуться к главному виду.
 
     Снимает ``editing_speaker``: следующее текстовое сообщение уже не ловится
     как имя, а уходит в обычную обработку записи.

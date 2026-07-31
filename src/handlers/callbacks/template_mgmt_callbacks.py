@@ -13,6 +13,7 @@ from src.utils.telegram_safe import safe_edit_text
 from src.utils.template_sort import category_label, sort_templates_by_name
 from src.ux.html_text import esc
 from src.ux.keyboards import build_template_picker
+from src.ux.message_builder import TEMPLATES_EMPTY, TEMPLATES_LOAD_FAILED
 
 from .helpers import _safe_callback_answer
 
@@ -131,7 +132,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
+                    InlineKeyboardButton(text="Да, удалить", callback_data=f"confirm_delete_template_{template_id}"),
                     InlineKeyboardButton(text="Отмена", callback_data=f"view_template_{template_id}")
                 ]
             ])
@@ -234,7 +235,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
         except Exception as e:
             logger.error(f"Ошибка в back_to_templates_callback: {e}")
-            await callback.answer("❌ Произошла ошибка при загрузке шаблонов")
+            await callback.answer(TEMPLATES_LOAD_FAILED)
 
     @router.callback_query(F.data == "settings_default_template")
     async def settings_default_template_callback(callback: CallbackQuery):
@@ -395,8 +396,7 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
             if not templates:
                 await safe_edit_text(callback.message,
-                    "❌ <b>Шаблоны не найдены</b>\n\n"
-                    "Обратитесь к администратору.",
+                    TEMPLATES_EMPTY,
                     parse_mode="HTML"
                 )
                 return
@@ -440,6 +440,6 @@ def setup_template_mgmt_callbacks(user_service: UserService, template_service: T
 
         except Exception as e:
             logger.error(f"Ошибка в quick_set_default_callback: {e}")
-            await _safe_callback_answer(callback, "❌ Произошла ошибка при загрузке шаблонов")
+            await _safe_callback_answer(callback, TEMPLATES_LOAD_FAILED)
 
     return router

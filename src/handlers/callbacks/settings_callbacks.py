@@ -9,6 +9,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
+from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 
 def setup_settings_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
@@ -25,19 +26,19 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'messages' else ''}В сообщение",
+                    text=f"{SELECTED_MARK + ' ' if current == 'messages' else ''}В сообщение",
                     callback_data="set_protocol_output_messages"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'file' else ''}В файл Markdown",
+                    text=f"{SELECTED_MARK + ' ' if current == 'file' else ''}В файл Markdown",
                     callback_data="set_protocol_output_file"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'pdf' else ''}В файл PDF",
+                    text=f"{SELECTED_MARK + ' ' if current == 'pdf' else ''}В файл PDF",
                     callback_data="set_protocol_output_pdf"
                 )],
                 [InlineKeyboardButton(
-                    text=f"{'✅ ' if current == 'docx' else ''}В файл Word",
+                    text=f"{SELECTED_MARK + ' ' if current == 'docx' else ''}В файл Word",
                     callback_data="set_protocol_output_docx"
                 )],
                 [InlineKeyboardButton(
@@ -95,6 +96,76 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         except Exception as e:
             logger.error(f"Ошибка в set_protocol_output_mode_callback: {e}")
             await callback.answer("❌ Не удалось изменить режим вывода")
+
+    @router.callback_query(F.data == "settings_speaker_mapping")
+    async def settings_speaker_mapping_callback(callback: CallbackQuery):
+        """Спрашивать ли имена спикеров перед генерацией протокола."""
+        try:
+            from src.config import settings as app_settings
+            from src.services.mapping_preference import should_confirm_mapping
+
+            user = await user_service.get_user_by_telegram_id(callback.from_user.id)
+            enabled = should_confirm_mapping(
+                user,
+                global_default=app_settings.enable_speaker_mapping_confirmation,
+            )
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{SELECTED_MARK + ' ' if enabled else ''}Спрашивать",
+                    callback_data="set_speaker_mapping_on"
+                )],
+                [InlineKeyboardButton(
+                    text=f"{SELECTED_MARK + ' ' if not enabled else ''}Не спрашивать",
+                    callback_data="set_speaker_mapping_off"
+                )],
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к настройкам",
+                    callback_data="back_to_settings"
+                )]
+            ])
+
+            await safe_edit_text(callback.message,
+                "<b>Сопоставление спикеров</b>\n\n"
+                "Перед генерацией протокола бот показывает карточку и предлагает "
+                "назвать голоса из записи.\n"
+                "• Спрашивать — в протоколе будут имена участников\n"
+                "• Не спрашивать — протокол придёт быстрее, голоса останутся "
+                "«Участник 1», «Участник 2»",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в settings_speaker_mapping_callback: {e}")
+            await callback.answer("Не удалось загрузить настройки, попробуйте ещё раз")
+
+    @router.callback_query(F.data.in_({"set_speaker_mapping_on", "set_speaker_mapping_off"}))
+    async def set_speaker_mapping_callback(callback: CallbackQuery):
+        """Сохранить выбор «спрашивать / не спрашивать»."""
+        try:
+            enabled = callback.data.endswith("_on")
+            await user_service.update_speaker_mapping_preference(
+                callback.from_user.id, enabled
+            )
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="⬅️ Назад к настройкам",
+                    callback_data="back_to_settings"
+                )]
+            ])
+
+            await safe_edit_text(callback.message,
+                "✅ Имена спикеров: спрашиваю перед протоколом"
+                if enabled else
+                "✅ Имена спикеров: не спрашиваю, протокол придёт сразу",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Ошибка в set_speaker_mapping_callback: {e}")
+            await callback.answer("❌ Не удалось сохранить настройку")
 
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
@@ -255,7 +326,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             active_key = await app_settings_repo.get_active_model_key()
             rows = []
             for p in presets:
-                marker = "✅ " if p["key"] == active_key else ""
+                marker = SELECTED_MARK + " " if p["key"] == active_key else ""
                 rows.append([InlineKeyboardButton(
                     text=f"{marker}{p['name']}",
                     callback_data=f"set_active_model_{p['key']}",

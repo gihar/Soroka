@@ -77,12 +77,12 @@ def test_messages_mode_offers_pdf_and_word_side_by_side():
 
 def test_pdf_mode_hides_pdf_keeps_word():
     datas = _keyboard_datas(result_sender._protocol_actions_keyboard(9, "pdf"))
-    assert datas == {"proto_docx_9", "proto_regen_9"}
+    assert datas == {"proto_docx_9", "proto_regen_9", "proto_header_9"}
 
 
 def test_docx_mode_hides_word_keeps_pdf():
     datas = _keyboard_datas(result_sender._protocol_actions_keyboard(9, "docx"))
-    assert datas == {"proto_pdf_9", "proto_regen_9"}
+    assert datas == {"proto_pdf_9", "proto_regen_9", "proto_header_9"}
 
 
 def test_no_keyboard_without_history_id():
@@ -117,7 +117,7 @@ async def test_last_part_carries_action_buttons(monkeypatch):
     assert len(parts) > 1
     # кнопки только на последней части — под документом (PDF + Word + перегенерация)
     assert _keyboard_datas(parts[-1].get("reply_markup")) == {
-        "proto_pdf_7", "proto_docx_7", "proto_regen_7"
+        "proto_pdf_7", "proto_docx_7", "proto_regen_7", "proto_header_7"
     }
     for part in parts[:-1]:
         assert part.get("reply_markup") is None
@@ -174,7 +174,7 @@ async def test_pdf_document_offers_word_and_regen(monkeypatch):
     assert len(documents) == 1
     datas = _keyboard_datas(documents[0].get("reply_markup"))
     # PDF уже в руках — его не предлагаем снова, но Word ещё можно получить.
-    assert datas == {"proto_docx_9", "proto_regen_9"}
+    assert datas == {"proto_docx_9", "proto_regen_9", "proto_header_9"}
 
 
 # ---------------------------------------------------------------------------

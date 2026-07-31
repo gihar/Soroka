@@ -54,11 +54,14 @@ def _datas(markup):
 
 
 def _checked_texts(markup):
+    # Маркер выбора — ✓ (критика v10): ✅ значит «сделано», а не «выбрано».
+    from src.ux.speaker_mapping_ui import SELECTED_MARK
+
     return [
         btn.text
         for row in markup.inline_keyboard
         for btn in row
-        if btn.text.startswith("✅")
+        if btn.text.startswith(SELECTED_MARK)
     ]
 
 

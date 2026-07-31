@@ -274,7 +274,12 @@ class EnhancedTelegramBot:
             
             # 8. Проверяем доступность компонентов
             await self._perform_startup_checks()
-            
+
+            # 8.5. Меню команд Telegram: без него кнопка «/» пуста, и команды
+            # живут только в приветственном пузыре, куда никто не возвращается.
+            from src.ux.command_menu import publish_command_menu
+            await publish_command_menu(self.bot)
+
             # 9. Запускаем бота
             logger.info("Бот с системой надежности запущен и готов к работе")
             await self.dp.start_polling(self.bot)

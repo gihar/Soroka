@@ -15,6 +15,14 @@ from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux import admin_views
 from src.ux.html_text import esc
+from src.ux.admin_views import ACCESS_DENIED
+
+# Отказ статистики размножился по пяти хендлерам (критика v10). Текст
+# исключения пользователю не показываем — он уже в логе.
+_STATS_FAILED = (
+    "❌ Не удалось собрать статистику.\n"
+    "Попробуйте ещё раз через минуту."
+)
 
 # Импорт сервиса очистки
 try:
@@ -32,7 +40,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def status_handler(message: Message):
         """Обработчик команды /status - статус системы"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -46,7 +54,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def health_handler(message: Message):
         """Обработчик команды /health - детальная проверка здоровья"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -65,7 +73,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def stats_handler(message: Message):
         """Обработчик команды /stats - детальная статистика"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -132,13 +140,13 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка в stats_handler: {e}")
-            await message.answer(f"❌ Ошибка при получении статистики: {e}")
+            await message.answer(_STATS_FAILED)
     
     @router.message(Command("reset_reliability"))
     async def reset_reliability_handler(message: Message):
         """Обработчик команды /reset_reliability - сброс компонентов надежности"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -164,7 +172,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def export_stats_handler(message: Message):
         """Обработчик команды /export_stats - экспорт статистики в JSON"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -204,7 +212,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def transcription_mode_handler(message: Message):
         """Обработчик команды /transcription_mode - переключение режима транскрипции"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -219,7 +227,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def admin_help_handler(message: Message):
         """Обработчик команды /admin_help - справка по административным командам"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         await safe_answer(message, admin_views.admin_help_text(), parse_mode="HTML")
@@ -228,7 +236,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def performance_handler(message: Message):
         """Обработчик команды /performance - статистика производительности"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -247,13 +255,13 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка в performance_handler: {e}")
-            await message.answer(f"❌ Ошибка при получении статистики: {e}")
+            await message.answer(_STATS_FAILED)
     
     @router.message(Command("optimize"))
     async def optimize_handler(message: Message):
         """Обработчик команды /optimize - принудительная оптимизация"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         try:
@@ -287,7 +295,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def cleanup_handler(message: Message):
         """Обработчик команды /cleanup - управление очисткой файлов"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         if not CLEANUP_SERVICE_AVAILABLE:
@@ -308,13 +316,13 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка в cleanup_handler: {e}")
-            await message.answer(f"❌ Ошибка при получении статистики: {e}")
+            await message.answer(_STATS_FAILED)
     
     @router.message(Command("cleanup_force"))
     async def cleanup_force_handler(message: Message):
         """Обработчик команды /cleanup_force - принудительная очистка"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
         
         if not CLEANUP_SERVICE_AVAILABLE:
@@ -401,7 +409,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             await safe_edit_text(callback.message, report, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка в admin_performance_callback: {e}")
-            await safe_edit_text(callback.message, f"❌ Ошибка при получении статистики: {e}")
+            await safe_edit_text(callback.message, _STATS_FAILED)
     
     @router.callback_query(F.data == "admin_cleanup")
     async def admin_cleanup_callback(callback: CallbackQuery):
@@ -430,7 +438,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             await safe_edit_text(callback.message, report, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка в admin_cleanup_callback: {e}")
-            await safe_edit_text(callback.message, f"❌ Ошибка при получении статистики: {e}")
+            await safe_edit_text(callback.message, _STATS_FAILED)
     
     @router.callback_query(F.data == "admin_transcription")
     async def admin_transcription_callback(callback: CallbackQuery):
@@ -629,7 +637,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def add_model_handler(message: Message):
         """Добавление модели: /add_model model_id \"Name\" base_url [api_key]"""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
 
         import re
@@ -699,7 +707,7 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
     async def models_handler(message: Message):
         """Список всех моделей с inline-кнопками."""
         if not is_admin(message.from_user.id):
-            await message.answer("❌ Недостаточно прав для выполнения команды.")
+            await message.answer(ACCESS_DENIED)
             return
 
         try:

@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery
 from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
+from src.services.participants_service import participants_service
 from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
@@ -239,12 +240,25 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             # determined by the admin-configured active preset at processing time.
             llm_provider = 'openai'
 
+            # Сохранённый список участников — часть тех самых «сохранённых
+            # настроек», которые обещает кнопка. Раньше он молча обнулялся, и
+            # карточка сопоставления становилась длиннее именно у того, кто
+            # выбрал быстрый путь.
+            participants_list = None
+            if user and getattr(user, 'saved_participants', None):
+                try:
+                    participants_list = participants_service.participants_from_json(
+                        user.saved_participants
+                    ) or None
+                except Exception as e:
+                    logger.warning(f"Не удалось прочитать сохранённых участников: {e}")
+
             # Set state and process
             await state.update_data(
                 template_id=template_id,
                 use_smart_selection=(template_id == 0),
                 llm_provider=llm_provider,
-                participants_list=None
+                participants_list=participants_list
             )
 
             await safe_edit_text(callback.message,

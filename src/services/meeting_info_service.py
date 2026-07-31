@@ -10,6 +10,10 @@ from loguru import logger
 
 from src.models.meeting_info import MeetingInfo, MeetingParticipant
 
+# Тема не найдена в тексте. Значение служебное: оно управляет предупреждением
+# и НЕ показывается пользователю как данные (см. format_meeting_info_for_display).
+_TOPIC_MISSING = "Не указана"
+
 
 class MeetingInfoService:
     """Сервис для извлечения информации о встрече из текста"""
@@ -70,7 +74,7 @@ class MeetingInfoService:
 
             # Создаем MeetingInfo
             meeting_info = MeetingInfo(
-                topic=topic or "Не указана",
+                topic=topic or _TOPIC_MISSING,
                 participants=participants,
                 **date_time_info
             )
@@ -390,8 +394,11 @@ class MeetingInfoService:
 
         lines = []
 
-        # Тема
-        lines.append(f"📋 <b>Тема:</b> {escape_telegram_html(meeting_info.topic)}")
+        # Тема. Плейсхолдер «Не указана» — не данные: строка с ним показывала
+        # выдуманный факт, а сразу под ней шло предупреждение о том же самом
+        # отсутствии. Ничего пустого: нет темы — нет строки (PRODUCT.md, №3).
+        if meeting_info.topic and meeting_info.topic != _TOPIC_MISSING:
+            lines.append(f"📋 <b>Тема:</b> {escape_telegram_html(meeting_info.topic)}")
 
         # Время
         if meeting_info.start_time:
@@ -420,7 +427,7 @@ class MeetingInfoService:
         warnings = []
         
         # Проверяем тему - если не указана, добавляем предупреждение, но не блокируем
-        if not meeting_info.topic or meeting_info.topic == "Не указана":
+        if not meeting_info.topic or meeting_info.topic == _TOPIC_MISSING:
             warnings.append("⚠️ Тема встречи не указана, будет использовано значение по умолчанию")
 
         # Строгая проверка участников - это критично

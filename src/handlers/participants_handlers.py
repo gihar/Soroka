@@ -15,8 +15,20 @@ from src.exceptions.file import FileError
 from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
+from src.utils.date_format import format_russian_date
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux.html_text import esc
+
+# Формулировки, нужные нескольким хендлерам этого модуля: одна на всех, иначе
+# правка голоса поправит одну копию из трёх (критика v10).
+_FORM_OPEN_FAILED = (
+    "❌ Не удалось открыть форму.\n"
+    "Попробуйте ещё раз."
+)
+_CONTINUE_FAILED = (
+    "❌ Не удалось продолжить.\n"
+    "Отправьте запись заново."
+)
 
 
 async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
@@ -150,8 +162,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при запросе автоизвлечения: {e}")
             await callback.message.answer(
-                "❌ Не удалось открыть форму.\n"
-                "Попробуйте ещё раз."
+                _FORM_OPEN_FAILED
             )
 
     @router.callback_query(F.data == "input_new_participants")
@@ -165,14 +176,20 @@ def setup_participants_handlers() -> Router:
                 [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
             ])
 
-            await safe_answer(callback.message, 
-                "<b>Введите список участников</b>\n\n"
-                "Отправьте список участников текстом (один участник на строку).\n\n"
-                "<b>Примеры форматов:</b>\n"
+            # Дата встречи — единственный реквизит, которого нет в аудио: без
+            # неё в шапку уходит день обработки. Приглашение отдаёт её вместе с
+            # темой и участниками, поэтому подсказка про него стоит первой —
+            # раньше эта возможность работала, но нигде не была описана.
+            await safe_answer(callback.message,
+                "<b>Кто был на встрече и когда она была?</b>\n\n"
+                "Пришлите приглашение или письмо целиком — возьму оттуда "
+                "участников, дату и тему.\n\n"
+                "Или просто список участников, по одному на строку:\n"
                 "• <code>Иван Петров, руководитель</code>\n"
                 "• <code>Мария Иванова - разработчик</code>\n"
-                "• <code>Алексей Смирнов (тестировщик)</code>\n"
                 "• <code>Ольга Сидорова</code>\n\n"
+                "Без даты в шапку протокола попадёт день обработки — "
+                "поправить можно и после готового протокола.\n\n"
                 "Или отправьте /cancel для отмены.",
                 reply_markup=keyboard,
                 parse_mode="HTML"
@@ -181,8 +198,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при запросе ввода участников: {e}")
             await callback.message.answer(
-                "❌ Не удалось открыть форму.\n"
-                "Попробуйте ещё раз."
+                _FORM_OPEN_FAILED
             )
     
     @router.callback_query(F.data == "upload_participants_file")
@@ -218,8 +234,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при запросе файла: {e}")
             await callback.message.answer(
-                "❌ Не удалось открыть форму.\n"
-                "Попробуйте ещё раз."
+                _FORM_OPEN_FAILED
             )
     
     @router.callback_query(F.data == "use_saved_participants")
@@ -252,7 +267,7 @@ def setup_participants_handlers() -> Router:
             display_text = participants_service.format_participants_for_display(participants)
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_participants")]
+                [InlineKeyboardButton(text="Использовать", callback_data="confirm_participants")]
             ])
             
             await safe_answer(callback.message,
@@ -287,8 +302,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при пропуске участников: {e}")
             await callback.message.answer(
-                "❌ Не удалось продолжить.\n"
-                "Отправьте запись заново."
+                _CONTINUE_FAILED
             )
     
     @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "text")
@@ -360,7 +374,11 @@ def setup_participants_handlers() -> Router:
                 if meeting_info.topic:
                     await state.update_data(meeting_topic=meeting_info.topic)
                 if meeting_info.start_time:
-                    await state.update_data(meeting_date=meeting_info.start_time.strftime("%d.%m.%Y"))
+                    # Русский формат: дата встаёт в шапку рядом с датой обработки
+                    # («30 июля 2026»), и «27.07.2026» читался бы разнобоем.
+                    await state.update_data(meeting_date=format_russian_date(
+                        meeting_info.start_time
+                    ))
                     await state.update_data(meeting_time=meeting_info.start_time.strftime("%H:%M"))
 
                 await state.set_state(ParticipantsInput.confirm_meeting_info)
@@ -375,7 +393,7 @@ def setup_participants_handlers() -> Router:
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Использовать", callback_data="confirm_meeting_info"),
+                        InlineKeyboardButton(text="Использовать", callback_data="confirm_meeting_info"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_meeting_info")
                     ],
                     [
@@ -401,7 +419,7 @@ def setup_participants_handlers() -> Router:
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
+                        InlineKeyboardButton(text="Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
@@ -459,7 +477,7 @@ def setup_participants_handlers() -> Router:
                 if not is_valid:
                     await safe_answer(message,
                         f"❌ {esc(error_message)}\n"
-                        "Поправьте список в файле и пришлите ещё раз.",
+                        "Поправьте список в файле и отправьте ещё раз.",
                         parse_mode="HTML"
                     )
                     return
@@ -473,7 +491,7 @@ def setup_participants_handlers() -> Router:
                 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_participants"),
+                        InlineKeyboardButton(text="Подтвердить", callback_data="confirm_participants"),
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
@@ -492,7 +510,7 @@ def setup_participants_handlers() -> Router:
                 logger.warning(f"Не удалось разобрать файл участников: {e}")
                 await message.answer(
                     "❌ Не удалось разобрать файл.\n"
-                    "Проверьте формат (.txt или .csv) и пришлите ещё раз."
+                    "Проверьте формат (.txt или .csv) и отправьте ещё раз."
                 )
             finally:
                 # Убеждаемся что файл удален
@@ -534,8 +552,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при подтверждении информации о встрече: {e}")
             await callback.message.answer(
-                "❌ Не удалось продолжить.\n"
-                "Отправьте запись заново."
+                _CONTINUE_FAILED
             )
 
     @router.callback_query(F.data == "save_meeting_info")
@@ -600,8 +617,7 @@ def setup_participants_handlers() -> Router:
         except Exception as e:
             logger.error(f"Ошибка при подтверждении участников: {e}")
             await callback.message.answer(
-                "❌ Не удалось продолжить.\n"
-                "Отправьте запись заново."
+                _CONTINUE_FAILED
             )
     
     @router.callback_query(F.data == "save_and_confirm_participants")
@@ -613,7 +629,7 @@ def setup_participants_handlers() -> Router:
             participants_count = len(participants)
 
             if not participants:
-                await callback.answer("❌ Список участников пуст", show_alert=True)
+                await callback.answer("Список участников пуст", show_alert=True)
                 return
 
             # Сохраняем список для пользователя
