@@ -126,6 +126,13 @@ class QuickActionsUI:
                     callback_data="settings_reset",
                 )
             ],
+            # Выход: единственное меню верхнего уровня, у которого его не было.
+            [
+                InlineKeyboardButton(
+                    text="Закрыть",
+                    callback_data="settings_close",
+                )
+            ],
         ])
 
         return InlineKeyboardMarkup(inline_keyboard=buttons)

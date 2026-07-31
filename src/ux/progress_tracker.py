@@ -12,6 +12,7 @@ from loguru import logger
 
 from src.reliability.telegram_rate_limiter import telegram_rate_limiter
 from src.services import error_presentation
+from src.utils.duration import format_duration
 from src.utils.telegram_safe import safe_edit_text, safe_send_message
 
 
@@ -297,11 +298,7 @@ class ProgressTracker:
         total_sec = int((stage.completed_at - stage.started_at).total_seconds())
         if total_sec < 60:
             return f" · {total_sec}с"
-        minutes, seconds = divmod(total_sec, 60)
-        if minutes < 60:
-            return f" · {minutes}м" + (f" {seconds}с" if seconds else "")
-        hours, rem_min = divmod(minutes, 60)
-        return f" · {hours}ч" + (f" {rem_min}м" if rem_min else "")
+        return f" · {format_duration(total_sec)}"
 
     def _format_progress_text(self, final: bool = False) -> str:
         """Спокойный экран прогресса: один статусный глиф на строку.
@@ -325,10 +322,10 @@ class ProgressTracker:
         total_elapsed = (datetime.now() - self.start_time).total_seconds()
         if final:
             lines.append("")
-            lines.append(f"Время обработки: {total_elapsed:.0f}с")
+            lines.append(f"Время обработки: {format_duration(total_elapsed)}")
         elif total_elapsed > 10:
             lines.append("")
-            lines.append(f"Прошло: {total_elapsed:.0f}с")
+            lines.append(f"Прошло: {format_duration(total_elapsed)}")
 
         return "\n".join(lines)
     

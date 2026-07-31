@@ -280,6 +280,18 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.error(f"Ошибка в settings_stats_callback: {e}")
             await callback.answer("Не удалось загрузить статистику, попробуйте ещё раз")
 
+    @router.callback_query(F.data == "settings_close")
+    async def settings_close_callback(callback: CallbackQuery):
+        """Закрыть меню настроек, не оставляя в чате живых кнопок."""
+        try:
+            await callback.message.delete()
+        except Exception:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.debug(f"Меню настроек уже не закрыть: {e}")
+        await callback.answer()
+
     @router.callback_query(F.data == "back_to_settings")
     async def back_to_settings_callback(callback: CallbackQuery):
         """Обработчик возврата к главному меню настроек"""

@@ -168,8 +168,13 @@ def test_health_report_maps_status_to_lexicon_glyphs():
 
 
 def test_transcription_mode_view_is_html_and_marks_active_with_check():
-    """Режим транскрипции: HTML-текст, кнопки без 🏠☁️🐆, активная помечена ✅."""
+    """Режим транскрипции: HTML-текст, кнопки без 🏠☁️🐆, активная помечена ✓.
+
+    Маркер выбора сменился с ✅ на ✓ в критике v11: ✅ значит «сделано», а этот
+    экран показывает «выбрано». Экран пережил чистку канона в v10.
+    """
     from src.ux.admin_views import transcription_mode_view
+    from src.ux.speaker_mapping_ui import SELECTED_MARK
 
     text, keyboard = transcription_mode_view("cloud")
     _assert_html_canon(text)
@@ -177,7 +182,7 @@ def test_transcription_mode_view_is_html_and_marks_active_with_check():
     labels = _button_texts(keyboard)
     for label in labels:
         assert_only_lexicon(label)
-    active = next(l for l in labels if l.startswith("✅"))
+    active = next(l for l in labels if l.startswith(SELECTED_MARK))
     assert "Облачная" in active
 
 

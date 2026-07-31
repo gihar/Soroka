@@ -26,7 +26,7 @@ class TemplateStates(StatesGroup):
 def _cancel_keyboard() -> InlineKeyboardMarkup:
     """Кнопка выхода из создания шаблона — FSM не должен быть ловушкой."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Отменить", callback_data="cancel_template_creation")
+        InlineKeyboardButton(text="Отмена", callback_data="cancel_template_creation")
     ]])
 
 
@@ -282,7 +282,7 @@ async def _show_template_preview(message: Message, template_data: dict, template
                 InlineKeyboardButton(text="Изменить", callback_data="edit_template")
             ],
             [
-                InlineKeyboardButton(text="Отменить", callback_data="cancel_template")
+                InlineKeyboardButton(text="Отмена", callback_data="cancel_template")
             ]
         ])
         

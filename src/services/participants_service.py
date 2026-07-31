@@ -30,6 +30,13 @@ def is_valid_manual_name(trimmed: str) -> bool:
     return not trimmed.startswith("/")
 
 
+# Границы имени участника. Минимум был всегда, максимума не было (критика
+# v11): имя подставляется в шапку протокола и в список без обрезки, поэтому
+# вставленный абзац раздувал документ и ломал вёрстку.
+MIN_NAME_LENGTH = 2
+MAX_NAME_LENGTH = 100
+
+
 class ParticipantsService:
     """Сервис для парсинга и валидации списка участников"""
     
@@ -68,11 +75,15 @@ class ParticipantsService:
         return participants
     
     def _parse_single_line(self, line: str) -> Optional[Dict[str, str]]:
-        """Парсинг одной строки с участником"""
+        """Парсинг одной строки с участником.
+
+        Строка длиннее ``MAX_NAME_LENGTH`` участником не считается: это почти
+        всегда вставленный абзац письма, а не имя.
+        """
         # Убираем номера списков в начале (1., 2., -, •, etc)
         line = re.sub(r'^[\d\-•*]+[\.\)]\s*', '', line).strip()
         
-        if not line:
+        if not line or len(line) > MAX_NAME_LENGTH:
             return None
         
         # Фильтруем строки с email-полями - они не являются участниками
@@ -102,8 +113,8 @@ class ParticipantsService:
                 name = match.group(1).strip()
                 role = match.group(2).strip()
                 
-                # Валидация: имя должно содержать хотя бы 2 символа
-                if len(name) >= 2:
+                # Валидация: имя в границах MIN_NAME_LENGTH..MAX_NAME_LENGTH
+                if MIN_NAME_LENGTH <= len(name) <= MAX_NAME_LENGTH:
                     participant["name"] = name
                     participant["role"] = role
                     parsed = True
@@ -289,9 +300,12 @@ class ParticipantsService:
             if not participant.get("name"):
                 return False, f"Участник #{i+1} не имеет имени"
             
-            # Проверка минимальной длины имени
-            if len(participant["name"]) < 2:
+            # Проверка длины имени
+            if len(participant["name"]) < MIN_NAME_LENGTH:
                 return False, f"Имя '{participant['name']}' слишком короткое"
+
+            if len(participant["name"]) > MAX_NAME_LENGTH:
+                return False, "Одно из имён слишком длинное — похоже, в список попал текст"
         
         return True, None
     
@@ -310,7 +324,7 @@ class ParticipantsService:
         """
         from src.services.protocol_render.telegram_html import escape_telegram_html
 
-        lines = ["📋 <b>Список участников:</b>\n"]
+        lines = ["<b>Список участников:</b>\n"]
 
         for i, participant in enumerate(participants, 1):
             name = escape_telegram_html(participant["name"])

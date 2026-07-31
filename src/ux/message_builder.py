@@ -185,14 +185,10 @@ class MessageBuilder:
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        """«5 мин 12 с» читается легче, чем «312 с»."""
-        total = int(round(seconds))
-        minutes, secs = divmod(total, 60)
-        if minutes and secs:
-            return f"{minutes} мин {secs} с"
-        if minutes:
-            return f"{minutes} мин"
-        return f"{secs} с"
+        """Один формат длительности на весь продукт (см. utils.duration)."""
+        from src.utils.duration import format_duration
+
+        return format_duration(seconds)
 
     @staticmethod
     def _participants_line(result: Dict[str, Any]) -> str:

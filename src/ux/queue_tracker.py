@@ -9,6 +9,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
+from src.utils.duration import format_duration
 from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
 
 
@@ -70,12 +71,7 @@ class QueuePositionTracker:
         if position > 3:
             # Примерное время ожидания (приблизительно 2-3 минуты на задачу).
             estimated_minutes = position * 2.5
-            if estimated_minutes < 60:
-                time_estimate = f"~{int(estimated_minutes)} мин"
-            else:
-                hours = int(estimated_minutes / 60)
-                minutes = int(estimated_minutes % 60)
-                time_estimate = f"~{hours}ч {minutes}мин" if minutes > 0 else f"~{hours}ч"
+            time_estimate = f"~{format_duration(estimated_minutes * 60)}"
             lines.append(f"Примерное время ожидания: {time_estimate}")
 
         return "\n".join(lines)
