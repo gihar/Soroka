@@ -152,7 +152,12 @@ class MessageBuilder:
         оговорки здесь.
         """
         notes = list(result.get("warnings") or [])
-        if result.get("date_is_assumed"):
+        # В файловых режимах сводка остаётся в чате и с документом не едет —
+        # там оговорка о дате вписана в само тело (критика v11), и повторять её
+        # здесь значит показать её тому, кто и так её видит, и не показать тому,
+        # кому переслали файл.
+        in_chat = (result.get("protocol_output_mode") or "messages") == "messages"
+        if result.get("date_is_assumed") and in_chat:
             notes.append(
                 "📅 Дата в шапке — день обработки: в записи её не нашлось. "
                 "Поправить: кнопка «Дата и название» под протоколом."
