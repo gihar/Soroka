@@ -27,6 +27,7 @@ from src.services.participants_service import (
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.url_detection import contains_url
 from src.ux.card_sender import edit_card
+from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
@@ -35,7 +36,6 @@ from src.ux.speaker_mapping_callback_data import (
     SmSkip,
     SmSkipConfirm,
 )
-from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_ui import (
     create_skip_confirm_keyboard,
     format_skip_confirm_message,

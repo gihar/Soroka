@@ -102,8 +102,6 @@ def test_empty_states_do_not_wear_the_failure_glyph():
 
 def test_lost_state_is_still_a_failure():
     """Обратная сторона правила: потеря файла — сбой, глиф остаётся."""
-    from src.handlers.callbacks import processing_callbacks
-
     strings = _strings(
         _SRC / "handlers" / "callbacks" / "processing_callbacks.py"
     )

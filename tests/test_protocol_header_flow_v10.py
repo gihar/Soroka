@@ -8,7 +8,6 @@
 может прислать кто угодно) — тот же контракт, что у «PDF» и «Другой шаблон».
 """
 
-from types import SimpleNamespace
 
 import pytest
 

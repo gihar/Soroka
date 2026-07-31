@@ -10,7 +10,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
-from src.ux.html_text import esc
 
 
 class QueuePositionTracker:
