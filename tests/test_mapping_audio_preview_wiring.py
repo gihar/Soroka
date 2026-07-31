@@ -30,6 +30,8 @@ def _make_service():
 def _make_args():
     request = SimpleNamespace(
         user_id=7,
+        # Карточка называет запись (критика v11) — имя файла ей нужно.
+        file_name="встреча.mp3",
         participants_list=[{"name": "Иван Иванов"}],
         model_dump=lambda: {},
     )

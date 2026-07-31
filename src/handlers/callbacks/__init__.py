@@ -20,7 +20,9 @@ def setup_callback_handlers(user_service, template_service, processing_service) 
     router.include_router(setup_processing_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_speaker_mapping_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_protocol_actions_callbacks(user_service, template_service))
-    # Правка шапки — после доставки, когда сессии сопоставления уже нет; её
-    # ловец текста привязан к FSM-состоянию и с карточкой не конкурирует.
+    # Правка шапки включена ПОСЛЕ карточки, поэтому приоритет разводится не
+    # порядком, а состоянием: ловец имени спикера отступает, когда открыт любой
+    # FSM-диалог (см. _capturing_speaker_name). До критики v11 здесь стояло
+    # обратное утверждение, и при живой второй записи дата уезжала в имена.
     router.include_router(setup_protocol_header_callbacks())
     return router

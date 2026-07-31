@@ -48,10 +48,10 @@ def _session(mapping=None, user_id=42) -> MappingSession:
 def test_take_regardless_returns_expired_session():
     """Просроченная сессия всё ещё содержит расшифровку — её нужно доработать."""
     store = MappingSessionStore(ttl_seconds=3600)
-    store.save(42, _session())
-    store._timestamps[42] = datetime.now() - timedelta(hours=2)
+    key = store.save(42, _session())
+    store._timestamps[(42, key)] = datetime.now() - timedelta(hours=2)
 
-    assert store.take_regardless(42) is not None
+    assert store.take_regardless(42, key) is not None
 
 
 def test_take_regardless_is_atomic():
@@ -69,8 +69,9 @@ def test_take_regardless_without_session_is_none():
 def test_peek_still_evicts_expired_for_the_card():
     """Карточка по-прежнему считает просроченную сессию мёртвой."""
     store = MappingSessionStore(ttl_seconds=3600)
-    store.save(42, _session())
-    store._timestamps[42] = datetime.now() - timedelta(hours=2)
+    key = store.save(42, _session())
+    # Ключ хранилища — пара «пользователь + запись» (критика v11).
+    store._timestamps[(42, key)] = datetime.now() - timedelta(hours=2)
 
     assert store.peek(42) is None
 

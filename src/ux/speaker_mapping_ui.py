@@ -166,6 +166,7 @@ def build_mapping_card(
     speakers_text: Optional[Dict[str, str]] = None,
     speakers_with_audio: Optional[Set[str]] = None,
     current_editing_speaker: Optional[str] = None,
+    record_name: Optional[str] = None,
 ) -> MappingCard:
     """
     Собрать семантическое содержимое Карточки сопоставления (ADR-0005).
@@ -184,6 +185,8 @@ def build_mapping_card(
             уже в подписи фрагмента, в карточке не дублируется
         current_editing_speaker: спикер открытого под-вида — заголовок называет
             его и приглашает отправить имя (None — главный вид)
+        record_name: имя записи под заголовком — различает карточки, если в чате
+            их несколько (критика v11)
 
     Returns:
         MappingCard с заголовком и строками спикеров в порядке их появления
@@ -224,7 +227,10 @@ def build_mapping_card(
     # одного спикера, повторять «зачем шаг» незачем.
     intro = None if current_editing_speaker else _CARD_INTRO
 
-    return MappingCard(header=header, rows=tuple(rows), hint=hint, intro=intro)
+    return MappingCard(
+        header=header, rows=tuple(rows), hint=hint, intro=intro,
+        record_name=record_name,
+    )
 
 
 def create_mapping_keyboard(
@@ -375,7 +381,8 @@ async def show_mapping_confirmation(
     participants: List[Dict[str, str]],
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
-    speakers_with_audio: Optional[Set[str]] = None
+    speakers_with_audio: Optional[Set[str]] = None,
+    record_name: Optional[str] = None,
 ) -> Optional[Message]:
     """Показать Карточку сопоставления новым сообщением (ADR-0005).
 
@@ -393,6 +400,7 @@ async def show_mapping_confirmation(
         unmapped_speakers,
         speakers_text=speakers_text,
         speakers_with_audio=speakers_with_audio,
+        record_name=record_name,
     )
     keyboard = create_mapping_keyboard(
         speaker_mapping, diarization, participants, user_id
@@ -415,7 +423,8 @@ async def update_mapping_message(
     current_editing_speaker: Optional[str] = None,
     unmapped_speakers: Optional[List[str]] = None,
     speakers_text: Optional[Dict[str, str]] = None,
-    speakers_with_audio: Optional[Set[str]] = None
+    speakers_with_audio: Optional[Set[str]] = None,
+    record_name: Optional[str] = None,
 ) -> bool:
     """Перерисовать Карточку сопоставления на месте (ADR-0005).
 
@@ -433,6 +442,7 @@ async def update_mapping_message(
         speakers_text=speakers_text,
         speakers_with_audio=speakers_with_audio,
         current_editing_speaker=current_editing_speaker,
+        record_name=record_name,
     )
     keyboard = create_mapping_keyboard(
         speaker_mapping,
