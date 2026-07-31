@@ -31,8 +31,46 @@ _CONTINUE_FAILED = (
 )
 
 
-async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
-    """Helper-функция для показа детального меню добавления участников.
+async def dismiss_participants_menu(bot, state: Optional[FSMContext]) -> None:
+    """Погасить кнопки меню участников после ухода потока вперёд.
+
+    Меню оставалось в чате нажимаемым: тап через минуту после старта обработки
+    уводил в ввод участников, выбор шаблона и заканчивался «Запись потерялась»
+    — четыре шага в никуда (критика v11). Best-effort: сообщение могли удалить,
+    и падать из-за этого поток не имеет права.
+    """
+    if state is None:
+        return
+    try:
+        menu = (await state.get_data()).get("participants_menu")
+    except Exception:
+        return
+    if not menu:
+        return
+
+    await state.update_data(participants_menu=None)
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=menu["chat_id"], message_id=menu["message_id"],
+            reply_markup=None,
+        )
+    except Exception as e:
+        logger.debug(f"Меню участников уже не погасить: {e}")
+
+
+async def show_participants_menu(
+    message: Message,
+    user_service: UserService,
+    user_id: Optional[int] = None,
+    state: Optional[FSMContext] = None,
+):
+    """Показать экран «Участники встречи» — он же шаг ввода.
+
+    Экран обещает ввод текстом, поэтому сам его и открывает: до критики v11
+    FSM-состояние здесь не выставлялось, и выполнивший инструкцию дословно
+    получал в ответ «отправьте файл или ссылку». Отдельная кнопка «Добавить
+    участников» после этого не нужна — приглашение осталось только как экран
+    «⬅️ Назад» с подтверждения разбора.
 
     Кнопка сохранённого списка строится по владельцу диалога. При вызове из
     колбэка message принадлежит боту, поэтому реальный ID пользователя нужно
@@ -42,7 +80,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         # Проверяем, есть ли сохраненный список у владельца диалога
         owner_id = user_id if user_id is not None else message.from_user.id
         user = await user_service.get_user_by_telegram_id(owner_id)
-        
+
         keyboard_buttons = []
 
         # Saved participants — show first if available
@@ -57,12 +95,6 @@ async def show_participants_menu(message: Message, user_service: UserService, us
             except Exception:
                 pass
 
-        # Add new participants
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="Добавить участников",
-            callback_data="input_new_participants"
-        )])
-
         # Skip
         keyboard_buttons.append([InlineKeyboardButton(
             text="⏭ Без участников",
@@ -71,18 +103,35 @@ async def show_participants_menu(message: Message, user_service: UserService, us
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
+        # Дата встречи — единственный реквизит, которого нет в аудио: без неё в
+        # шапку уходит день обработки. Приглашение целиком отдаёт её вместе с
+        # темой и участниками, поэтому стоит первым.
         message_text = (
             "<b>Участники встречи</b>\n\n"
-            "Укажите участников для точной атрибуции в протоколе.\n"
-            "Введите имена в любом формате — по одному на строку."
+            "Пришлите приглашение или письмо целиком — возьму оттуда "
+            "участников, дату и тему.\n\n"
+            "Или просто список, по одному на строку:\n"
+            "• <code>Иван Петров, руководитель</code>\n"
+            "• <code>Мария Иванова - разработчик</code>\n\n"
+            "Без даты в шапку протокола попадёт день обработки — "
+            "поправить можно и после готового протокола."
         )
 
-        await safe_answer(message,
+        if state is not None:
+            await state.set_state(ParticipantsInput.waiting_for_participants)
+
+        sent = await safe_answer(message,
             message_text,
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-        
+
+        # Запоминаем меню, чтобы погасить его кнопки, когда поток уйдёт вперёд.
+        if state is not None and sent is not None:
+            await state.update_data(participants_menu={
+                "chat_id": sent.chat.id, "message_id": sent.message_id,
+            })
+
     except Exception as e:
         logger.error(f"Ошибка при показе меню участников: {e}")
         await message.answer(
@@ -722,7 +771,7 @@ def setup_participants_handlers() -> Router:
             await state.set_data(user_data)
             await state.set_state(None)  # exit FSM state, keep file data intact
 
-            await show_participants_menu(message, user_service)
+            await show_participants_menu(message, user_service, state=state)
 
         except Exception as e:
             logger.error(f"Ошибка при сохранении доп. информации: {e}")
@@ -736,7 +785,10 @@ def setup_participants_handlers() -> Router:
             await state.set_state(None)
 
             # callback.message принадлежит боту — передаём реального пользователя явно
-            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
+            await show_participants_menu(
+                callback.message, user_service,
+                user_id=callback.from_user.id, state=state,
+            )
 
         except Exception as e:
             logger.error(f"Ошибка при завершении ввода доп. информации: {e}")
@@ -748,7 +800,10 @@ def setup_participants_handlers() -> Router:
             await callback.answer()
             await state.set_state(None)  # keep file data intact
             # callback.message принадлежит боту — передаём реального пользователя явно
-            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
+            await show_participants_menu(
+                callback.message, user_service,
+                user_id=callback.from_user.id, state=state,
+            )
 
         except Exception as e:
             logger.error(f"Ошибка при пропуске доп. информации: {e}")

@@ -226,6 +226,24 @@ class _MapUserService:
         return self.mapping.get(telegram_id)
 
 
+class _FakeState:
+    """FSMContext ровно в той части, что нужна экрану участников."""
+
+    def __init__(self):
+        self._state = None
+        self._data = {}
+
+    async def set_state(self, state):
+        self._state = state
+
+    async def update_data(self, **values):
+        self._data.update(values)
+        return self._data
+
+    async def get_data(self):
+        return dict(self._data)
+
+
 @pytest.mark.asyncio
 async def test_configure_shows_participants_menu(monkeypatch):
     """«Настроить» редактирует сообщение и показывает меню участников."""
@@ -235,7 +253,7 @@ async def test_configure_shows_participants_menu(monkeypatch):
     handler = _find_callback(router, "configure_file_processing_callback")
     callback = _make_callback(user_id=111, message_from_user_id=999)
 
-    await handler(callback)
+    await handler(callback, _FakeState())
 
     # Показано меню участников (реальный show_participants_menu через callback.message).
     assert callback.message.answer.await_count == 1
@@ -260,7 +278,7 @@ async def test_configure_with_saved_list_shows_saved_button(monkeypatch):
     handler = _find_callback(router, "configure_file_processing_callback")
     callback = _make_callback(user_id=real_user_id, message_from_user_id=bot_id)
 
-    await handler(callback)
+    await handler(callback, _FakeState())
 
     # Поиск выполнен по реальному пользователю, а не по ID бота.
     assert user_service.calls == [real_user_id]
@@ -269,7 +287,9 @@ async def test_configure_with_saved_list_shows_saved_button(monkeypatch):
     keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
     data = _callback_data_set(keyboard)
     assert "use_saved_participants" in data
-    assert data == {"use_saved_participants", "input_new_participants", "skip_participants"}
+    # Кнопки «Добавить участников» больше нет: экран сам открывает шаг ввода
+    # и принимает текст (критика v11).
+    assert data == {"use_saved_participants", "skip_participants"}
 
 
 @pytest.mark.asyncio
@@ -286,11 +306,11 @@ async def test_configure_without_saved_list_hides_saved_button(monkeypatch):
     handler = _find_callback(router, "configure_file_processing_callback")
     callback = _make_callback(user_id=real_user_id, message_from_user_id=bot_id)
 
-    await handler(callback)
+    await handler(callback, _FakeState())
 
     # Поиск по реальному пользователю; списка нет — кнопки нет.
     assert user_service.calls == [real_user_id]
     keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
     data = _callback_data_set(keyboard)
     assert "use_saved_participants" not in data
-    assert data == {"input_new_participants", "skip_participants"}
+    assert data == {"skip_participants"}

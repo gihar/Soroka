@@ -374,6 +374,12 @@ def _extract_file_info(message: Message) -> tuple:
 async def _show_template_selection_step2(message: Message, template_service: TemplateService, state: FSMContext = None, participants_count: Optional[int] = None, real_user_id: Optional[int] = None):
     """Показать выбор шаблонов (шаг 2)"""
     try:
+        # Меню участников остаётся выше в чате: гасим его кнопки, чтобы тап по
+        # устаревшему экрану не уводил в поток, которого уже нет (критика v11).
+        from src.handlers.participants_handlers import dismiss_participants_menu
+
+        await dismiss_participants_menu(message.bot, state)
+
         # Детальное логирование для отладки
         logger.info(f"[DEBUG] _show_template_selection_step2 вызван: message.from_user.id={message.from_user.id}, message.chat.id={message.chat.id}")
 
