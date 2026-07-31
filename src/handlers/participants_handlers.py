@@ -250,42 +250,6 @@ def setup_participants_handlers() -> Router:
                 _FORM_OPEN_FAILED
             )
     
-    @router.callback_query(F.data == "upload_participants_file")
-    async def prompt_file_upload(callback: CallbackQuery, state: FSMContext):
-        """Запрос загрузки файла с участниками"""
-        try:
-            await callback.answer()
-            await state.set_state(ParticipantsInput.waiting_for_participants)
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
-            ])
-            
-            await safe_answer(callback.message, 
-                "<b>Загрузите файл с участниками</b>\n\n"
-                "Отправьте файл в формате .txt или .csv\n\n"
-                "<b>Формат .txt:</b>\n"
-                "<pre>"
-                "Иван Петров, менеджер\n"
-                "Мария Иванова"
-                "</pre>\n\n"
-                "<b>Формат .csv:</b>\n"
-                "<pre>"
-                "name,role\n"
-                "Иван Петров,менеджер\n"
-                "Мария Иванова,"
-                "</pre>\n\n"
-                "Или отправьте /cancel для отмены.",
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка при запросе файла: {e}")
-            await callback.message.answer(
-                _FORM_OPEN_FAILED
-            )
-    
     @router.callback_query(F.data == "use_saved_participants")
     async def use_saved_participants(callback: CallbackQuery, state: FSMContext):
         """Использование сохраненного списка участников"""
@@ -538,7 +502,7 @@ def setup_participants_handlers() -> Router:
                         InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
                     ],
                     [
-                        InlineKeyboardButton(text="⬅️ Назад", callback_data="upload_participants_file"),
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants"),
                         InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")
                     ]
                 ])

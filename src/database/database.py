@@ -84,7 +84,10 @@ class Database:
                 CREATE TABLE IF NOT EXISTS feedback (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
-                    rating INTEGER NOT NULL,
+                    -- rating необязателен: сообщение об ошибке и предложение
+                    -- идут текстом без цифры (критика v11). AVG в SQLite
+                    -- игнорирует NULL, поэтому статистика не портится.
+                    rating INTEGER,
                     feedback_type TEXT NOT NULL,
                     comment TEXT,
                     protocol_id TEXT,
@@ -219,6 +222,12 @@ class Database:
                             f"Миграция {_column} в processing_history не применилась: {exc}"
                         )
 
+            # Миграция: rating в feedback становится необязательным.
+            # NOT NULL снимается только перестройкой таблицы (SQLite не умеет
+            # ALTER COLUMN), поэтому шаг идёт под проверкой схемы и выполняется
+            # ровно один раз.
+            await self._relax_feedback_rating(db)
+
             # Миграция: синхронизируем владельцев шаблонов (legacy created_by = telegram_id)
             await self._sync_template_owner_ids(db)
             
@@ -314,6 +323,57 @@ class Database:
             await db.commit()
             logger.info("База данных инициализирована")
     
+    async def _relax_feedback_rating(self, db) -> None:
+        """Снять NOT NULL с feedback.rating, сохранив данные.
+
+        Отзыв текстом без оценки («Сообщить об ошибке», «Предложение улучшения»)
+        пишет rating=None, и на старой схеме вставка падала бы (критика v11).
+        SQLite не умеет ALTER COLUMN, поэтому таблица перестраивается: копия →
+        перенос строк → замена. Шаг идемпотентный: на уже мигрированной схеме он
+        не выполняется. AVG в SQLite игнорирует NULL — статистика не портится.
+        """
+        try:
+            cursor = await db.execute("PRAGMA table_info(feedback)")
+            columns = await cursor.fetchall()
+            rating = next((c for c in columns if c[1] == "rating"), None)
+            # c[3] — notnull; 0 значит «уже необязательный».
+            if rating is None or not rating[3]:
+                return
+
+            await db.execute("""
+                CREATE TABLE feedback_migrated (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    rating INTEGER,
+                    feedback_type TEXT NOT NULL,
+                    comment TEXT,
+                    protocol_id TEXT,
+                    processing_time REAL,
+                    file_format TEXT,
+                    file_size INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                INSERT INTO feedback_migrated
+                    (id, user_id, rating, feedback_type, comment, protocol_id,
+                     processing_time, file_format, file_size, created_at)
+                SELECT id, user_id, rating, feedback_type, comment, protocol_id,
+                       processing_time, file_format, file_size, created_at
+                FROM feedback
+            """)
+            await db.execute("DROP TABLE feedback")
+            await db.execute("ALTER TABLE feedback_migrated RENAME TO feedback")
+            await db.commit()
+            logger.info("Поле rating в таблице feedback стало необязательным")
+        except Exception as exc:
+            logger.error(f"Миграция rating в feedback не применилась: {exc}")
+            try:
+                await db.execute("DROP TABLE IF EXISTS feedback_migrated")
+                await db.commit()
+            except Exception:
+                pass
+
     async def _sync_template_owner_ids(self, db) -> None:
         """Преобразовать старые значения created_by (telegram_id) в актуальные user_id"""
         try:

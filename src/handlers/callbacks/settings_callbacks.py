@@ -169,13 +169,39 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
-        """Обработчик сброса всех настроек"""
+        """Сброс настроек: делаем то, о чём отчитываемся.
+
+        До критики v11 сбрасывался только режим вывода протокола, а экран
+        рапортовал «Шаблон по умолчанию сброшен • Другие настройки
+        восстановлены». Теперь сбрасывается всё, а список показывает ровно то,
+        что удалось: молчаливый провал под бодрым отчётом хуже честного «не
+        всё получилось».
+        """
         try:
-            # Сбрасываем режим вывода протокола на значение по умолчанию
+            user_id = callback.from_user.id
+            done = []
+
             try:
-                await user_service.update_user_protocol_output_preference(callback.from_user.id, 'messages')
-            except Exception:
-                pass
+                await user_service.update_user_protocol_output_preference(
+                    user_id, 'messages'
+                )
+                done.append("• Вывод протокола — сообщениями в чат")
+            except Exception as e:
+                logger.warning(f"Сброс: режим вывода не сброшен: {e}")
+
+            try:
+                from src.database import user_repo
+
+                await user_repo.reset_default_template(user_id)
+                done.append("• Шаблон по умолчанию — снова автоподбор")
+            except Exception as e:
+                logger.warning(f"Сброс: шаблон по умолчанию не сброшен: {e}")
+
+            try:
+                await user_service.update_speaker_mapping_preference(user_id, None)
+                done.append("• Сопоставление спикеров — как в настройках бота")
+            except Exception as e:
+                logger.warning(f"Сброс: настройка сопоставления не сброшена: {e}")
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -184,14 +210,16 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 )]
             ])
 
+            if done:
+                text = "<b>Настройки сброшены</b>\n\n" + "\n".join(done)
+            else:
+                text = (
+                    "❌ Не удалось сбросить настройки.\n"
+                    "Попробуйте ещё раз через пару минут."
+                )
+
             await safe_edit_text(callback.message,
-                "<b>Настройки сброшены</b>\n\n"
-                "Все ваши настройки восстановлены по умолчанию:\n\n"
-                "• Шаблон по умолчанию сброшен\n"
-                "• Другие настройки восстановлены\n\n"
-                "Теперь бот будет использовать настройки по умолчанию.",
-                parse_mode="HTML",
-                reply_markup=keyboard
+                text, parse_mode="HTML", reply_markup=keyboard,
             )
             await callback.answer()
 

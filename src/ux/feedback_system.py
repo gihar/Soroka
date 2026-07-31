@@ -8,15 +8,48 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Message,
 )
 from loguru import logger
 
 from src.database import feedback_repo
+from src.handlers.participants_states import FeedbackInput
 from src.utils.telegram_safe import safe_edit_text
+
+# Типы, где цифра бесполезна: серьёзность бага и важность идеи пользователь не
+# калибрует, а вот описание — единственный качественный сигнал о продукте,
+# которого иначе взять неоткуда (критика v11).
+_TEXT_FIRST_TYPES = ("bug_report", "suggestion")
+
+_COMMENT_PROMPTS = {
+    "bug_report": (
+        "<b>Сообщение об ошибке</b>\n\n"
+        "Опишите одним сообщением, что произошло и на каком шаге."
+    ),
+    "suggestion": (
+        "<b>Предложение улучшения</b>\n\n"
+        "Опишите одним сообщением, что хотелось бы изменить."
+    ),
+}
+
+_COMMENT_FOLLOWUP = (
+    "Спасибо. Если хотите — опишите одним сообщением, что именно "
+    "стоит поправить."
+)
+
+_COMMENT_SAVED = "Записал, спасибо — передам разработчику."
+
+_COMMENT_SKIPPED = "Оценка записана, спасибо."
+
+
+def _comment_prompt(feedback_type: str) -> str:
+    return _COMMENT_PROMPTS.get(feedback_type, _COMMENT_FOLLOWUP)
 
 
 @dataclass
@@ -219,6 +252,15 @@ class FeedbackUI:
         return InlineKeyboardMarkup(inline_keyboard=buttons)
     
     @staticmethod
+    @staticmethod
+    def create_comment_keyboard() -> InlineKeyboardMarkup:
+        """Выход из свободного ввода: писать текст — дело добровольное."""
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="⏭ Пропустить", callback_data="feedback_comment_skip"
+            )
+        ]])
+
     def format_feedback_request(feedback_type: str) -> str:
         """Сформировать запрос обратной связи"""
         type_messages = {
@@ -257,7 +299,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
     router = Router()
     
     @router.callback_query(F.data.startswith("feedback_rating_"))
-    async def handle_rating(callback: CallbackQuery):
+    async def handle_rating(callback: CallbackQuery, state: FSMContext):
         """Обработчик оценки"""
         try:
             # Парсим: feedback_rating_protocol_quality_5
@@ -272,19 +314,17 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             # Собираем тип обратной связи из средних частей
             feedback_type = "_".join(parts[2:-1])  # protocol_quality
             
-            # Сохраняем базовую обратную связь
-            feedback = FeedbackEntry(
-                user_id=callback.from_user.id,
-                timestamp=datetime.now(),
-                rating=rating,
-                feedback_type=feedback_type
+            # Цифра — половина сигнала. Вторую половину спрашиваем текстом;
+            # запись в сборщик уходит одна, после ответа или пропуска.
+            await state.update_data(
+                feedback_type=feedback_type, feedback_rating=rating
             )
-            feedback_collector.add_feedback(feedback)
-            
-            # Подтверждаем без фанфар: оценка — служебное действие
+            await state.set_state(FeedbackInput.waiting_for_comment)
+
             await safe_edit_text(
                 callback.message,
-                f"Оценка записана: {rating}/5",
+                _COMMENT_FOLLOWUP,
+                reply_markup=FeedbackUI.create_comment_keyboard(),
                 parse_mode="HTML"
             )
             
@@ -303,7 +343,7 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
         )
     
     @router.callback_query(F.data.startswith("feedback_type_"))
-    async def handle_feedback_type(callback: CallbackQuery):
+    async def handle_feedback_type(callback: CallbackQuery, state: FSMContext):
         """Обработчик выбора типа обратной связи"""
         try:
             # Парсим: feedback_type_protocol_quality или feedback_type_bug_report
@@ -314,9 +354,22 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             # Собираем тип из всех частей после "feedback_type_"
             feedback_type = "_".join(parts[2:])
             
+            if feedback_type in _TEXT_FIRST_TYPES:
+                await state.update_data(
+                    feedback_type=feedback_type, feedback_rating=None
+                )
+                await state.set_state(FeedbackInput.waiting_for_comment)
+                await safe_edit_text(
+                    callback.message,
+                    _comment_prompt(feedback_type),
+                    reply_markup=FeedbackUI.create_comment_keyboard(),
+                    parse_mode="HTML"
+                )
+                return
+
             message_text = FeedbackUI.format_feedback_request(feedback_type)
             keyboard = FeedbackUI.create_rating_keyboard(feedback_type)
-            
+
             await safe_edit_text(
                 callback.message,
                 message_text,
@@ -328,6 +381,44 @@ def setup_feedback_handlers(feedback_collector: FeedbackCollector) -> Router:
             logger.error(f"Ошибка выбора типа обратной связи: {e}")
             await callback.answer("Не удалось открыть форму, попробуйте ещё раз")
     
+    def _entry(user_id: int, data: dict, comment=None) -> FeedbackEntry:
+        return FeedbackEntry(
+            user_id=user_id,
+            timestamp=datetime.now(),
+            rating=data.get("feedback_rating"),
+            feedback_type=data.get("feedback_type") or "user_experience",
+            comment=comment,
+        )
+
+    @router.message(StateFilter(FeedbackInput.waiting_for_comment), F.text)
+    async def receive_feedback_comment(message: Message, state: FSMContext):
+        """Одно сообщение свободным текстом — то, ради чего /feedback и нужен."""
+        try:
+            data = await state.get_data()
+            await state.set_state(None)
+            feedback_collector.add_feedback(
+                _entry(message.from_user.id, data, comment=message.text)
+            )
+            await message.answer(_COMMENT_SAVED)
+        except Exception as e:
+            logger.error(f"Не удалось сохранить отзыв: {e}")
+            await message.answer(
+                "❌ Не удалось сохранить отзыв.\n"
+                "Попробуйте ещё раз командой /feedback."
+            )
+
+    @router.callback_query(F.data == "feedback_comment_skip")
+    async def skip_feedback_comment(callback: CallbackQuery, state: FSMContext):
+        """Писать текст добровольно: оценка сохраняется и без него."""
+        try:
+            data = await state.get_data()
+            await state.set_state(None)
+            feedback_collector.add_feedback(_entry(callback.from_user.id, data))
+            await safe_edit_text(callback.message, _COMMENT_SKIPPED)
+        except Exception as e:
+            logger.error(f"Не удалось сохранить оценку: {e}")
+            await callback.answer("Не удалось сохранить, попробуйте ещё раз")
+
     return router
 
 
