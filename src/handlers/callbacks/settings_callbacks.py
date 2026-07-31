@@ -9,6 +9,7 @@ from loguru import logger
 from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
+from src.ux.keyboards import BACK_TO_SETTINGS
 from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 
@@ -41,10 +42,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{SELECTED_MARK + ' ' if current == 'docx' else ''}В файл Word",
                     callback_data="set_protocol_output_docx"
                 )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -82,10 +80,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             await user_service.update_user_protocol_output_preference(callback.from_user.id, mode)
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -119,10 +114,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{SELECTED_MARK + ' ' if not enabled else ''}Не спрашивать",
                     callback_data="set_speaker_mapping_off"
                 )],
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -150,10 +142,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             )
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message,
@@ -169,29 +158,54 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
 
     @router.callback_query(F.data == "settings_reset")
     async def settings_reset_callback(callback: CallbackQuery):
-        """Обработчик сброса всех настроек"""
+        """Сброс настроек: делаем то, о чём отчитываемся.
+
+        До критики v11 сбрасывался только режим вывода протокола, а экран
+        рапортовал «Шаблон по умолчанию сброшен • Другие настройки
+        восстановлены». Теперь сбрасывается всё, а список показывает ровно то,
+        что удалось: молчаливый провал под бодрым отчётом хуже честного «не
+        всё получилось».
+        """
         try:
-            # Сбрасываем режим вывода протокола на значение по умолчанию
+            user_id = callback.from_user.id
+            done = []
+
             try:
-                await user_service.update_user_protocol_output_preference(callback.from_user.id, 'messages')
-            except Exception:
-                pass
+                await user_service.update_user_protocol_output_preference(
+                    user_id, 'messages'
+                )
+                done.append("• Вывод протокола — сообщениями в чат")
+            except Exception as e:
+                logger.warning(f"Сброс: режим вывода не сброшен: {e}")
+
+            try:
+                from src.database import user_repo
+
+                await user_repo.reset_default_template(user_id)
+                done.append("• Шаблон по умолчанию — снова автоподбор")
+            except Exception as e:
+                logger.warning(f"Сброс: шаблон по умолчанию не сброшен: {e}")
+
+            try:
+                await user_service.update_speaker_mapping_preference(user_id, None)
+                done.append("• Сопоставление спикеров — как в настройках бота")
+            except Exception as e:
+                logger.warning(f"Сброс: настройка сопоставления не сброшена: {e}")
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬅️ Назад к настройкам",
-                    callback_data="back_to_settings"
-                )]
+                [BACK_TO_SETTINGS]
             ])
 
+            if done:
+                text = "<b>Настройки сброшены</b>\n\n" + "\n".join(done)
+            else:
+                text = (
+                    "❌ Не удалось сбросить настройки.\n"
+                    "Попробуйте ещё раз через пару минут."
+                )
+
             await safe_edit_text(callback.message,
-                "<b>Настройки сброшены</b>\n\n"
-                "Все ваши настройки восстановлены по умолчанию:\n\n"
-                "• Шаблон по умолчанию сброшен\n"
-                "• Другие настройки восстановлены\n\n"
-                "Теперь бот будет использовать настройки по умолчанию.",
-                parse_mode="HTML",
-                reply_markup=keyboard
+                text, parse_mode="HTML", reply_markup=keyboard,
             )
             await callback.answer()
 
@@ -255,7 +269,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 )
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к настройкам", callback_data="back_to_settings")]
+                [BACK_TO_SETTINGS]
             ])
 
             await safe_edit_text(callback.message, stats_text,
@@ -265,6 +279,18 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
         except Exception as e:
             logger.error(f"Ошибка в settings_stats_callback: {e}")
             await callback.answer("Не удалось загрузить статистику, попробуйте ещё раз")
+
+    @router.callback_query(F.data == "settings_close")
+    async def settings_close_callback(callback: CallbackQuery):
+        """Закрыть меню настроек, не оставляя в чате живых кнопок."""
+        try:
+            await callback.message.delete()
+        except Exception:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.debug(f"Меню настроек уже не закрыть: {e}")
+        await callback.answer()
 
     @router.callback_query(F.data == "back_to_settings")
     async def back_to_settings_callback(callback: CallbackQuery):
@@ -314,10 +340,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     "❌ Нет доступных моделей.\n\n"
                     "Используйте /add_model чтобы добавить модель.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="⬅️ Назад к настройкам",
-                            callback_data="back_to_settings",
-                        )]
+                        [BACK_TO_SETTINGS]
                     ]),
                 )
                 await callback.answer()
@@ -331,10 +354,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                     text=f"{marker}{p['name']}",
                     callback_data=f"set_active_model_{p['key']}",
                 )])
-            rows.append([InlineKeyboardButton(
-                text="⬅️ Назад к настройкам",
-                callback_data="back_to_settings",
-            )])
+            rows.append([BACK_TO_SETTINGS])
 
             await safe_edit_text(
                 callback.message,
@@ -385,10 +405,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
                 f"✅ Активная модель: <b>{esc(model_name)}</b>\n\n"
                 "Бот будет использовать эту модель для всех обработок.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text="⬅️ Назад к настройкам",
-                        callback_data="back_to_settings",
-                    )]
+                    [BACK_TO_SETTINGS]
                 ]),
                 parse_mode="HTML",
             )

@@ -20,6 +20,7 @@ from src.services.url_service import URLService
 from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
+from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
 
 
@@ -208,16 +209,14 @@ async def _start_file_processing(message: Message, state: FSMContext, processing
         if is_external_file:
             if not data.get('file_path') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Запись потерялась.\n"
-                    "Пришлите ссылку ещё раз."
+                    RECORD_LOST_LINK
                 )
                 await state.clear()
                 return
         else:
             if not data.get('file_id') or not data.get('file_name'):
                 await message.answer(
-                    "❌ Запись потерялась.\n"
-                    "Отправьте файл ещё раз."
+                    RECORD_LOST_FILE
                 )
                 await state.clear()
                 return
@@ -374,6 +373,12 @@ def _extract_file_info(message: Message) -> tuple:
 async def _show_template_selection_step2(message: Message, template_service: TemplateService, state: FSMContext = None, participants_count: Optional[int] = None, real_user_id: Optional[int] = None):
     """Показать выбор шаблонов (шаг 2)"""
     try:
+        # Меню участников остаётся выше в чате: гасим его кнопки, чтобы тап по
+        # устаревшему экрану не уводил в поток, которого уже нет (критика v11).
+        from src.handlers.participants_handlers import dismiss_participants_menu
+
+        await dismiss_participants_menu(message.bot, state)
+
         # Детальное логирование для отладки
         logger.info(f"[DEBUG] _show_template_selection_step2 вызван: message.from_user.id={message.from_user.id}, message.chat.id={message.chat.id}")
 

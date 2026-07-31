@@ -72,9 +72,9 @@ async def test_record_without_hanging_state_is_untouched():
 @pytest.mark.asyncio
 async def test_unrelated_state_is_also_cleared():
     """Любой висящий шаг мешает новой записи, не только ввод участников."""
-    from src.handlers.participants_states import ProtocolInfoState
+    from src.handlers.participants_states import ProtocolHeaderEdit
 
-    state = FakeState(state=ProtocolInfoState.waiting_agenda)
+    state = FakeState(state=ProtocolHeaderEdit.waiting_for_header)
 
     await register_new_record(state, file_id="новый")
 

@@ -27,7 +27,30 @@ MAX_MESSAGE_LENGTH = 4000
 PART_PREFIX_RESERVE = 24
 
 
-def _build_result_dict(request: ProcessingRequest, result: ProcessingResult) -> dict:
+# Режимы, в которых протокол уезжает файлом: сводка остаётся в чате и с
+# документом не едет, поэтому оговорки о шапке пишутся в само тело.
+_FILE_MODES = ("file", "pdf", "docx")
+
+
+def protocol_text_for_delivery(
+    protocol_text: str, *, date_is_assumed: bool, output_mode: str
+) -> str:
+    """Текст протокола под канал доставки.
+
+    Единственное отличие файловых режимов: оговорка о подставленной дате
+    вписывается в документ, потому что сводка с ним не поедет (критика v11).
+    В чат протокол приходит вместе со сводкой — там дублировать нечего.
+    """
+    if date_is_assumed and output_mode in _FILE_MODES:
+        from src.utils.text_processing import with_assumed_date_note
+
+        return with_assumed_date_note(protocol_text)
+    return protocol_text
+
+
+def _build_result_dict(
+    request: ProcessingRequest, result: ProcessingResult, output_mode: str = "messages"
+) -> dict:
     """Build the dict consumed by ``MessageBuilder.processing_complete_message``."""
     llm_display_name = (
         result.llm_model_used
@@ -55,6 +78,9 @@ def _build_result_dict(request: ProcessingRequest, result: ProcessingResult) -> 
         # отдельными пузырями после него.
         "warnings": getattr(result, "warnings", None) or [],
         "date_is_assumed": getattr(result, "date_is_assumed", False),
+        # Канал доставки решает, где живёт оговорка о дате: в сводке (чат) или
+        # в теле документа (файл).
+        "protocol_output_mode": output_mode,
     }
 
 
@@ -309,7 +335,7 @@ async def send_result_to_user(
             return False
 
         result_message = MessageBuilder.processing_complete_message(
-            _build_result_dict(request, result)
+            _build_result_dict(request, result, output_mode)
         )
         await _send_summary_message(bot, chat_id, result_message)
 
@@ -317,7 +343,13 @@ async def send_result_to_user(
             getattr(result, "history_id", None), output_mode
         )
         delivered = await send_protocol_body(
-            bot, chat_id, result.protocol_text, request.file_name,
+            bot, chat_id,
+            protocol_text_for_delivery(
+                result.protocol_text,
+                date_is_assumed=getattr(result, "date_is_assumed", False),
+                output_mode=output_mode,
+            ),
+            request.file_name,
             output_mode, reply_markup=actions_keyboard,
         )
 

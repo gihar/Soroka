@@ -115,8 +115,8 @@ def test_no_text_points_at_a_glyph_that_no_button_carries():
 
 
 def test_missing_topic_is_not_shown_as_fake_data():
-    from src.services.participants_service import participants_service
     from src.models.meeting_info import MeetingInfo
+    from src.services.participants_service import participants_service
 
     info = MeetingInfo(topic="Не указана", participants=[])
     shown = participants_service.format_meeting_info_for_display(info)
@@ -124,8 +124,8 @@ def test_missing_topic_is_not_shown_as_fake_data():
 
 
 def test_present_topic_is_still_shown():
-    from src.services.participants_service import participants_service
     from src.models.meeting_info import MeetingInfo
+    from src.services.participants_service import participants_service
 
     info = MeetingInfo(topic="Смета проекта", participants=[])
     assert "Смета проекта" in participants_service.format_meeting_info_for_display(info)

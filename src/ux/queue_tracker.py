@@ -9,8 +9,8 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
+from src.utils.duration import format_duration
 from src.utils.telegram_safe import safe_bot_edit_message, safe_send_message
-from src.ux.html_text import esc
 
 
 class QueuePositionTracker:
@@ -71,12 +71,7 @@ class QueuePositionTracker:
         if position > 3:
             # Примерное время ожидания (приблизительно 2-3 минуты на задачу).
             estimated_minutes = position * 2.5
-            if estimated_minutes < 60:
-                time_estimate = f"~{int(estimated_minutes)} мин"
-            else:
-                hours = int(estimated_minutes / 60)
-                minutes = int(estimated_minutes % 60)
-                time_estimate = f"~{hours}ч {minutes}мин" if minutes > 0 else f"~{hours}ч"
+            time_estimate = f"~{format_duration(estimated_minutes * 60)}"
             lines.append(f"Примерное время ожидания: {time_estimate}")
 
         return "\n".join(lines)
@@ -126,30 +121,6 @@ class QueuePositionTracker:
                 
         except Exception as e:
             logger.error(f"Ошибка обновления трекера очереди: {e}")
-    
-    async def show_processing_started(self):
-        """Показать, что обработка началась"""
-        if not self.is_active or not self.message_id:
-            return
-        
-        try:
-            text = (
-                "<b>Начинаю обработку файла</b>\n\n"
-                "⏳ Подготовка к обработке..."
-            )
-            
-            result = await safe_bot_edit_message(
-                self.bot,
-                chat_id=self.chat_id,
-                message_id=self.message_id,
-                text=text,
-                parse_mode="HTML"
-            )
-            if result is not None:
-                self._last_text = text
-            
-        except Exception as e:
-            logger.error(f"Ошибка отображения начала обработки: {e}")
     
     async def show_cancelled(self):
         """Показать, что задача отменена"""

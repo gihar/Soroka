@@ -95,17 +95,20 @@ _UNMAPPED_NOTE = (
 )
 
 
-def with_unmapped_speakers_note(protocol_text: str, unmapped_count: int) -> str:
-    """Вписать пояснение про «Участник N» в сам документ, под шапку.
+_ASSUMED_DATE_NOTE = (
+    "_Дата в шапке — день обработки записи: "
+    "в самой записи даты встречи не нашлось._"
+)
 
-    Раньше пояснение жило отдельным пузырём в чате — и в режимах PDF/Word
-    отваливалось при пересылке файла, ровно когда нужнее всего: читатель
-    «наверху» получал поручения безымянным «Участникам» без объяснения.
 
-    Место — до первой секции: «Участник 2» встречается в середине документа, и
-    сноска в конце опаздывает. Возвращает новый текст (вход не мутируется).
+def _with_document_note(protocol_text: str, note: str) -> str:
+    """Вписать оговорку в сам документ, под шапку.
+
+    Место — до первой секции: оговорка относится к шапке и к тексту всего
+    документа, а сноска в конце опаздывает. Возвращает новый текст (вход не
+    мутируется).
     """
-    if not unmapped_count or _UNMAPPED_NOTE in protocol_text:
+    if note in protocol_text:
         return protocol_text
 
     lines = protocol_text.splitlines()
@@ -116,10 +119,33 @@ def with_unmapped_speakers_note(protocol_text: str, unmapped_count: int) -> str:
             while head and not head[-1].strip():
                 head = head[:-1]
             body = lines[index:]
-            return "\n".join([*head, "", _UNMAPPED_NOTE, "", *body])
+            return "\n".join([*head, "", note, "", *body])
 
     # Секций нет (короткий или нестандартный протокол) — пометка в конец.
-    return "\n".join([*lines, "", _UNMAPPED_NOTE])
+    return "\n".join([*lines, "", note])
+
+
+def with_unmapped_speakers_note(protocol_text: str, unmapped_count: int) -> str:
+    """Вписать пояснение про «Участник N» в сам документ, под шапку.
+
+    Раньше пояснение жило отдельным пузырём в чате — и в режимах PDF/Word
+    отваливалось при пересылке файла, ровно когда нужнее всего: читатель
+    «наверху» получал поручения безымянным «Участникам» без объяснения.
+    """
+    if not unmapped_count:
+        return protocol_text
+    return _with_document_note(protocol_text, _UNMAPPED_NOTE)
+
+
+def with_assumed_date_note(protocol_text: str) -> str:
+    """Вписать в документ оговорку о том, что дата подставлена днём обработки.
+
+    Тот же довод, что и у пометки про «Участник N» (критика v11): в режимах
+    файла сводка остаётся в чате и с документом не едет, поэтому читатель
+    «наверху» видел «Протокол от 30 июля» про встречу, которая была 24-го, и не
+    имел способа это заподозрить.
+    """
+    return _with_document_note(protocol_text, _ASSUMED_DATE_NOTE)
 
 
 def humanize_speaker_labels_for_reader(protocol_text: str, warnings: list) -> str:

@@ -158,6 +158,26 @@ def setup_command_handlers(user_service: UserService, template_service: Template
                 "Попробуйте ещё раз командой /templates."
             )
     
+    @router.message(Command("cancel"))
+    async def cancel_handler(message: Message, state: FSMContext):
+        """Выход из любого открытого диалога.
+
+        Раньше /cancel рекламировался четырьмя экранами, а работал подстрочной
+        проверкой в одном хендлере ввода участников (критика v11): в правке
+        шапки он молча становился датой протокола. Роутер команд включён раньше
+        карточки сопоставления и правки шапки, поэтому команда забирает текст
+        у обоих ловцов.
+        """
+        try:
+            had_dialog = await state.get_state() is not None
+            await state.set_state(None)
+            await message.answer(
+                "Отменено." if had_dialog
+                else "Сейчас нечего отменять — пришлите запись, когда будете готовы."
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в cancel_handler: {e}")
+
     @router.message(Command("feedback", "fb"))
     async def feedback_handler(message: Message):
         """Обработчик команды /feedback"""

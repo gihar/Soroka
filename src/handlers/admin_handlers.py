@@ -14,8 +14,8 @@ from src.services.processing_service import ProcessingService
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.ux import admin_views
-from src.ux.html_text import esc
 from src.ux.admin_views import ACCESS_DENIED
+from src.ux.html_text import esc
 
 # Отказ статистики размножился по пяти хендлерам (критика v10). Текст
 # исключения пользователю не показываем — он уже в логе.

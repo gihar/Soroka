@@ -48,16 +48,22 @@ class MappingCard:
     ``hint`` — необязательная строка-следствие внизу карточки (nudge о том, что
     неназванные спикеры уйдут метками); задаёт её вызывающий, только когда есть
     несопоставленные спикеры. Пустые вводная и подсказка строк не добавляют.
+    ``record_name`` — имя записи, к которой относится карточка: без него две
+    карточки в чате неразличимы, а вопрос «кто есть кто» задан о неизвестно чём
+    (критика v11).
     """
 
     header: str
     rows: tuple[SpeakerRow, ...] = ()
     hint: Optional[str] = None
     intro: Optional[str] = None
+    record_name: Optional[str] = None
 
     def to_html(self) -> str:
         """Разметка Telegram HTML: жирные заголовок и спикеры, цитаты в кавычках."""
         lines = [f"<b>{escape_telegram_html(self.header)}</b>"]
+        if self.record_name:
+            lines.append(escape_telegram_html(self.record_name))
         if self.intro:
             lines.append(escape_telegram_html(self.intro))
         lines.append("")
@@ -78,6 +84,8 @@ class MappingCard:
     def to_plain(self) -> str:
         """Plain-страховка: то же содержимое без тегов и без экранирования."""
         lines = [self.header]
+        if self.record_name:
+            lines.append(self.record_name)
         if self.intro:
             lines.append(self.intro)
         lines.append("")

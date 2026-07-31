@@ -2,21 +2,18 @@
 Обработчики для работы со списком участников встречи
 """
 
-import os
-from typing import Dict, Optional
+from typing import Optional
 
 from aiogram import F, Router
-from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
-from src.exceptions.file import FileError
-from src.handlers.participants_states import ParticipantsInput, ProtocolInfoState
+from src.handlers.participants_states import ParticipantsInput
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 from src.utils.date_format import format_russian_date
-from src.utils.telegram_safe import safe_answer, safe_edit_text
+from src.utils.telegram_safe import safe_answer
 from src.ux.html_text import esc
 
 # Формулировки, нужные нескольким хендлерам этого модуля: одна на всех, иначе
@@ -31,8 +28,46 @@ _CONTINUE_FAILED = (
 )
 
 
-async def show_participants_menu(message: Message, user_service: UserService, user_id: Optional[int] = None):
-    """Helper-функция для показа детального меню добавления участников.
+async def dismiss_participants_menu(bot, state: Optional[FSMContext]) -> None:
+    """Погасить кнопки меню участников после ухода потока вперёд.
+
+    Меню оставалось в чате нажимаемым: тап через минуту после старта обработки
+    уводил в ввод участников, выбор шаблона и заканчивался «Запись потерялась»
+    — четыре шага в никуда (критика v11). Best-effort: сообщение могли удалить,
+    и падать из-за этого поток не имеет права.
+    """
+    if state is None:
+        return
+    try:
+        menu = (await state.get_data()).get("participants_menu")
+    except Exception:
+        return
+    if not menu:
+        return
+
+    await state.update_data(participants_menu=None)
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=menu["chat_id"], message_id=menu["message_id"],
+            reply_markup=None,
+        )
+    except Exception as e:
+        logger.debug(f"Меню участников уже не погасить: {e}")
+
+
+async def show_participants_menu(
+    message: Message,
+    user_service: UserService,
+    user_id: Optional[int] = None,
+    state: Optional[FSMContext] = None,
+):
+    """Показать экран «Участники встречи» — он же шаг ввода.
+
+    Экран обещает ввод текстом, поэтому сам его и открывает: до критики v11
+    FSM-состояние здесь не выставлялось, и выполнивший инструкцию дословно
+    получал в ответ «отправьте файл или ссылку». Отдельная кнопка «Добавить
+    участников» после этого не нужна — приглашение осталось только как экран
+    «⬅️ Назад» с подтверждения разбора.
 
     Кнопка сохранённого списка строится по владельцу диалога. При вызове из
     колбэка message принадлежит боту, поэтому реальный ID пользователя нужно
@@ -42,7 +77,7 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         # Проверяем, есть ли сохраненный список у владельца диалога
         owner_id = user_id if user_id is not None else message.from_user.id
         user = await user_service.get_user_by_telegram_id(owner_id)
-        
+
         keyboard_buttons = []
 
         # Saved participants — show first if available
@@ -57,12 +92,6 @@ async def show_participants_menu(message: Message, user_service: UserService, us
             except Exception:
                 pass
 
-        # Add new participants
-        keyboard_buttons.append([InlineKeyboardButton(
-            text="Добавить участников",
-            callback_data="input_new_participants"
-        )])
-
         # Skip
         keyboard_buttons.append([InlineKeyboardButton(
             text="⏭ Без участников",
@@ -71,18 +100,35 @@ async def show_participants_menu(message: Message, user_service: UserService, us
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
+        # Дата встречи — единственный реквизит, которого нет в аудио: без неё в
+        # шапку уходит день обработки. Приглашение целиком отдаёт её вместе с
+        # темой и участниками, поэтому стоит первым.
         message_text = (
             "<b>Участники встречи</b>\n\n"
-            "Укажите участников для точной атрибуции в протоколе.\n"
-            "Введите имена в любом формате — по одному на строку."
+            "Пришлите приглашение или письмо целиком — возьму оттуда "
+            "участников, дату и тему.\n\n"
+            "Или просто список, по одному на строку:\n"
+            "• <code>Иван Петров, руководитель</code>\n"
+            "• <code>Мария Иванова - разработчик</code>\n\n"
+            "Без даты в шапку протокола попадёт день обработки — "
+            "поправить можно и после готового протокола."
         )
 
-        await safe_answer(message,
+        if state is not None:
+            await state.set_state(ParticipantsInput.waiting_for_participants)
+
+        sent = await safe_answer(message,
             message_text,
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-        
+
+        # Запоминаем меню, чтобы погасить его кнопки, когда поток уйдёт вперёд.
+        if state is not None and sent is not None:
+            await state.update_data(participants_menu={
+                "chat_id": sent.chat.id, "message_id": sent.message_id,
+            })
+
     except Exception as e:
         logger.error(f"Ошибка при показе меню участников: {e}")
         await message.answer(
@@ -91,80 +137,11 @@ async def show_participants_menu(message: Message, user_service: UserService, us
         )
 
 
-async def show_protocol_info_menu(callback_query: CallbackQuery, user_state: dict):
-    """Menu for inputting additional protocol information"""
-    try:
-        keyboard_buttons = [
-            [InlineKeyboardButton(text="Повестка встречи", callback_data="input_meeting_agenda")],
-            [InlineKeyboardButton(text="Список проектов", callback_data="input_project_list")],
-            [InlineKeyboardButton(text="Готово", callback_data="protocol_info_complete")],
-            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
-        ]
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
-        message_text = (
-            "<b>Дополнительная информация к протоколу</b>\n\n"
-            "Добавьте контекст для улучшения качества протокола:\n\n"
-            "<b>Повестка встречи</b> - основные темы и вопросы для обсуждения\n"
-            "<b>Список проектов</b> - названия проектов, упоминаемых во встрече\n\n"
-            "Выберите действие:"
-        )
-
-        await safe_edit_text(callback_query.message,
-            message_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-
-    except Exception as e:
-        logger.error(f"Ошибка при показе меню доп. информации: {e}")
-        await callback_query.message.edit_text(
-            "❌ Не удалось открыть меню.\n"
-            "Попробуйте ещё раз."
-        )
-
-
 def setup_participants_handlers() -> Router:
     """Настройка обработчиков для работы с участниками"""
     router = Router()
     user_service = UserService()
     
-    @router.callback_query(F.data == "auto_extract_meeting_info")
-    async def prompt_auto_extraction(callback: CallbackQuery, state: FSMContext):
-        """Запрос автоматического извлечения информации о встрече"""
-        try:
-            await callback.answer()
-            await state.set_state(ParticipantsInput.waiting_for_participants)
-
-            # Создаем клавиатуру с кнопками навигации
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel_participants")]
-            ])
-
-            await safe_answer(callback.message, 
-                "<b>Автоматическое извлечение информации о встрече</b>\n\n"
-                "Отправьте текст с информацией о встрече (email, сообщение, описание).\n\n"
-                "<b>Поддерживаемые форматы:</b>\n"
-                "• Email с полями От, Кому, Копия, Тема, Когда\n"
-                "• Текст с информацией об участниках, дате и теме\n\n"
-                "<b>Пример:</b>\n"
-                "<pre>"
-                "От: Иван Петров\n"
-                "Кому: Мария Иванова; Алексей Смирнов\n"
-                "Тема: Обсуждение проекта\n"
-                "Когда: 22 октября 2025 г. 15:00-16:00"
-                "</pre>",
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-
-        except Exception as e:
-            logger.error(f"Ошибка при запросе автоизвлечения: {e}")
-            await callback.message.answer(
-                _FORM_OPEN_FAILED
-            )
-
     @router.callback_query(F.data == "input_new_participants")
     async def prompt_participants_input(callback: CallbackQuery, state: FSMContext):
         """Запрос ввода нового списка участников"""
@@ -197,42 +174,6 @@ def setup_participants_handlers() -> Router:
 
         except Exception as e:
             logger.error(f"Ошибка при запросе ввода участников: {e}")
-            await callback.message.answer(
-                _FORM_OPEN_FAILED
-            )
-    
-    @router.callback_query(F.data == "upload_participants_file")
-    async def prompt_file_upload(callback: CallbackQuery, state: FSMContext):
-        """Запрос загрузки файла с участниками"""
-        try:
-            await callback.answer()
-            await state.set_state(ParticipantsInput.waiting_for_participants)
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")]
-            ])
-            
-            await safe_answer(callback.message, 
-                "<b>Загрузите файл с участниками</b>\n\n"
-                "Отправьте файл в формате .txt или .csv\n\n"
-                "<b>Формат .txt:</b>\n"
-                "<pre>"
-                "Иван Петров, менеджер\n"
-                "Мария Иванова"
-                "</pre>\n\n"
-                "<b>Формат .csv:</b>\n"
-                "<pre>"
-                "name,role\n"
-                "Иван Петров,менеджер\n"
-                "Мария Иванова,"
-                "</pre>\n\n"
-                "Или отправьте /cancel для отмены.",
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка при запросе файла: {e}")
             await callback.message.answer(
                 _FORM_OPEN_FAILED
             )
@@ -310,12 +251,6 @@ def setup_participants_handlers() -> Router:
         """Обработка текстового ввода списка участников"""
         try:
             text = message.text.strip()
-
-            # Проверка на команду отмены
-            if text.startswith('/cancel'):
-                await state.clear()
-                await message.answer("Ввод участников отменен.")
-                return
 
             # Гибридный подход: пробуем автоизвлечение, затем обычный парсинг
             meeting_info = participants_service.extract_from_meeting_text(text)
@@ -439,92 +374,6 @@ def setup_participants_handlers() -> Router:
             await message.answer(
                 "❌ Не удалось разобрать список участников.\n"
                 "Проверьте формат и отправьте ещё раз."
-            )
-    
-    @router.message(ParticipantsInput.waiting_for_participants, F.content_type == "document")
-    async def handle_participants_file(message: Message, state: FSMContext):
-        """Обработка файла со списком участников"""
-        try:
-            document = message.document
-            
-            # Проверяем расширение файла
-            file_name = document.file_name or "file"
-            file_ext = os.path.splitext(file_name)[1].lower()
-            
-            if file_ext not in ['.txt', '.csv', '.text']:
-                await message.answer(
-                    "❌ Поддерживаются только файлы .txt и .csv\n"
-                    "Попробуйте еще раз."
-                )
-                return
-            
-            # Скачиваем файл
-            temp_file_path = f"temp/participants_{message.from_user.id}_{file_ext}"
-            
-            try:
-                await message.bot.download(document, destination=temp_file_path)
-                
-                # Парсим файл
-                participants = participants_service.parse_participants_file(temp_file_path)
-                
-                # Удаляем временный файл
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-                
-                # Валидируем
-                is_valid, error_message = participants_service.validate_participants(participants)
-                
-                if not is_valid:
-                    await safe_answer(message,
-                        f"❌ {esc(error_message)}\n"
-                        "Поправьте список в файле и отправьте ещё раз.",
-                        parse_mode="HTML"
-                    )
-                    return
-                
-                # Сохраняем в состояние
-                await state.update_data(participants_list=participants)
-                await state.set_state(ParticipantsInput.confirm_participants)
-                
-                # Показываем для подтверждения
-                display_text = participants_service.format_participants_for_display(participants)
-                
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="Подтвердить", callback_data="confirm_participants"),
-                        InlineKeyboardButton(text="Сохранить и использовать", callback_data="save_and_confirm_participants")
-                    ],
-                    [
-                        InlineKeyboardButton(text="⬅️ Назад", callback_data="upload_participants_file"),
-                        InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_participants")
-                    ]
-                ])
-                
-                await safe_answer(message,
-                    f"{display_text}\n\n<b>Все верно?</b>",
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
-
-            except FileError as e:
-                logger.warning(f"Не удалось разобрать файл участников: {e}")
-                await message.answer(
-                    "❌ Не удалось разобрать файл.\n"
-                    "Проверьте формат (.txt или .csv) и отправьте ещё раз."
-                )
-            finally:
-                # Убеждаемся что файл удален
-                if os.path.exists(temp_file_path):
-                    try:
-                        os.remove(temp_file_path)
-                    except:
-                        pass
-            
-        except Exception as e:
-            logger.error(f"Ошибка при обработке файла участников: {e}")
-            await message.answer(
-                "❌ Не удалось разобрать файл участников.\n"
-                "Проверьте формат (.txt или .csv) и отправьте ещё раз."
             )
     
     @router.callback_query(F.data == "confirm_meeting_info")
@@ -667,100 +516,4 @@ def setup_participants_handlers() -> Router:
             logger.error(f"Ошибка при отмене: {e}")
 
     # Обработчики для дополнительной информации о протоколе
-    @router.callback_query(F.data == "add_protocol_info")
-    async def handle_add_protocol_info(callback: CallbackQuery, state: FSMContext):
-        """Handler for 'Add protocol info' button"""
-        try:
-            await callback.answer()
-            await show_protocol_info_menu(callback, {})
-        except Exception as e:
-            logger.error(f"Ошибка при добавлении доп. информации: {e}")
-
-    @router.callback_query(F.data.startswith("input_"))
-    async def handle_protocol_info_input(callback: CallbackQuery, state: FSMContext):
-        """Handle different types of protocol information input"""
-        try:
-            await callback.answer()
-            info_type = callback.data.replace("input_", "")
-
-            # Set FSM state for text input
-            if info_type == "meeting_agenda":
-                await state.set_state(ProtocolInfoState.waiting_agenda)
-                prompt_text = "<b>Введите повестку встречи</b>\n\nПеречислите основные темы и вопросы для обсуждения:"
-            elif info_type == "project_list":
-                await state.set_state(ProtocolInfoState.waiting_project_list)
-                prompt_text = "<b>Введите список проектов</b>\n\nПеречислите названия проектов, которые упоминались на встрече (через запятую или каждый с новой строки):"
-            else:
-                return
-
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_protocol_info")]
-            ])
-
-            await safe_answer(callback.message,
-                prompt_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-
-        except Exception as e:
-            logger.error(f"Ошибка при обработке ввода доп. информации: {e}")
-
-    @router.message(StateFilter(ProtocolInfoState.waiting_agenda, ProtocolInfoState.waiting_project_list))
-    async def handle_protocol_info_text(message: Message, state: FSMContext):
-        """Handle text input for protocol information"""
-        try:
-            current_state = await state.get_state()
-            user_data = await state.get_data()
-
-            # Store the information
-            if current_state == ProtocolInfoState.waiting_agenda:
-                user_data.setdefault('protocol_info', {})['meeting_agenda'] = message.text
-            elif current_state == ProtocolInfoState.waiting_project_list:
-                user_data.setdefault('protocol_info', {})['project_list'] = message.text
-
-            await state.set_data(user_data)
-            await state.set_state(None)  # exit FSM state, keep file data intact
-
-            await show_participants_menu(message, user_service)
-
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении доп. информации: {e}")
-
-    @router.callback_query(F.data == "protocol_info_complete")
-    async def handle_protocol_info_complete(callback: CallbackQuery, state: FSMContext):
-        """When user finishes entering protocol info"""
-        try:
-            await callback.answer()
-            # Return to participants menu, keep file data intact
-            await state.set_state(None)
-
-            # callback.message принадлежит боту — передаём реального пользователя явно
-            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
-
-        except Exception as e:
-            logger.error(f"Ошибка при завершении ввода доп. информации: {e}")
-
-    @router.callback_query(F.data == "skip_protocol_info")
-    async def handle_skip_protocol_info(callback: CallbackQuery, state: FSMContext):
-        """When user skips protocol info input"""
-        try:
-            await callback.answer()
-            await state.set_state(None)  # keep file data intact
-            # callback.message принадлежит боту — передаём реального пользователя явно
-            await show_participants_menu(callback.message, user_service, user_id=callback.from_user.id)
-
-        except Exception as e:
-            logger.error(f"Ошибка при пропуске доп. информации: {e}")
-
     return router
-
-
-async def get_protocol_info_from_state(state: FSMContext) -> Optional[Dict]:
-    """Extract protocol information from user state"""
-    try:
-        user_data = await state.get_data()
-        return user_data.get('protocol_info')
-    except Exception as e:
-        logger.error(f"Ошибка при извлечении протокольной информации из состояния: {e}")
-        return None

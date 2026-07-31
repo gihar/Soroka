@@ -74,10 +74,10 @@ def test_update_mapping_mutates_session(store):
 
 
 def test_expired_session_is_not_returned(store, monkeypatch):
-    store.save(42, _session())
+    key = store.save(42, _session())
 
-    # состариваем запись за TTL
-    store._timestamps[42] -= timedelta(seconds=3601)
+    # состариваем запись за TTL (ключ — пара «пользователь + запись», v11)
+    store._timestamps[(42, key)] -= timedelta(seconds=3601)
 
     assert store.peek(42) is None
     assert store.take(42) is None

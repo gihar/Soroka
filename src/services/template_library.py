@@ -81,7 +81,7 @@ class TemplateLibrary:
         return {
             "name": "Техническое совещание",
             "category": "technical",
-            "description": "Шаблон для технических встреч и code review с диаризацией",
+            "description": "Шаблон для технических встреч и разбора кода с диаризацией",
             "tags": ["technical", "engineering", "code_review"],
             "keywords": ["техническое", "разработка", "код", "архитектура"],
             "is_default": True,

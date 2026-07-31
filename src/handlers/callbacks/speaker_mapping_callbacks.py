@@ -27,6 +27,7 @@ from src.services.participants_service import (
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.url_detection import contains_url
 from src.ux.card_sender import edit_card
+from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_callback_data import (
     SmCancel,
     SmChange,
@@ -35,7 +36,6 @@ from src.ux.speaker_mapping_callback_data import (
     SmSkip,
     SmSkipConfirm,
 )
-from src.ux.speaker_label import humanize_speaker_label
 from src.ux.speaker_mapping_ui import (
     create_skip_confirm_keyboard,
     format_skip_confirm_message,
@@ -45,8 +45,16 @@ from src.ux.speaker_mapping_ui import (
 from .helpers import _safe_callback_answer
 
 _SESSION_GONE_TEXT = (
-    "❌ Состояние обработки не найдено или истекло.\n\n"
-    "Пожалуйста, начните обработку заново."
+    "❌ Эта карточка больше не активна.\n"
+    "Отправьте запись ещё раз, чтобы назвать спикеров."
+)
+
+# Сессия закрыта доставкой — работа не пропала, и говорить «начните заново»
+# значит врать (критика v11): протокол лежит выше в этом же чате.
+_DELIVERED_TEXT = (
+    "Протокол по этой записи уже доставлен — он выше в чате.\n"
+    "Имена спикеров в готовом протоколе можно поправить только "
+    "повторной обработкой."
 )
 
 _PROCESSING_ERROR_TEXT = (
@@ -59,6 +67,18 @@ _SKIP_CONTINUED_TEXT = (
     "⏭ <b>Сопоставление пропущено</b>\n\n"
     "⏳ Продолжаю генерацию протокола без замены имен спикеров..."
 )
+
+
+def _stale_card_text(user_id: int) -> str:
+    """Что ответить на нажатие в карточке, которой уже нет.
+
+    Два разных исхода — и до критики v11 оба получали один текст «начните
+    обработку заново». После авто-доставки по таймауту это прямая ложь:
+    протокол доставлен и лежит выше в чате.
+    """
+    if mapping_sessions.was_recently_closed(user_id):
+        return _DELIVERED_TEXT
+    return _SESSION_GONE_TEXT
 
 
 def _skip_needs_confirmation(session: MappingSession) -> bool:
@@ -165,7 +185,7 @@ def card_handler(
                     current_session = mapping_sessions.take(user_id)
 
                 if session is not None and current_session is None:
-                    await safe_edit_text(callback.message, _SESSION_GONE_TEXT)
+                    await safe_edit_text(callback.message, _stale_card_text(user_id))
                     return
 
                 await core(callback, callback_data, state, user_id, current_session)
@@ -200,6 +220,7 @@ async def _show_main_view(callback: CallbackQuery, session: MappingSession,
         current_editing_speaker=session.editing_speaker,
         speakers_text=diarization.speakers_text if diarization else None,
         speakers_with_audio=session.speakers_with_audio,
+        record_name=session.request.file_name,
     )
 
 
@@ -227,6 +248,7 @@ async def _redraw_main_card_after_naming(
             current_editing_speaker=None,
             speakers_text=speakers_text,
             speakers_with_audio=session.speakers_with_audio,
+            record_name=session.request.file_name,
         )
         return
 
@@ -379,7 +401,7 @@ async def speaker_mapping_cancel_callback(
     await _show_main_view(callback, session, user_id)
 
 
-async def _capturing_speaker_name(message: Message) -> bool:
+async def _capturing_speaker_name(message: Message, state: FSMContext = None) -> bool:
     """Фильтр message-хендлера имени: ловим текст без ссылки, пока жива сессия
     сопоставления — НЕЗАВИСИМО от ``editing_speaker`` (#100).
 
@@ -389,11 +411,17 @@ async def _capturing_speaker_name(message: Message) -> bool:
     видео/фото) и истёкшая по TTL сессия проваливаются мимо — в обычный поток
     обработки записи; карточка их не съедает (ADR-0006). Живость сессии читается
     здесь же: нет живой сессии → нет открытой карточки → ловить нечего.
+
+    Открытый FSM-диалог сильнее карточки (критика v11): роутер карточки включён
+    раньше правки шапки, и без этой проверки введённая туда дата уезжала в имена
+    спикеров, пока по второй записи висела живая сессия.
     """
     user = message.from_user
     if user is None or not message.text:
         return False
     if contains_url(message.text):
+        return False
+    if state is not None and await state.get_state() is not None:
         return False
     session = mapping_sessions.peek(user.id)
     return session is not None

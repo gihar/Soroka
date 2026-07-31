@@ -398,7 +398,7 @@ class MeetingInfoService:
         # выдуманный факт, а сразу под ней шло предупреждение о том же самом
         # отсутствии. Ничего пустого: нет темы — нет строки (PRODUCT.md, №3).
         if meeting_info.topic and meeting_info.topic != _TOPIC_MISSING:
-            lines.append(f"📋 <b>Тема:</b> {escape_telegram_html(meeting_info.topic)}")
+            lines.append(f"<b>Тема:</b> {escape_telegram_html(meeting_info.topic)}")
 
         # Время
         if meeting_info.start_time:
@@ -406,19 +406,21 @@ class MeetingInfoService:
             if meeting_info.end_time:
                 end_time_str = meeting_info.end_time.strftime("%H:%M")
                 time_str += f" - {end_time_str}"
-            lines.append(f"🕐 <b>Время:</b> {time_str}")
+            lines.append(f"<b>Время:</b> {time_str}")
 
         # Участники
         if meeting_info.participants:
             participants_count = len(meeting_info.participants)
-            lines.append(f"👥 <b>Участники ({participants_count}):</b>")
+            lines.append(f"<b>Участники ({participants_count}):</b>")
 
             for participant in meeting_info.participants:
-                marker = "👑" if participant.is_organizer else "•"
+                # Организатор назван словом: смысл не имеет права
+                # держаться на одном глифе (PRODUCT.md, доступность).
+                organizer = ", организатор" if participant.is_organizer else ""
                 name = escape_telegram_html(participant.name)
                 role = escape_telegram_html(participant.role) if participant.role else ""
                 role_text = f", {role}" if role else ""
-                lines.append(f"  {marker} {name}{role_text}")
+                lines.append(f"  • {name}{role_text}{organizer}")
 
         return "\n".join(lines)
 

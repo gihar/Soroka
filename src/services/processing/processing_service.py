@@ -504,7 +504,21 @@ class ProcessingService(BaseProcessingService):
                 template=template,
                 speakers_with_audio=speakers_with_audio,
             )
-            mapping_sessions.save(request.user_id, session)
+            # Пользователь мог прислать новую запись, не закрыв карточку
+            # предыдущей. Раньше её сессия здесь молча затиралась вместе с
+            # готовой расшифровкой (критика v11) — теперь предыдущая запись
+            # доводится до протокола, прежде чем слот займёт новая.
+            from src.services.mapping_timeout import finish_superseded_session
+
+            await finish_superseded_session(
+                self,
+                mapping_sessions,
+                user_id=request.user_id,
+                bot=progress_tracker.bot,
+                chat_id=progress_tracker.chat_id,
+            )
+
+            session_key = mapping_sessions.save(request.user_id, session)
 
             confirmation_message = await show_mapping_confirmation(
                 bot=progress_tracker.bot,
@@ -518,6 +532,7 @@ class ProcessingService(BaseProcessingService):
                 unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
                 speakers_text=speakers_text,
                 speakers_with_audio=speakers_with_audio,
+                record_name=request.file_name,
             )
 
             if confirmation_message is None:
@@ -545,7 +560,7 @@ class ProcessingService(BaseProcessingService):
                         f"Не удалось отправить уведомление об ошибке UI: {notify_error}"
                     )
 
-                mapping_sessions.discard(request.user_id)
+                mapping_sessions.discard(request.user_id, session_key)
                 request.speaker_mapping = speaker_mapping
                 return True  # continue processing
             else:
@@ -570,6 +585,7 @@ class ProcessingService(BaseProcessingService):
                     self,
                     mapping_sessions,
                     user_id=request.user_id,
+                    session_key=session_key,
                     bot=progress_tracker.bot,
                     chat_id=progress_tracker.chat_id,
                     delay_seconds=auto_deliver_delay_seconds(mapping_sessions),

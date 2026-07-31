@@ -19,6 +19,25 @@ TEMPLATES_EMPTY = (
 
 PROTOCOL_GONE = "Протокол не найден — возможно, история очищена."
 
+# Общий текст «что-то пошло не так»: восемь копий в трёх модулях (критика v11).
+SOMETHING_WENT_WRONG = (
+    "❌ Произошла ошибка.\n"
+    "Попробуйте ещё раз."
+)
+
+# «Запись потерялась» — состояние обработки не дожило до запуска. Инструкция
+# называет тот же объект, что и первая строка: раньше «Запись потерялась.
+# Отправьте файл ещё раз» звала файл двумя словами в двух строках подряд.
+RECORD_LOST_FILE = (
+    "❌ Запись потерялась.\n"
+    "Отправьте её ещё раз."
+)
+
+RECORD_LOST_LINK = (
+    "❌ Запись потерялась.\n"
+    "Пришлите ссылку ещё раз."
+)
+
 
 class MessageBuilder:
     """Строитель красивых сообщений"""
@@ -152,7 +171,12 @@ class MessageBuilder:
         оговорки здесь.
         """
         notes = list(result.get("warnings") or [])
-        if result.get("date_is_assumed"):
+        # В файловых режимах сводка остаётся в чате и с документом не едет —
+        # там оговорка о дате вписана в само тело (критика v11), и повторять её
+        # здесь значит показать её тому, кто и так её видит, и не показать тому,
+        # кому переслали файл.
+        in_chat = (result.get("protocol_output_mode") or "messages") == "messages"
+        if result.get("date_is_assumed") and in_chat:
             notes.append(
                 "📅 Дата в шапке — день обработки: в записи её не нашлось. "
                 "Поправить: кнопка «Дата и название» под протоколом."
@@ -161,14 +185,10 @@ class MessageBuilder:
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        """«5 мин 12 с» читается легче, чем «312 с»."""
-        total = int(round(seconds))
-        minutes, secs = divmod(total, 60)
-        if minutes and secs:
-            return f"{minutes} мин {secs} с"
-        if minutes:
-            return f"{minutes} мин"
-        return f"{secs} с"
+        """Один формат длительности на весь продукт (см. utils.duration)."""
+        from src.utils.duration import format_duration
+
+        return format_duration(seconds)
 
     @staticmethod
     def _participants_line(result: Dict[str, Any]) -> str:

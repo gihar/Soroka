@@ -29,9 +29,11 @@ class ProtocolHeaderEdit(StatesGroup):
     waiting_for_header = State()  # Ожидание даты и (необязательно) названия
 
 
-class ProtocolInfoState(StatesGroup):
-    """Состояния для ввода дополнительной информации о протоколе"""
-    waiting_agenda = State()  # Ожидание ввода повестки встречи
-    waiting_project_list = State()  # Ожидание ввода списка проектов
+class FeedbackInput(StatesGroup):
+    """Обратная связь свободным текстом.
 
-
+    Меню команд обещает «/feedback — Написать разработчику», а написать было
+    негде: диалог заканчивался цифрой, поле comment никто не заполнял
+    (критика v11).
+    """
+    waiting_for_comment = State()  # Ожидание одного сообщения текстом

@@ -10,6 +10,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.ux.html_text import esc
+from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 # Отказ в доступе был размножен по четырнадцати местам админской поверхности
 # (критика v10). Одна формулировка — одно место.
@@ -162,7 +163,7 @@ def transcription_mode_view(current_mode: str) -> tuple[str, InlineKeyboardMarku
     for mode, label, mode_description in _TRANSCRIPTION_MODES:
         if mode == current_mode:
             description = mode_description
-        prefix = "✅ " if mode == current_mode else ""
+        prefix = f"{SELECTED_MARK} " if mode == current_mode else ""
         rows.append([InlineKeyboardButton(
             text=f"{prefix}{label}",
             callback_data=f"set_transcription_mode_{mode}",
