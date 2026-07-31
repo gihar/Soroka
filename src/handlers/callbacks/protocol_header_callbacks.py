@@ -4,15 +4,21 @@
 живёт там и тестируется без Telegram. Здесь только диалог: спросить, поймать
 ответ, переотправить исправленный протокол.
 
-Ловец текста привязан к FSM-состоянию, поэтому он не конкурирует с приёмом имён
-спикеров (та карточка ловит текст, пока жива сессия сопоставления) — правка
-шапки возможна только после доставки, когда сессии уже нет.
+Ловец текста привязан к FSM-состоянию. Приоритет над приёмом имён спикеров
+даёт не порядок роутеров (карточка включена раньше), а то, что её ловец
+отступает при любом открытом FSM-диалоге — иначе при живой второй записи
+введённая дата уезжала в имена спикеров (критика v11).
 """
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from loguru import logger
 
 from src.handlers.participants_states import ProtocolHeaderEdit
@@ -31,6 +37,24 @@ _GONE_TEXT = (
     "Протокол не найден — возможно, история очищена.\n"
     "Отправьте запись ещё раз."
 )
+
+# Ввод не похож на шапку: пока диалог открыт, общий обработчик текста до
+# сообщения не доходит, поэтому ссылка на новую запись раньше становилась датой.
+_REJECTED_TEXT = (
+    "Это не похоже на дату встречи.\n"
+    "Отправьте её одной строкой — или нажмите «Отмена», чтобы выйти."
+)
+
+_CANCELLED_TEXT = "Правка отменена — протокол остался прежним."
+
+_CANCEL_DATA = "proto_header_cancel"
+
+
+def _cancel_keyboard() -> InlineKeyboardMarkup:
+    """Выход из диалога: без него текст пользователя некуда деть, кроме шапки."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Отмена", callback_data=_CANCEL_DATA)
+    ]])
 
 
 def _history_id_from(data: str) -> int:
@@ -55,7 +79,20 @@ def setup_protocol_header_callbacks() -> Router:
 
         await state.set_state(ProtocolHeaderEdit.waiting_for_header)
         await state.update_data(header_history_id=history_id)
-        await callback.message.answer(HEADER_EDIT_PROMPT)
+        await callback.message.answer(
+            HEADER_EDIT_PROMPT, reply_markup=_cancel_keyboard()
+        )
+        await _safe_callback_answer(callback)
+
+    @router.callback_query(F.data == _CANCEL_DATA)
+    async def cancel_header(callback: CallbackQuery, state: FSMContext):
+        """Закрыть диалог, ничего не меняя."""
+        await state.set_state(None)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.debug(f"Правка шапки: клавиатуру уже не убрать: {e}")
+        await callback.message.answer(_CANCELLED_TEXT)
         await _safe_callback_answer(callback)
 
     @router.message(StateFilter(ProtocolHeaderEdit.waiting_for_header), F.text)
@@ -79,6 +116,10 @@ def setup_protocol_header_callbacks() -> Router:
 
         if outcome.status == "empty":
             await message.answer(_EMPTY_INPUT_TEXT)
+            return
+
+        if outcome.status == "rejected":
+            await message.answer(_REJECTED_TEXT, reply_markup=_cancel_keyboard())
             return
 
         await state.clear()

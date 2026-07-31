@@ -14,6 +14,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from src.services.protocol_header import parse_header_input, rewrite_protocol_header
+from src.utils.url_detection import contains_url
 
 HEADER_EDIT_PROMPT = (
     "Когда была встреча?\n"
@@ -27,7 +28,8 @@ class HeaderEditOutcome:
     """Итог правки: что показать пользователю и что переотправить.
 
     ``status``: ``ok`` — есть исправленный протокол; ``empty`` — ввод пуст,
-    спрашиваем ещё раз; ``not_found`` — записи нет или она не принадлежит
+    спрашиваем ещё раз; ``rejected`` — это не шапка (ссылка или команда),
+    диалог держим открытым; ``not_found`` — записи нет или она не принадлежит
     пользователю (история очищена / чужой id).
     """
 
@@ -36,6 +38,21 @@ class HeaderEditOutcome:
     file_name: Optional[str] = None
     date: Optional[str] = None
     title: Optional[str] = None
+
+
+def _looks_like_header(raw_input: str) -> bool:
+    """Похож ли ввод на дату с названием, а не на что-то другое.
+
+    Отсекаются два случая, которые пользователь набирает в этом состоянии по
+    инерции: ссылка на новую запись и команда. Всё остальное принимается как
+    есть — название встречи может выглядеть как угодно.
+    """
+    text = (raw_input or "").strip()
+    if not text:
+        return False
+    if contains_url(text):
+        return False
+    return not text.startswith("/")
 
 
 async def apply_header_edit(
@@ -56,6 +73,12 @@ async def apply_header_edit(
     date, title = parse_header_input(raw_input)
     if not date and not title:
         return HeaderEditOutcome(status="empty")
+
+    # Пока диалог открыт, общий text_handler до сообщения не доходит
+    # (StateFilter(None)), поэтому ссылка на новую запись и команда молча
+    # уезжали в шапку документа (критика v11). Такое не применяем.
+    if not _looks_like_header(raw_input):
+        return HeaderEditOutcome(status="rejected")
 
     row = await history_repo.get_result_for_user(history_id, telegram_user_id)
     if not row or not (row.get("result_text") or "").strip():

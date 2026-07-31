@@ -360,12 +360,6 @@ def setup_participants_handlers() -> Router:
         try:
             text = message.text.strip()
 
-            # Проверка на команду отмены
-            if text.startswith('/cancel'):
-                await state.clear()
-                await message.answer("Ввод участников отменен.")
-                return
-
             # Гибридный подход: пробуем автоизвлечение, затем обычный парсинг
             meeting_info = participants_service.extract_from_meeting_text(text)
             
