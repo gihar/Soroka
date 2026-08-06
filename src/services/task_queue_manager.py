@@ -15,7 +15,7 @@ from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
-from src.services import admin_alerts, error_presentation
+from src.services import admin_alerts, error_presentation, preset_failover
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -384,10 +384,17 @@ class TaskQueueManager:
         ``src.services.error_presentation`` — общего с пользовательским текстом,
         чтобы два пути не разошлись в том, что считать исчерпанием. Доставка и
         троттлинг — в ``admin_alerts``, единственном канале до администраторов.
+
+        Разница поводов доходит и до действий: квотную стену бот пробует обойти
+        сам, переведя активный пресет на резервный (``preset_failover``), а
+        кредитную — нет, там лечение другое и минутное (пополнение). Задача,
+        упавшая на стене, уже завершилась ошибкой выше по стеку: автовозврат
+        достаётся следующим прогонам, модель внутри упавшего не подменяется.
         """
         error_text = str(exc).lower()
         if error_presentation.is_quota_exhausted(error_text):
-            await admin_alerts.notify_quota_exhausted(exc)
+            switched_to = await preset_failover.return_to_fallback()
+            await admin_alerts.notify_quota_exhausted(exc, switched_to=switched_to)
         elif error_presentation.is_insufficient_credits(error_text):
             await admin_alerts.notify_insufficient_credits(exc)
 

@@ -122,19 +122,35 @@ def build_credits_alert(exc: Exception) -> str:
     )
 
 
-def build_quota_alert(exc: Exception) -> str:
+def build_quota_alert(exc: Exception, *, switched_to: Optional[str] = None) -> str:
     """Текст алерта об исчерпании квоты подписки.
 
     Совет противоположен кредитному: пополнять нечего — квота вернётся в
     следующем периоде, а работать сейчас можно только с другого пресета
     (CONTEXT.md, ADR-0007).
+
+    ``switched_to`` — имя пресета, на который автовозврат уже перевёл бота.
+    Тогда шаг администратора другой: просить сменить пресет, который бот сменил
+    сам, значит слать в /models за уже сделанной работой.
     """
+    if switched_to:
+        next_step = (
+            f"Активный пресет переключён на «{switched_to}» — следующие протоколы "
+            "идут на нём.\n\n"
+            "➡️ Квота вернётся в следующем периоде подписки. Вернуть прежний "
+            "пресет можно в /models."
+        )
+    else:
+        next_step = (
+            "➡️ Квота вернётся в следующем периоде подписки. Чтобы протоколы шли "
+            "сейчас, смените активный пресет (/models)."
+        )
+
     return (
         "🚨 LLM: исчерпана квота подписки\n\n"
         "Запросы к модели падают — пользователи сейчас получают отказ.\n\n"
         + _incident_details(exc)
-        + "➡️ Квота вернётся в следующем периоде подписки. Чтобы протоколы шли "
-        "сейчас, смените активный пресет (/models)."
+        + next_step
     )
 
 
@@ -181,6 +197,15 @@ async def notify_insufficient_credits(exc: Exception) -> None:
     await notify_admins(build_credits_alert(exc), reason=REASON_INSUFFICIENT_CREDITS)
 
 
-async def notify_quota_exhausted(exc: Exception) -> None:
-    """Сообщить администраторам об исчерпании квоты подписки."""
-    await notify_admins(build_quota_alert(exc), reason=REASON_QUOTA_EXHAUSTED)
+async def notify_quota_exhausted(
+    exc: Exception, *, switched_to: Optional[str] = None
+) -> None:
+    """Сообщить администраторам об исчерпании квоты подписки.
+
+    ``switched_to`` называет пресет, на который увёл автовозврат (если увёл):
+    одно сообщение вместо двух — и повод, и то, что бот с ним сделал.
+    """
+    await notify_admins(
+        build_quota_alert(exc, switched_to=switched_to),
+        reason=REASON_QUOTA_EXHAUSTED,
+    )

@@ -1,10 +1,16 @@
-"""Уведомление админов об исчерпании квоты подписки (#117).
+"""Реакция на квотную стену: уведомление админов (#117) и автовозврат (#119).
 
 Квота подписки кончается иначе, чем кредиты провайдера, и лечится иначе:
 пополнение баланса не помогает — нужен следующий период или другой пресет
 (CONTEXT.md). Поэтому у события свой текст, а окно троттлинга считается
 отдельно от прочих поводов: квотный инцидент не должен глушить сообщение о
 расхождении с брифом.
+
+Разница доходит и до действий. Активный пресет глобальный, поэтому квотная
+стена валит протоколы у всех и держит их до появления администратора — бот
+переводит активный пресет на резервный сам. Кредитная стена автовозврат не
+запускает: там лечение минутное. Переключается настройка, а не идущий вызов —
+фолбэк внутри одного прогона отвергнут в ADR-0007.
 """
 import os
 import sys
@@ -118,3 +124,137 @@ async def test_worker_stays_silent_on_unrelated_failures(sent):
     await _worker()._notify_admins_provider_exhausted(RuntimeError("connection reset"))
 
     assert sent.await_count == 0
+
+
+# ------------------------------------------------ автовозврат активного пресета
+
+
+@pytest.fixture(autouse=True)
+async def presets(monkeypatch, test_db, app_settings_repo):
+    """Репозитории воркера — на временной базе теста; два включённых пресета.
+
+    Автоматически на весь файл: реакция на квотную стену теперь ходит в
+    настройки приложения за резервным пресетом, и тест про текст уведомления
+    должен упираться в ту же базу, что тест про переключение.
+    """
+    import src.database as database
+    from src.database.model_preset_repo import ModelPresetRepository
+
+    preset_repo = ModelPresetRepository(test_db)
+    await preset_repo.upsert(
+        key="qwen_plus", name="Qwen: plus", model="qwen3.7-plus", base_url="q"
+    )
+    await preset_repo.upsert(
+        key="openrouter", name="OpenRouter: gpt-5-mini", model="gpt-5-mini", base_url="o"
+    )
+    monkeypatch.setattr(database, "app_settings_repo", app_settings_repo)
+    monkeypatch.setattr(database, "model_preset_repo", preset_repo)
+    return app_settings_repo
+
+
+async def test_quota_wall_returns_active_preset_to_the_reserve(sent, presets):
+    """Стена у подписки — активный пресет уходит на резервный, бот не лежит."""
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("openrouter", admin_id=42)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    assert await presets.get_active_model_key() == "openrouter"
+    body = str(sent.await_args_list[0].args[2])
+    assert "OpenRouter: gpt-5-mini" in body  # админу видно, на что переключились
+    # Звать в /models за уже сделанной работой — обещание невыполненного шага.
+    assert "смените активный пресет" not in body.lower()
+
+
+async def test_without_a_reserve_nothing_switches_but_the_alert_arrives(sent, presets):
+    """Резерв не задан — тихо переехать на случайного провайдера хуже, чем постоять."""
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    assert await presets.get_active_model_key() == "qwen_plus"
+    body = str(sent.await_args_list[0].args[2])
+    assert "смените активный пресет" in body.lower()
+
+
+async def test_reserve_equal_to_the_exhausted_preset_switches_nothing(sent, presets):
+    """Резерв совпал с активным — переключать не на что, и обещать нечего."""
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("qwen_plus", admin_id=42)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    assert await presets.get_active_model_key() == "qwen_plus"
+    body = str(sent.await_args_list[0].args[2])
+    assert "переключён" not in body.lower()
+    assert "смените активный пресет" in body.lower()
+
+
+async def test_stale_reserve_does_not_switch_and_the_alert_still_arrives(
+    sent, presets, test_db
+):
+    """Резерв выключили после настройки — автовозврату некуда идти, но алерт идёт."""
+    from src.database.model_preset_repo import ModelPresetRepository
+
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("openrouter", admin_id=42)
+    await ModelPresetRepository(test_db).update_field("openrouter", "is_enabled", 0)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    assert await presets.get_active_model_key() == "qwen_plus"
+    assert sent.await_count == 2  # сбой автовозврата не съел уведомление
+    assert "смените активный пресет" in str(sent.await_args_list[0].args[2]).lower()
+
+
+async def test_storage_failure_during_switch_does_not_eat_the_alert(
+    sent, presets, monkeypatch
+):
+    """Автовозврат — попытка, а не условие: упал он — уведомление всё равно уходит."""
+    async def unavailable():
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(presets, "get_fallback_model_key", unavailable)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    assert sent.await_count == 2
+    assert "квот" in str(sent.await_args_list[0].args[2]).lower()
+
+
+async def test_credits_exhaustion_leaves_the_active_preset_alone(sent, presets):
+    """Кредиты лечатся пополнением за минуту — уводить бота с провайдера незачем."""
+    from src.exceptions.processing import LLMInsufficientCreditsError
+
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("openrouter", admin_id=42)
+
+    await _worker()._notify_admins_provider_exhausted(
+        LLMInsufficientCreditsError(
+            "Error code: 402 - requires more credits", provider="openai", model="gpt-5"
+        )
+    )
+
+    assert await presets.get_active_model_key() == "qwen_plus"
+    assert "баланс" in str(sent.await_args_list[0].args[2]).lower()
+
+
+async def test_reserve_reaches_the_next_run_not_the_one_that_hit_the_wall(sent, presets):
+    """Переключается настройка, а не идущий вызов: упавший прогон остался на своём.
+
+    Прогон к этому моменту уже завершился ошибкой (реакция вызывается из
+    ветки сбоя воркера) — модель внутри него не подменяется, резерв достаётся
+    следующему обращению за активным пресетом.
+    """
+    from src.database import model_preset_repo
+    from src.services.processing.llm_generation import resolve_active_preset
+
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("openrouter", admin_id=42)
+
+    run_that_hit_the_wall = await resolve_active_preset(presets, model_preset_repo)
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    next_run = await resolve_active_preset(presets, model_preset_repo)
+
+    assert run_that_hit_the_wall["model"] == "qwen3.7-plus"
+    assert next_run["model"] == "gpt-5-mini"

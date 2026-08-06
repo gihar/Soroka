@@ -619,13 +619,24 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
         from src.database import app_settings_repo
 
         active_key = await app_settings_repo.get_active_model_key()
+        fallback_key = await app_settings_repo.get_fallback_model_key()
         is_active = preset["key"] == active_key
+        is_fallback = preset["key"] == fallback_key
 
         key = preset["key"]
         api_key_status = "задан" if preset.get("api_key") else "не задан"
         enabled_label = "включена" if preset.get("is_enabled") else "выключена"
         access_label = "только админы" if preset.get("admin_only") else "все пользователи"
         active_label = "да" if is_active else "—"
+        # Резерв, совпавший с активной, — законное состояние (сюда приводит сам
+        # автовозврат), но переключаться ему уже некуда: говорим это словами,
+        # чтобы карточка не обещала автовозврат, которого не будет.
+        if is_fallback and is_active:
+            fallback_label = "да (совпадает с активной — автовозврата не будет)"
+        elif is_fallback:
+            fallback_label = "да"
+        else:
+            fallback_label = "—"
 
         text = (
             f"<b>{esc(preset['name'])}</b>\n\n"
@@ -635,11 +646,13 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             f"API Key: {api_key_status}\n"
             f"Статус: {enabled_label}\n"
             f"Доступ: {access_label}\n"
-            f"Активная: {active_label}"
+            f"Активная: {active_label}\n"
+            f"Резервная: {fallback_label}"
         )
 
         toggle_text = "Выключить" if preset.get("is_enabled") else "Включить"
         access_text = "Для всех" if preset.get("admin_only") else "Только админы"
+        reserve_text = "Убрать из резервных" if is_fallback else "Сделать резервной"
 
         rows = []
         if not is_active and preset.get("is_enabled"):
@@ -651,6 +664,9 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             [
                 InlineKeyboardButton(text=toggle_text, callback_data=f"admin_model_toggle_{key}"),
                 InlineKeyboardButton(text=access_text, callback_data=f"admin_model_access_{key}"),
+            ],
+            [
+                InlineKeyboardButton(text=reserve_text, callback_data=f"admin_model_reserve_{key}"),
             ],
             [
                 InlineKeyboardButton(text="Удалить", callback_data=f"admin_model_delete_{key}"),
@@ -859,6 +875,50 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
             await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Ошибка в admin_model_access_callback: {e}")
+            await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
+
+    @router.callback_query(F.data.startswith("admin_model_reserve_"))
+    async def admin_model_reserve_callback(callback: CallbackQuery):
+        """Назначить модель резервной или снять этот признак.
+
+        Резервная модель — адрес автовозврата: на неё бот сам переключается,
+        упёршись в квотную стену подписки (ADR-0007). Незаданный резерв —
+        законная настройка: тогда автовозврата нет, остаётся уведомление.
+        """
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Недостаточно прав", show_alert=True)
+            return
+
+        try:
+            from src.database import app_settings_repo, model_preset_repo
+            from src.exceptions.configuration import AdminConfigurationError
+
+            await callback.answer()
+            key = callback.data.replace("admin_model_reserve_", "", 1)
+            repo = model_preset_repo
+            preset = await repo.get_by_key(key)
+            if not preset:
+                await safe_edit_text(callback.message, f"❌ Модель <code>{esc(key)}</code> не найдена.", parse_mode="HTML")
+                return
+
+            was_fallback = key == await app_settings_repo.get_fallback_model_key()
+            try:
+                if was_fallback:
+                    await app_settings_repo.clear_fallback_model_key(
+                        admin_id=callback.from_user.id
+                    )
+                else:
+                    await app_settings_repo.set_fallback_model_key(
+                        key, admin_id=callback.from_user.id
+                    )
+            except AdminConfigurationError as e:
+                await safe_edit_text(callback.message, f"❌ {e.message}")
+                return
+
+            text, keyboard = await _render_model_detail(preset)
+            await safe_edit_text(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Ошибка в admin_model_reserve_callback: {e}")
             await safe_edit_text(callback.message, f"❌ Ошибка: {e}")
 
     @router.callback_query(F.data.startswith("admin_model_delete_"))

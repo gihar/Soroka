@@ -1,7 +1,9 @@
 """Application-wide key-value settings (admin-controlled).
 
 Stores small, global pieces of state that are not user-scoped — most notably
-`active_model_key`, the globally selected AI model preset.
+`active_model_key`, the globally selected AI model preset, and
+`fallback_model_key`, the preset the bot returns to when the active one hits a
+subscription quota wall (ADR-0007).
 """
 
 from typing import Optional
@@ -11,6 +13,16 @@ from loguru import logger
 from src.exceptions.configuration import AdminConfigurationError
 
 _ACTIVE_MODEL_KEY = "active_model_key"
+_FALLBACK_MODEL_KEY = "fallback_model_key"
+
+_UPSERT_SETTING = """
+    INSERT INTO app_settings (key, value, updated_by, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_by = excluded.updated_by,
+        updated_at = CURRENT_TIMESTAMP
+"""
 
 
 class AppSettingsRepository:
@@ -32,27 +44,65 @@ class AppSettingsRepository:
     async def set(self, key: str, value: str, admin_id: Optional[int]) -> None:
         """UPSERT `key` to `value`, recording `admin_id` as `updated_by`."""
         async with self._db.connect() as db:
-            await db.execute(
-                """
-                INSERT INTO app_settings (key, value, updated_by, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_by = excluded.updated_by,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, value, admin_id),
-            )
+            await db.execute(_UPSERT_SETTING, (key, value, admin_id))
+            await db.commit()
+
+    async def delete(self, key: str) -> None:
+        """Forget `key` entirely (an unset setting, not an empty one)."""
+        async with self._db.connect() as db:
+            await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
             await db.commit()
 
     async def get_active_model_key(self) -> Optional[str]:
         """Return the globally selected model preset key, or None."""
         return await self.get(_ACTIVE_MODEL_KEY)
 
-    async def set_active_model_key(self, preset_key: str, admin_id: int) -> None:
+    async def set_active_model_key(
+        self, preset_key: str, admin_id: Optional[int]
+    ) -> None:
         """Validate the preset and store it as the active model.
 
         Raises `AdminConfigurationError` if the preset does not exist or is disabled.
+
+        `admin_id` is `None` when nobody chose: the автовозврат at a quota wall
+        switches presets without a human (ADR-0007). Recording the admin who
+        happened to be first in the list would put a name against an action they
+        never took, so the journal keeps NULL and the log says so in words.
+        """
+        await self._set_validated_preset(_ACTIVE_MODEL_KEY, preset_key, admin_id)
+        actor = f"admin {admin_id}" if admin_id is not None else "автовозвратом"
+        logger.info(f"active_model_key set to '{preset_key}' by {actor}")
+
+    async def get_fallback_model_key(self) -> Optional[str]:
+        """Return the reserve preset key used by автовозврат, or None.
+
+        None means «автовозврата нет»: silently moving onto an arbitrary
+        provider is worse than standing still (ADR-0007).
+        """
+        return await self.get(_FALLBACK_MODEL_KEY)
+
+    async def set_fallback_model_key(self, preset_key: str, admin_id: int) -> None:
+        """Validate the preset and store it as the reserve model.
+
+        Validated exactly like the active one: a reserve pointing at a missing
+        or disabled preset is a promise without an address, and it would only
+        come apart at the wall, when there is no time to fix it.
+        """
+        await self._set_validated_preset(_FALLBACK_MODEL_KEY, preset_key, admin_id)
+        logger.info(f"fallback_model_key set to '{preset_key}' by admin {admin_id}")
+
+    async def clear_fallback_model_key(self, admin_id: int) -> None:
+        """Drop the reserve preset: автовозврат stops, the alert stays."""
+        await self.delete(_FALLBACK_MODEL_KEY)
+        logger.info(f"fallback_model_key cleared by admin {admin_id}")
+
+    async def _set_validated_preset(
+        self, setting_key: str, preset_key: str, admin_id: Optional[int]
+    ) -> None:
+        """Store `preset_key` under `setting_key` if that preset exists and is enabled.
+
+        Check and write share one transaction: a preset disabled in between
+        would otherwise be recorded as a working address.
         """
         async with self._db.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -69,21 +119,7 @@ class AppSettingsRepository:
             if not row[0]:
                 await db.rollback()
                 raise AdminConfigurationError(
-                    f"Пресет '{preset_key}' отключён и не может быть активным"
+                    f"Пресет '{preset_key}' отключён и не может быть выбран"
                 )
-            await db.execute(
-                """
-                INSERT INTO app_settings (key, value, updated_by, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_by = excluded.updated_by,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (_ACTIVE_MODEL_KEY, preset_key, admin_id),
-            )
+            await db.execute(_UPSERT_SETTING, (setting_key, preset_key, admin_id))
             await db.commit()
-
-        logger.info(
-            f"active_model_key set to '{preset_key}' by admin {admin_id}"
-        )
