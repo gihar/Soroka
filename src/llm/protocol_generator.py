@@ -5,6 +5,9 @@ OpenAI-совместимых клиентов по пресетам модел�
 (rate-limit → circuit-breaker → retry) — безусловно вокруг каждого вызова.
 402 (кончились кредиты) классифицируется в LLMInsufficientCreditsError,
 не ретраится и пролетает насквозь.
+
+Каким клиентом и какой моделью идёт шаг, модуль не решает: вызов называет шаг и
+пресет, а маршрут разрешает `src.llm.model_step` — единственная такая точка.
 """
 import asyncio
 from typing import Any, Dict, Optional
@@ -16,6 +19,7 @@ from loguru import logger
 from src.config import settings
 from src.exceptions.processing import LLMInsufficientCreditsError
 from src.llm.json_utils import safe_json_parse
+from src.llm.model_step import ModelStep, resolve_step
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import (
     build_analysis_prompt,
@@ -195,21 +199,22 @@ class ProtocolGenerator:
         )
 
     async def structured_call(self, *, system_prompt: str, user_prompt: str,
-                              schema: Dict[str, Any], model: str = None,
-                              preset: Optional[Dict[str, Any]] = None,
-                              step_name: str = "StructuredCall") -> Dict[str, Any]:
-        """Один вызов модели со строгой схемой ответа (с надёжностью)."""
+                              schema: Dict[str, Any], step: ModelStep,
+                              preset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Один вызов модели со строгой схемой ответа (с надёжностью).
+
+        Клиента и модель выбирает маршрут шага: вызывающий называет шаг, а не
+        модель.
+        """
         if not self.is_available():
             raise ValueError("OpenAI API не настроен")
-        client = self._get_client(preset)
         return await self._protected(
             self._call_openai,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             schema=schema,
-            step_name=step_name,
-            model=model,
-            client=client,
+            step=step,
+            preset=preset,
         )
 
     # ----------------------------------------------------------- реализация
@@ -240,15 +245,6 @@ class ProtocolGenerator:
         provided_meeting_type = kwargs.get('meeting_type')
         provided_speaker_mapping = kwargs.get('speaker_mapping')
 
-        if preset and preset.get('model'):
-            selected_model = preset['model']
-            logger.info(
-                f"Используется модель: {selected_model} "
-                f"(ключ: {preset.get('key')})"
-            )
-        else:
-            selected_model = settings.openai_model
-
         if provided_meeting_type and provided_speaker_mapping:
             logger.info(
                 f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление "
@@ -270,8 +266,8 @@ class ProtocolGenerator:
                     project_list=kwargs.get('project_list')
                 ),
                 schema=MEETING_ANALYSIS_SCHEMA,
-                step_name="Analysis",
-                model=settings.analysis_stage_model
+                step=ModelStep.ANALYSIS,
+                preset=preset,
             )
 
             meeting_type = analysis_result.get('meeting_type', 'general')
@@ -280,8 +276,6 @@ class ProtocolGenerator:
             logger.info(f"ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
 
         logger.info("Запуск ЭТАПА 2: Генерация протокола")
-
-        client = self._get_client(preset)
 
         # Единая точка: бриф-контракт для системного шаблона, legacy — для кастомного.
         generation_schema, generation_system_prompt = _select_generation_contract(
@@ -299,9 +293,8 @@ class ProtocolGenerator:
                 project_list=kwargs.get('project_list')
             ),
             schema=generation_schema,
-            step_name="Generation",
-            model=selected_model,
-            client=client
+            step=ModelStep.GENERATION,
+            preset=preset,
         )
 
         protocol_data = generation_result.get('protocol_data', {})
@@ -317,31 +310,27 @@ class ProtocolGenerator:
 
         return final_result
 
-    async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any],
-                           step_name: str, model: str = None, client=None) -> Dict[str, Any]:
-        """Helper method for OpenAI API calls."""
-        selected_model = model or settings.openai_model
-        active_client = client or self.default_client
+    async def _call_openai(self, *, system_prompt: str, user_prompt: str,
+                           schema: Dict[str, Any], step: ModelStep,
+                           preset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Единственный исполнитель вызова: маршрут шага → запрос → разбор ответа."""
+        route = resolve_step(step, preset, self._get_client)
+        step_name = step.value
 
-        extra_headers = {}
-        if settings.http_referer:
-            extra_headers["HTTP-Referer"] = settings.http_referer
-        if settings.x_title:
-            extra_headers["X-Title"] = settings.x_title
-
-        logger.info(f"Отправляем запрос в OpenAI [{step_name}] с моделью {selected_model}")
+        logger.info(route.describe())
 
         try:
             response = await asyncio.to_thread(
-                active_client.chat.completions.create,
-                model=selected_model,
+                route.client.chat.completions.create,
+                model=route.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
                 response_format={"type": "json_schema", "json_schema": schema},
-                extra_headers=extra_headers
+                extra_headers=route.extra_headers,
+                **({"extra_body": route.extra_body} if route.extra_body else {}),
             )
             content = response.choices[0].message.content
 
@@ -349,7 +338,7 @@ class ProtocolGenerator:
                 log_cached_tokens_usage(
                     response=response,
                     context=f"generate_protocol_{step_name}",
-                    model_name=selected_model,
+                    model_name=route.model,
                     provider="openai"
                 )
 
@@ -359,7 +348,7 @@ class ProtocolGenerator:
             logger.error(f"Ошибка при вызове OpenAI [{step_name}]: {e}")
             if _is_insufficient_credits_error(e):
                 raise LLMInsufficientCreditsError(
-                    str(e), provider="openai", model=selected_model
+                    str(e), provider="openai", model=route.model
                 ) from e
             raise
 

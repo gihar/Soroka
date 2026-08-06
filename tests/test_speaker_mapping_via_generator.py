@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.config import settings
+from src.llm import ModelStep
 
 
 async def test_mapping_call_uses_structured_call(monkeypatch):
@@ -23,7 +23,7 @@ async def test_mapping_call_uses_structured_call(monkeypatch):
     assert result == fake_result
     kwargs = fake_call.call_args.kwargs
     assert kwargs["user_prompt"] == "промпт с диалогом"
-    assert kwargs["model"] == settings.speaker_mapping_model
+    assert kwargs["step"] is ModelStep.SPEAKER_MAPPING  # модель выбирает маршрут шага
     assert kwargs["schema"] is sms.SPEAKER_MAPPING_SCHEMA
 
 

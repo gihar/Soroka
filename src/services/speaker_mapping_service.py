@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set
 from loguru import logger
 
 from src.config import settings
-from src.llm import protocol_generator
+from src.llm import ModelStep, protocol_generator
 from src.models.diarization import Diarization, Segment
 from src.models.llm_schemas import SPEAKER_MAPPING_SCHEMA
 
@@ -550,8 +550,7 @@ class SpeakerMappingService:
                 system_prompt=system_prompt,
                 user_prompt=prompt,
                 schema=SPEAKER_MAPPING_SCHEMA,
-                model=settings.speaker_mapping_model,
-                step_name="SpeakerMapping",
+                step=ModelStep.SPEAKER_MAPPING,
             )
 
             # Логирование ответа (если включено)

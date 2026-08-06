@@ -172,7 +172,9 @@ async def test_circuit_breaker_opens_and_blocks_calls():
 
 
 async def test_structured_call_contract():
-    """structured_call: строгая схема, заданная модель, распарсенный dict."""
+    """structured_call: строгая схема, модель шага, распарсенный dict."""
+    from src.llm.model_step import ModelStep
+
     client = MagicMock()
     client.chat.completions.create.return_value = _response(
         {"speaker_mappings": {"SPEAKER_0": "Анна"}, "unmapped_speakers": []}
@@ -181,12 +183,13 @@ async def test_structured_call_contract():
 
     result = await gen.structured_call(
         system_prompt="s", user_prompt="u",
-        schema={"name": "mapping"}, model="gpt-5-mini",
+        schema={"name": "mapping"}, step=ModelStep.SPEAKER_MAPPING,
     )
 
+    from src.config import settings
     assert result["speaker_mappings"] == {"SPEAKER_0": "Анна"}
     call = client.chat.completions.create.call_args
-    assert call.kwargs["model"] == "gpt-5-mini"
+    assert call.kwargs["model"] == settings.speaker_mapping_model
     assert call.kwargs["response_format"] == {"type": "json_schema", "json_schema": {"name": "mapping"}}
 
 
