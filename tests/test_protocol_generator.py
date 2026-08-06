@@ -406,12 +406,13 @@ async def test_schema_probe_says_schema_was_dropped_on_a_successful_answer():
     assert set(verdict.requested_keys) == {"zqx_marker", "unlikely_count"}
 
 
-async def test_schema_probe_asks_for_keys_the_prompt_never_mentions():
-    """Форма зонда: строгая схема с невозможными ключами и промпт без них.
+def _probe_call(client):
+    """Аргументы единственного запроса, который отправил зонд."""
+    return client.chat.completions.create.call_args
 
-    Упомяни промпт эти ключи — модель вернула бы их, не читая схему, и вердикт
-    «применяется» ничего бы не значил.
-    """
+
+async def test_schema_probe_sends_a_strict_schema_of_impossible_keys():
+    """Форма зонда: строгая схема, оба ключа обязательны, посторонних не бывает."""
     client = MagicMock()
     client.chat.completions.create.return_value = _response(
         {"zqx_marker": "zqx-7", "unlikely_count": 3}
@@ -420,7 +421,7 @@ async def test_schema_probe_asks_for_keys_the_prompt_never_mentions():
 
     await gen.probe_schema_support(preset=None)
 
-    call = client.chat.completions.create.call_args
+    call = _probe_call(client)
     schema = call.kwargs["response_format"]["json_schema"]
     assert call.kwargs["response_format"]["type"] == "json_schema"
     assert schema["strict"] is True
@@ -428,8 +429,58 @@ async def test_schema_probe_asks_for_keys_the_prompt_never_mentions():
     assert set(schema["schema"]["required"]) == {"zqx_marker", "unlikely_count"}
     assert schema["schema"]["additionalProperties"] is False
 
-    prompts = " ".join(m["content"] for m in call.kwargs["messages"]).lower()
-    assert "zqx_marker" not in prompts and "unlikely_count" not in prompts
+
+async def test_schema_probe_prompt_names_json_but_never_the_schema_keys():
+    """Промпт зонда: слово «json» есть, ключей схемы нет.
+
+    Живой прогон (2026-08-06): `qwen3.6-flash` понижает `json_schema` до
+    `json_object`, а у того предусловие — слово «json» в сообщениях. Без него
+    вместо вердикта прилетало HTTP 400, и зонд отправлял администратора чинить
+    связь ровно в том случае, ради которого он и заведён.
+
+    Ключи схемы — другое дело: они говорят о содержании ответа. Упомяни их
+    промпт, модель вернула бы их, не читая схему, и вердикт «применяется»
+    ничего бы не значил.
+    """
+    from src.llm.protocol_generator import SCHEMA_PROBE_SCHEMA
+
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response(
+        {"zqx_marker": "zqx-7", "unlikely_count": 3}
+    )
+    gen = _fast_generator(client)
+
+    await gen.probe_schema_support(preset=None)
+
+    prompts = " ".join(m["content"] for m in _probe_call(client).kwargs["messages"]).lower()
+    assert "json" in prompts, "провайдер, понижающий схему до json_object, иначе ответит 400"
+    for key in SCHEMA_PROBE_SCHEMA["schema"]["properties"]:
+        assert key not in prompts, f"ключ схемы {key} в промпте подсказывает вердикт"
+
+
+async def test_schema_probe_keeps_a_400_a_failure_and_not_a_verdict():
+    """Отказ провайдера с 400 — по-прежнему ошибка: вердикта по схеме в нём нет.
+
+    Путь остаётся живым для прочих причин отказа, и класс ошибки не подменяется
+    квотным или кредитным: у них другое лечение.
+    """
+    from src.exceptions.processing import (
+        LLMInsufficientCreditsError,
+        LLMQuotaExhaustedError,
+    )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = Exception(
+        "Error code: 400 - {'error': {'message': \"Invalid value: 'json_schema'. "
+        "Supported values are: 'json_object' and 'text'.\"}}"
+    )
+    gen = _fast_generator(client, retry_attempts=1, failure_threshold=5)
+
+    with pytest.raises(Exception) as raised:
+        await gen.probe_schema_support(preset=None)
+
+    assert "400" in str(raised.value)
+    assert not isinstance(raised.value, (LLMQuotaExhaustedError, LLMInsufficientCreditsError))
 
 
 async def test_schema_probe_lets_provider_failures_out_as_errors_not_verdicts(monkeypatch):
