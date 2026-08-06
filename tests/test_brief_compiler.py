@@ -11,6 +11,7 @@ from src.models.llm_schemas import PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import FIELD_SPECIFIC_RULES
 from src.services.brief_compiler import (
     brief_field_rules,
+    brief_protocol_keys,
     brief_to_schema,
     brief_to_template_content,
 )
@@ -197,3 +198,22 @@ def test_non_lecture_briefs_omit_lecturer(brief):
     assert "lecturer" not in node["properties"]
     assert "lecturer" not in node["required"]
     assert "lecturer" not in brief_field_rules(brief)
+
+
+# ---------------------------------------------------------------------------
+# brief_protocol_keys: ключи брифа — ОДИН источник для схемы, правил промпта и
+# сверки ответа модели (#113). Пока источник один, три набора не разъезжаются:
+# новый ключ приезжает и в схему, и в правила, и в сверку разом.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
+def test_brief_protocol_keys_are_the_schema_source(brief):
+    """Ключи брифа == ключи protocol_data строгой схемы."""
+    assert set(brief_protocol_keys(brief)) == set(_protocol_data_node(brief)["properties"])
+
+
+@pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
+def test_brief_protocol_keys_are_the_prompt_rules_source(brief):
+    """Ключи брифа == ключи правил извлечения для промпта."""
+    assert set(brief_protocol_keys(brief)) == set(brief_field_rules(brief))

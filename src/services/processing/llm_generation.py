@@ -13,6 +13,7 @@ from loguru import logger
 from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
 from src.performance.metrics import PerformanceTimer, metrics_collector
+from src.services.admin_alerts import notify_brief_mismatch
 from src.services.protocol_validator import protocol_validator
 from src.utils.date_format import format_russian_date, format_russian_day_month
 from src.utils.template_sort import template_name_of
@@ -158,7 +159,7 @@ class LLMGenerationService:
 
         preset_repo = model_preset_repo
         active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
-        llm_model_name = active_preset["name"]  # noqa: F841
+        llm_model_name = active_preset["name"]
 
         # Выполняем генерацию LLM
         with PerformanceTimer("llm_generation", metrics_collector):
@@ -166,6 +167,7 @@ class LLMGenerationService:
 
             # Подготавливаем данные для LLM
             template_variables = self.get_template_variables_from_template(template)
+            template_name = template_name_of(template)
 
             # Консолидированная двухэтапная генерация — единственный путь;
             # надёжность (rate-limit → circuit-breaker → retry) внутри модуля
@@ -199,7 +201,7 @@ class LLMGenerationService:
                 preset=active_preset,
                 transcription=transcription_text,
                 template_variables=template_variables,
-                template_name=template_name_of(template),
+                template_name=template_name,
                 participants_list=participants_list,
                 meeting_metadata=meeting_metadata,
                 speaker_mapping=request.speaker_mapping,
@@ -231,6 +233,14 @@ class LLMGenerationService:
                     template_variables=template_variables,
                     diarization_data=transcription_result.diarization,
                     speaker_mapping=effective_speaker_mapping,
+                    template_name=template_name,
+                )
+
+                await self._report_brief_conformance(
+                    llm_result_data,
+                    template_name=template_name,
+                    model_name=llm_model_name,
+                    processing_metrics=processing_metrics,
                 )
 
                 logger.info(
@@ -280,6 +290,45 @@ class LLMGenerationService:
                 logger.info("=" * 60)
 
         return llm_result_data
+
+    async def _report_brief_conformance(
+        self,
+        protocol: Dict[str, Any],
+        *,
+        template_name: Optional[str],
+        model_name: Optional[str],
+        processing_metrics,
+    ) -> None:
+        """Сверить ответ модели с ключами брифа и сообщить о расхождении заметно.
+
+        Строгая схема — обещание, а не гарантия: модель может ответить успехом и
+        валидным JSON, выбросив схему молча (ADR-0007). Такой ответ отличим от
+        честного только набором ключей, поэтому расхождение уходит в метрики
+        обработки и администраторам, а не только в лог: иначе потеря раздела
+        остаётся молчаливой.
+
+        Ремонтного повторного вызова здесь нет и не предполагается (ADR-0007):
+        при рабочих схемах ему негде сработать, а неисполняемая ветка не
+        проверяется в бою. Кастомный шаблон брифа не имеет — сверять не с чем.
+        """
+        conformance = protocol_validator.check_brief_conformance(protocol, template_name)
+        if conformance is None:
+            return
+
+        record_metric(processing_metrics, 'protocol_brief_mismatch', not conformance.matches)
+        if conformance.matches:
+            return
+
+        logger.error(
+            f"Ответ модели разошёлся с брифом «{conformance.template_name}»: "
+            f"не пришли {list(conformance.missing_keys)}, "
+            f"лишние {list(conformance.unexpected_keys)}"
+        )
+        # Best-effort: сбой уведомления не должен обрушить готовый протокол.
+        try:
+            await notify_brief_mismatch(conformance, model_name=model_name)
+        except Exception as alert_error:
+            logger.error(f"Не удалось уведомить админов о расхождении с брифом: {alert_error}")
 
     def get_template_variables_from_template(self, template) -> Dict[str, str]:
         """Извлечь переменные из конкретного шаблона"""
