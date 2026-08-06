@@ -166,6 +166,23 @@ async def test_quota_wall_returns_active_preset_to_the_reserve(sent, presets):
     assert "смените активный пресет" not in body.lower()
 
 
+async def test_the_switch_is_journalled_without_a_human_author(sent, presets, test_db):
+    """Переключил не человек — в журнале настроек автора нет, а не прежний админ."""
+    import aiosqlite
+
+    await presets.set_active_model_key("qwen_plus", admin_id=42)
+    await presets.set_fallback_model_key("openrouter", admin_id=42)
+
+    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+
+    async with aiosqlite.connect(test_db.db_path) as db:
+        cursor = await db.execute(
+            "SELECT updated_by FROM app_settings WHERE key = 'active_model_key'"
+        )
+        row = await cursor.fetchone()
+    assert row[0] is None
+
+
 async def test_without_a_reserve_nothing_switches_but_the_alert_arrives(sent, presets):
     """Резерв не задан — тихо переехать на случайного провайдера хуже, чем постоять."""
     await presets.set_active_model_key("qwen_plus", admin_id=42)

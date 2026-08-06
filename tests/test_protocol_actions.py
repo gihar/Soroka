@@ -817,6 +817,57 @@ async def test_model_go_regenerates_with_chosen_preset_and_stored_template(monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_preset",
+    [None, {"key": "qwen-token-plan", "name": "Qwen3.7 Plus", "is_enabled": False}],
+    ids=["удалён", "выключен"],
+)
+async def test_model_go_refuses_a_preset_that_left_between_screens(
+    monkeypatch, stored_preset
+):
+    """Пресет успели удалить или выключить, пока экран висел — запуска нет.
+
+    Экран выбора живёт своей жизнью: между показом списка и нажатием кнопки
+    администратор мог убрать пресет в /models. Молча уйти на него значило бы
+    генерировать адресом, которого больше нет.
+    """
+    from src.ux.protocol_actions_callback_data import ProtoModelGo
+
+    pac, handler = _actions_handler("protocol_model_go_callback")
+    _as_admin(monkeypatch, True)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row()),
+    )
+    monkeypatch.setattr(
+        db_module.model_preset_repo, "get_by_key",
+        AsyncMock(return_value=stored_preset),
+    )
+
+    import src.services.protocol_actions as pa
+
+    regen_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(pa, "regenerate_protocol", regen_mock)
+
+    data = ProtoModelGo(history_id=7, preset_key="qwen-token-plan")
+    await handler(_model_callback(data.pack()), data)
+
+    regen_mock.assert_not_awaited()
+    assert answers and "недоступна" in answers[-1]
+
+
+@pytest.mark.asyncio
 async def test_model_go_refuses_non_admin(monkeypatch):
     """Кнопка модели, доставшаяся не-администратору, не запускает перегенерацию."""
     from src.ux.protocol_actions_callback_data import ProtoModelGo

@@ -130,6 +130,33 @@ async def test_clear_fallback_model_key(app_settings_repo, test_db):
 
 
 @pytest.mark.asyncio
+async def test_automatic_switch_leaves_the_journal_without_an_author(
+    app_settings_repo, test_db
+):
+    """Автовозврат делает не человек: в журнале остаётся пусто, а не чужое имя.
+
+    Проверяем и то, что запись без автора читается дальше: `updated_by` в коде
+    нигде не форматируется, а сама база сеет `active_model_key` с NULL при
+    старте — пустой автор для этой настройки состояние штатное.
+    """
+    import aiosqlite
+
+    await _seed_enabled_preset(test_db, "qwen")
+    await _seed_enabled_preset(test_db, "reserve")
+    await app_settings_repo.set_active_model_key("qwen", admin_id=42)
+
+    await app_settings_repo.set_active_model_key("reserve", admin_id=None)
+
+    assert await app_settings_repo.get_active_model_key() == "reserve"
+    async with aiosqlite.connect(test_db.db_path) as db:
+        cursor = await db.execute(
+            "SELECT updated_by FROM app_settings WHERE key = 'active_model_key'"
+        )
+        row = await cursor.fetchone()
+    assert row[0] is None, "автовозврат не должен оставлять в журнале админа 42"
+
+
+@pytest.mark.asyncio
 async def test_active_model_key_survives_fallback_changes(app_settings_repo, test_db):
     """Две настройки живут раздельно: резерв не трогает активный пресет."""
     await _seed_enabled_preset(test_db, "active")

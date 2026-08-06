@@ -34,6 +34,27 @@ def is_insufficient_credits(error_text: str) -> bool:
     )
 
 
+# Слова, которыми исчерпание квоты подписки называет себя в тексте ошибки: своё
+# у каждого провайдера плюс русское — у типизированного LLMQuotaExhaustedError.
+# Таблица одна на оба пути опознания: сюда за ней ходит и граница клиента модели
+# (``src.llm.protocol_generator``, где к маркеру добавляется HTTP-код и рождается
+# типизированная ошибка), и всё, что ниже по течению работает с одним текстом.
+# Второй копии тут не место: она уже расходилась, и нетипизированный сбой «out of
+# quota» уезжал мимо квотной ветки — админ не получал ни квотного совета, ни
+# вообще уведомления.
+QUOTA_EXHAUSTION_MARKERS = (
+    "квота подписки",
+    "insufficient_quota",
+    "insufficient quota",
+    "allocationquota",
+    "allocated quota",
+    "quota exceeded",
+    "exceeded your current quota",
+    "quota_exhausted",
+    "out of quota",
+)
+
+
 def is_quota_exhausted(error_text: str) -> bool:
     """Признак ошибки «исчерпана квота подписки».
 
@@ -41,24 +62,14 @@ def is_quota_exhausted(error_text: str) -> bool:
     подписки»), и на сыром ответе провайдера. Классификация по HTTP-коду живёт
     на границе клиента модели (``protocol_generator``) — там она поднимает
     типизированную ошибку; здесь тот же случай опознаётся ниже по течению, где
-    от исключения остался один текст.
+    от исключения остался один текст. Слова признака у обоих общие —
+    :data:`QUOTA_EXHAUSTION_MARKERS`.
 
     Отличать от кредитов обязательно: «пополните баланс» на исчерпанной квоте —
     совет в пустоту (CONTEXT.md).
     """
     lowered = (error_text or "").lower()
-    return any(
-        marker in lowered
-        for marker in (
-            "квота подписки",
-            "insufficient_quota",
-            "insufficient quota",
-            "allocationquota",
-            "allocated quota",
-            "quota exceeded",
-            "exceeded your current quota",
-        )
-    )
+    return any(marker in lowered for marker in QUOTA_EXHAUSTION_MARKERS)
 
 
 def is_transient_api_error(error_text: str) -> bool:

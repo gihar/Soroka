@@ -23,10 +23,10 @@ QWEN_PRESET = {
 
 
 def _check_model_handler():
-    """Хендлер /check_model из собранного роутера админских команд."""
-    import src.handlers.admin_handlers as ah
+    """Хендлер /check_model из собранного роутера команд управления пресетами."""
+    import src.handlers.admin_model_handlers as ah
 
-    router = ah.setup_admin_handlers(processing_service=MagicMock())
+    router = ah.setup_admin_model_handlers()
     handler = next(
         h.callback for h in router.message.handlers
         if h.callback.__name__ == "check_model_handler"
@@ -65,7 +65,7 @@ def preset_lookup(monkeypatch):
 @pytest.fixture
 def shown(monkeypatch):
     """Текст, который увидел администратор вместо строки ожидания."""
-    import src.handlers.admin_handlers as ah
+    import src.handlers.admin_model_handlers as ah
 
     captured = {}
 

@@ -184,6 +184,136 @@ def transcription_mode_view(current_mode: str) -> tuple[str, InlineKeyboardMarku
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _sync_button() -> InlineKeyboardButton:
+    """Синхронизация пресетов из .env — выход со списка в любом его состоянии."""
+    return InlineKeyboardButton(
+        text="Синхронизировать из .env",
+        callback_data="admin_models_sync",
+    )
+
+
+def _preset_states(preset: dict, *, is_fallback: bool) -> str:
+    """Состояния пресета в строке списка — словами, а не глифами."""
+    states = []
+    if not preset.get("is_enabled"):
+        states.append("выкл")
+    elif preset.get("admin_only"):
+        states.append("админы")
+    if is_fallback:
+        states.append("резерв")
+    return "".join(f" · {state}" for state in states)
+
+
+def models_list_view(presets, *, active_key: Optional[str],
+                     fallback_key: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
+    """Список пресетов модели (единый источник /models и его inline-двойника).
+
+    Активный пресет помечается маркером выбора (канон v10: ✓ значит «выбрано»,
+    ✅ — «сделано»); состояние (выключен / только админы / резерв) называем
+    словом, а не декоративным глифом. Резерв — второй выбор, но тем же маркером
+    его не метят: два одинаковых знака в списке перестают отвечать на вопрос
+    «а активный-то какой».
+    """
+    if not presets:
+        text = ("<b>Список моделей</b>\n\n"
+                "Моделей пока нет. Используйте /add_model или синхронизируйте из .env.")
+        return text, InlineKeyboardMarkup(inline_keyboard=[[_sync_button()]])
+
+    lines = ["<b>Список моделей</b>\n"]
+    buttons = []
+    for preset in presets:
+        prefix = f"{SELECTED_MARK} " if preset["key"] == active_key else ""
+        suffix = _preset_states(preset, is_fallback=preset["key"] == fallback_key)
+        lines.append(f"{prefix}{esc(preset['name'])}{suffix}")
+        buttons.append([InlineKeyboardButton(
+            text=f"{prefix}{preset['name']}{suffix}",
+            callback_data=f"admin_model_{preset['key']}",
+        )])
+
+    buttons.append([_sync_button()])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _fallback_label(*, is_fallback: bool, is_active: bool) -> str:
+    """Строка «Резервная» в карточке.
+
+    Резерв, совпавший с активным пресетом, — законное состояние (сюда приводит
+    сам автовозврат), но переключаться ему уже некуда: говорим это словами,
+    чтобы карточка не обещала автовозврат, которого не будет.
+    """
+    if is_fallback and is_active:
+        return "да (совпадает с активной — автовозврата не будет)"
+    return "да" if is_fallback else "—"
+
+
+def _model_detail_text(preset: dict, *, is_active: bool, is_fallback: bool) -> str:
+    """Текст карточки: адрес пресета целиком и его роль в настройках."""
+    api_key_status = "задан" if preset.get("api_key") else "не задан"
+    enabled_label = "включена" if preset.get("is_enabled") else "выключена"
+    access_label = "только админы" if preset.get("admin_only") else "все пользователи"
+    return (
+        f"<b>{esc(preset['name'])}</b>\n\n"
+        f"Key: <code>{esc(preset['key'])}</code>\n"
+        f"Model ID: <code>{esc(preset['model'])}</code>\n"
+        f"Base URL: <code>{esc(preset['base_url'])}</code>\n"
+        f"API Key: {api_key_status}\n"
+        f"Статус: {enabled_label}\n"
+        f"Доступ: {access_label}\n"
+        f"Активная: {'да' if is_active else '—'}\n"
+        f"Резервная: {_fallback_label(is_fallback=is_fallback, is_active=is_active)}"
+    )
+
+
+def _model_detail_keyboard(preset: dict, *, is_active: bool,
+                           is_fallback: bool) -> InlineKeyboardMarkup:
+    """Кнопки карточки: действия, доступные пресету в его нынешней роли."""
+    key = preset["key"]
+    rows = []
+    if not is_active and preset.get("is_enabled"):
+        rows.append([InlineKeyboardButton(
+            text="Сделать активной",
+            callback_data=f"set_active_model_{key}",
+        )])
+    rows.extend([
+        [
+            InlineKeyboardButton(
+                text="Выключить" if preset.get("is_enabled") else "Включить",
+                callback_data=f"admin_model_toggle_{key}",
+            ),
+            InlineKeyboardButton(
+                text="Для всех" if preset.get("admin_only") else "Только админы",
+                callback_data=f"admin_model_access_{key}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="Убрать из резервных" if is_fallback else "Сделать резервной",
+                callback_data=f"admin_model_reserve_{key}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(text="Удалить", callback_data=f"admin_model_delete_{key}"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_models_list"),
+        ],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def model_detail_view(preset: dict, *, active_key: Optional[str],
+                      fallback_key: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
+    """Карточка одного пресета модели (единый источник детального экрана).
+
+    Роль пресета вид не выясняет сам: активный и резервный ключи — настройки
+    приложения, и ходить за ними из вида значило бы завести в нём базу.
+    """
+    is_active = preset["key"] == active_key
+    is_fallback = preset["key"] == fallback_key
+    return (
+        _model_detail_text(preset, is_active=is_active, is_fallback=is_fallback),
+        _model_detail_keyboard(preset, is_active=is_active, is_fallback=is_fallback),
+    )
+
+
 def _checked_address(preset_name: str, model: str, base_url: Optional[str]) -> str:
     """Кого проверяли: без модели и адреса вердикт не отличить от чужого."""
     return (

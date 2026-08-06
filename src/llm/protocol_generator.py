@@ -52,6 +52,7 @@ from src.reliability import (
     global_rate_limiter,
 )
 from src.services.brief_compiler import brief_field_rules, brief_to_schema
+from src.services.error_presentation import is_quota_exhausted
 from src.services.protocol_briefs import get_brief_for
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
@@ -68,20 +69,6 @@ def _is_insufficient_credits_error(exc: Exception) -> bool:
 # (Throttling.AllocationQuota), 400 у OpenAI-совместимых (insufficient_quota).
 _QUOTA_STATUS_CODES = (400, 429)
 
-# Признак именно исчерпания, а не обычного троттлинга: голое 429 — это
-# rate limit, он лечится повтором, и путать его с концом квоты нельзя.
-_QUOTA_EXHAUSTION_MARKERS = (
-    "insufficient_quota",
-    "insufficient quota",
-    "allocationquota",
-    "allocated quota",
-    "quota exceeded",
-    "exceeded your current quota",
-    "quota_exhausted",
-    "out of quota",
-)
-
-
 def _has_status(exc: Exception, code: int, text: str) -> bool:
     """Ответ провайдера пришёл с этим HTTP-кодом (атрибут SDK или текст ошибки)."""
     return getattr(exc, "status_code", None) == code or f"error code: {code}" in text
@@ -90,13 +77,19 @@ def _has_status(exc: Exception, code: int, text: str) -> bool:
 def _is_quota_exhausted_error(exc: Exception) -> bool:
     """Признак «квота подписки исчерпана»: код 429 или 400 с квотным признаком.
 
+    Квотный признак — именно исчерпание, а не обычный троттлинг: голое 429 это
+    rate limit, он лечится повтором, и путать его с концом квоты нельзя. Слова
+    признака берутся из ``src.services.error_presentation`` — там же их читает
+    путь ниже по течению, у которого от исключения остался один текст. Второй
+    таблицы нет: разойдясь, они развели бы классификацию и совет админу.
+
     Кредиты провайдера (402) сюда не относятся: их лечит пополнение, квоту —
     нет (CONTEXT.md), поэтому классы ошибок и алерты разные.
     """
     text = str(exc).lower()
     if not any(_has_status(exc, code, text) for code in _QUOTA_STATUS_CODES):
         return False
-    return any(marker in text for marker in _QUOTA_EXHAUSTION_MARKERS)
+    return is_quota_exhausted(text)
 
 
 def _select_generation_contract(

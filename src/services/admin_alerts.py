@@ -30,6 +30,9 @@ from src.models.validation import BriefConformance
 # Один повод — одно сообщение в этом окне, сколько бы задач ни упало.
 ALERT_THROTTLE = timedelta(minutes=10)
 
+# Сколько текста ответа провайдера доходит до администратора (см. clip_provider_error).
+PROVIDER_ERROR_LIMIT = 300
+
 # Поводы алертов. Окно троттлинга у каждого своё.
 REASON_BRIEF_MISMATCH = "brief_mismatch"
 REASON_INSUFFICIENT_CREDITS = "insufficient_credits"
@@ -74,17 +77,26 @@ def _keys_line(title: str, keys: tuple) -> str:
     return f"{title}: {', '.join(keys)}\n" if keys else ""
 
 
+def clip_provider_error(raw: str) -> str:
+    """Ответ провайдера, укороченный до пригодного для сообщения админу.
+
+    Провайдеры присылают простыни JSON: целиком они не помещаются в сообщение
+    Telegram и ничего не добавляют — полный текст остаётся в логе. Предел один
+    на все админские тексты о сбое провайдера (алерт и ответ /check_model),
+    иначе одно и то же правило живёт двумя числами.
+    """
+    if len(raw) <= PROVIDER_ERROR_LIMIT:
+        return raw
+    return raw[:PROVIDER_ERROR_LIMIT - 1] + "…"
+
+
 def _incident_details(exc: Exception) -> str:
     """Модель и обрезанный ответ провайдера — общая справка для алертов о сбое."""
     details = getattr(exc, "details", None) or {}
     model = details.get("model") if isinstance(details, dict) else None
 
-    raw = str(exc)
-    if len(raw) > 300:
-        raw = raw[:297] + "..."
-
     model_line = f"Модель: {model}\n" if model else ""
-    return f"{model_line}Детали: {raw}\n\n"
+    return f"{model_line}Детали: {clip_provider_error(str(exc))}\n\n"
 
 
 def build_brief_mismatch_alert(

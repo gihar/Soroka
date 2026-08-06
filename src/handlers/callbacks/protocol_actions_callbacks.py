@@ -73,6 +73,38 @@ async def _regeneratable(callback: CallbackQuery, row) -> bool:
     return True
 
 
+async def _preset_still_available(callback: CallbackQuery, preset_key: str):
+    """Пресет, выбранный на экране; None — если он оттуда успел уйти.
+
+    Между показом списка и нажатием кнопки администратор мог удалить или
+    выключить пресет в /models: молча уйти на исчезнувший адрес нельзя.
+    """
+    from src.database import model_preset_repo
+
+    preset = await model_preset_repo.get_by_key(preset_key)
+    if preset and preset.get("is_enabled"):
+        return preset
+
+    await _safe_callback_answer(
+        callback,
+        "Эта модель больше недоступна — выберите другую.",
+        show_alert=True,
+    )
+    return None
+
+
+async def _announce_regeneration(callback: CallbackQuery, preset) -> None:
+    """Сказать, чем именно генерируем: сравнение бок о бок начинается здесь."""
+    model_name = preset.get("name") or preset.get("model") or "выбранная модель"
+    await safe_edit_text(
+        callback.message,
+        f"⏳ Генерирую протокол моделью «{esc(model_name)}» — "
+        "обычно это занимает меньше минуты.",
+        parse_mode="HTML",
+    )
+    await _safe_callback_answer(callback)
+
+
 def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
     """Обработчики кнопок под доставленным протоколом."""
     router = Router()
@@ -269,7 +301,7 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             return
 
         try:
-            from src.database import history_repo, model_preset_repo
+            from src.database import history_repo
 
             row = await history_repo.get_result_for_user(
                 callback_data.history_id, callback.from_user.id
@@ -277,23 +309,11 @@ def setup_protocol_actions_callbacks(user_service, template_service) -> Router:
             if not await _regeneratable(callback, row):
                 return
 
-            preset = await model_preset_repo.get_by_key(callback_data.preset_key)
-            if not preset or not preset.get("is_enabled"):
-                await _safe_callback_answer(
-                    callback,
-                    "Эта модель больше недоступна — выберите другую.",
-                    show_alert=True,
-                )
+            preset = await _preset_still_available(callback, callback_data.preset_key)
+            if not preset:
                 return
 
-            model_name = preset.get("name") or preset.get("model") or "выбранная модель"
-            await safe_edit_text(
-                callback.message,
-                f"⏳ Генерирую протокол моделью «{esc(model_name)}» — "
-                "обычно это занимает меньше минуты.",
-                parse_mode="HTML",
-            )
-            await _safe_callback_answer(callback)
+            await _announce_regeneration(callback, preset)
 
             from src.services.protocol_actions import regenerate_protocol
 
