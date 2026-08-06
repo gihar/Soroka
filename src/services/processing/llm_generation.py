@@ -141,9 +141,14 @@ async def resolve_active_preset(app_settings_repo, preset_repo) -> Dict[str, Any
 class LLMGenerationService:
     """Handles LLM-based protocol generation, caching and post-processing."""
 
-    def __init__(self, user_service, template_service):
+    def __init__(self, user_service, template_service, preset: Optional[Dict[str, Any]] = None):
         self._user_service = user_service
         self._template_service = template_service
+        # Пресет, закреплённый за экземпляром: перегенерация обкатывает модель,
+        # не трогая активный пресет. Пусто — работает активный, как раньше.
+        # Генерация и подпись модели берут его из одного места, поэтому
+        # «сделано одной моделью, подписано другой» невозможно по построению.
+        self._preset = preset
 
     async def optimized_llm_generation(
         self,
@@ -154,11 +159,14 @@ class LLMGenerationService:
         meeting_type: str = None,
     ) -> Any:
         """Оптимизированная генерация LLM с кэшированием, двухэтапным подходом и валидацией"""
-        # Резолвим активную модель (глобальная админ-настройка) до построения cache key
+        # Пресет экземпляра (обкатка при перегенерации) либо активный —
+        # глобальная админ-настройка; резолвим до построения cache key
         from src.database import app_settings_repo, model_preset_repo
 
         preset_repo = model_preset_repo
-        active_preset = await resolve_active_preset(app_settings_repo, preset_repo)
+        active_preset = self._preset or await resolve_active_preset(
+            app_settings_repo, preset_repo
+        )
         llm_model_name = active_preset["name"]
 
         # Выполняем генерацию LLM
@@ -409,7 +417,13 @@ class LLMGenerationService:
         Single source of truth for the "name shown next to the result" logic
         that used to be inlined (and duplicated) in ProcessingService. Falls
         back to ``"?"`` when no active preset is configured/available.
+
+        Пресет экземпляра отвечает первым: подпись обязана назвать ту модель,
+        которая протокол и сделала, а не активную.
         """
+        if self._preset:
+            return self._preset.get("name") or self._preset.get("model") or "?"
+
         from src.database import app_settings_repo, model_preset_repo
 
         try:

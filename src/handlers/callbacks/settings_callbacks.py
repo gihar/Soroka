@@ -10,6 +10,7 @@ from src.services import ProcessingService, TemplateService, UserService
 from src.utils.telegram_safe import safe_edit_text
 from src.ux.html_text import esc
 from src.ux.keyboards import BACK_TO_SETTINGS
+from src.ux.message_builder import ADMIN_ONLY
 from src.ux.speaker_mapping_ui import SELECTED_MARK
 
 
@@ -323,9 +324,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.warning(
                 f"Non-admin {callback.from_user.id} attempted to open settings_active_model"
             )
-            await callback.answer(
-                "❌ Доступно только администратору", show_alert=True
-            )
+            await callback.answer(ADMIN_ONLY, show_alert=True)
             return
 
         try:
@@ -376,9 +375,7 @@ def setup_settings_callbacks(user_service: UserService, template_service: Templa
             logger.warning(
                 f"Non-admin {callback.from_user.id} attempted set_active_model"
             )
-            await callback.answer(
-                "❌ Доступно только администратору", show_alert=True
-            )
+            await callback.answer(ADMIN_ONLY, show_alert=True)
             return
 
         try:
