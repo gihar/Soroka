@@ -152,6 +152,63 @@ async def test_402_is_not_retried_and_propagates():
     assert client.chat.completions.create.call_count == 1  # без ретраев
 
 
+async def test_quota_429_is_not_retried_and_propagates():
+    """429 с квотным признаком — исчерпание квоты подписки, ровно один вызов."""
+    from src.exceptions.processing import LLMQuotaExhaustedError
+
+    err = Exception(
+        "Error code: 429 - {'error': {'code': 'Throttling.AllocationQuota', "
+        "'message': 'Free allocated quota exceeded, please increase your quota limit.'}}"
+    )
+    client = MagicMock()
+    client.chat.completions.create.side_effect = err
+    gen = _fast_generator(client)
+
+    with pytest.raises(LLMQuotaExhaustedError):
+        await gen.generate(preset=None, transcription="т", template_variables={})
+
+    assert client.chat.completions.create.call_count == 1  # без ретраев
+
+
+async def test_quota_400_is_classified_as_quota_not_credits():
+    """400 с признаком исчерпания квоты — квота подписки, а не кредиты провайдера."""
+    from src.exceptions.processing import (
+        LLMInsufficientCreditsError,
+        LLMQuotaExhaustedError,
+    )
+
+    err = Exception(
+        "Error code: 400 - {'error': {'message': 'You exceeded your current quota, "
+        "please check your plan and billing details.', 'type': 'insufficient_quota'}}"
+    )
+    client = MagicMock()
+    client.chat.completions.create.side_effect = err
+    gen = _fast_generator(client)
+
+    with pytest.raises(LLMQuotaExhaustedError) as raised:
+        await gen.generate(preset=None, transcription="т", template_variables={})
+
+    assert not isinstance(raised.value, LLMInsufficientCreditsError)
+    assert client.chat.completions.create.call_count == 1
+
+
+async def test_plain_rate_limit_429_is_not_quota_exhaustion():
+    """429 без квотного признака — обычный троттлинг: ретраится, класс не квотный."""
+    from src.exceptions.processing import LLMQuotaExhaustedError
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = Exception(
+        "Error code: 429 - {'error': {'message': 'Rate limit exceeded, slow down.'}}"
+    )
+    gen = _fast_generator(client)
+
+    with pytest.raises(Exception) as raised:
+        await gen.generate(preset=None, transcription="т", template_variables={})
+
+    assert not isinstance(raised.value, LLMQuotaExhaustedError)
+    assert client.chat.completions.create.call_count == 3  # ретраи на месте
+
+
 async def test_circuit_breaker_opens_and_blocks_calls():
     """После порога отказов CB открывается и блокирует вызовы без похода в API."""
     from src.reliability.circuit_breaker import CircuitBreakerError
@@ -301,6 +358,103 @@ async def test_preset_with_its_own_key_works_without_the_global_one(monkeypatch)
     assert result["decisions"] == "решения"
     models = [c.kwargs["model"] for c in client.chat.completions.create.call_args_list]
     assert models == ["qwen3.7-plus", "qwen3.7-plus"]
+
+
+async def test_schema_probe_says_schema_is_honored_when_the_keys_come_back():
+    """Модель вернула ровно затребованные ключи — схема применяется."""
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response(
+        {"zqx_marker": "zqx-7", "unlikely_count": 3}
+    )
+    gen = _fast_generator(client)
+    gen._client_cache[("https://token-plan.example/compatible-mode/v1", hash("sk-sp-qwen"))] = client
+
+    verdict = await gen.probe_schema_support(preset={
+        "key": "qwen_plus", "model": "qwen3.7-plus",
+        "base_url": "https://token-plan.example/compatible-mode/v1",
+        "api_key": "sk-sp-qwen",
+    })
+
+    assert verdict.schema_honored is True
+    assert verdict.model == "qwen3.7-plus"
+    assert verdict.base_url == "https://token-plan.example/compatible-mode/v1"
+
+
+async def test_schema_probe_says_schema_was_dropped_on_a_successful_answer():
+    """Успешный ответ с валидным JSON, но своими ключами — схема выброшена.
+
+    Ровно тот бесшумный отказ, ради которого зонд и существует: по коду ответа
+    он неотличим от успеха, вердикт даёт только сравнение ключей.
+    """
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response(
+        {"answer": "Протокол — это выжимка, транскрипция — дословная запись.",
+         "confidence": 0.95}
+    )
+    gen = _fast_generator(client)
+    gen._client_cache[("https://token-plan.example/compatible-mode/v1", hash("sk-sp-qwen"))] = client
+
+    verdict = await gen.probe_schema_support(preset={
+        "key": "qwen_flash", "model": "qwen3.6-flash",
+        "base_url": "https://token-plan.example/compatible-mode/v1",
+        "api_key": "sk-sp-qwen",
+    })
+
+    assert verdict.schema_honored is False
+    assert verdict.model == "qwen3.6-flash"
+    assert set(verdict.returned_keys) == {"answer", "confidence"}
+    assert set(verdict.requested_keys) == {"zqx_marker", "unlikely_count"}
+
+
+async def test_schema_probe_asks_for_keys_the_prompt_never_mentions():
+    """Форма зонда: строгая схема с невозможными ключами и промпт без них.
+
+    Упомяни промпт эти ключи — модель вернула бы их, не читая схему, и вердикт
+    «применяется» ничего бы не значил.
+    """
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response(
+        {"zqx_marker": "zqx-7", "unlikely_count": 3}
+    )
+    gen = _fast_generator(client)
+
+    await gen.probe_schema_support(preset=None)
+
+    call = client.chat.completions.create.call_args
+    schema = call.kwargs["response_format"]["json_schema"]
+    assert call.kwargs["response_format"]["type"] == "json_schema"
+    assert schema["strict"] is True
+    assert set(schema["schema"]["properties"]) == {"zqx_marker", "unlikely_count"}
+    assert set(schema["schema"]["required"]) == {"zqx_marker", "unlikely_count"}
+    assert schema["schema"]["additionalProperties"] is False
+
+    prompts = " ".join(m["content"] for m in call.kwargs["messages"]).lower()
+    assert "zqx_marker" not in prompts and "unlikely_count" not in prompts
+
+
+async def test_schema_probe_lets_provider_failures_out_as_errors_not_verdicts(monkeypatch):
+    """Недоступность провайдера и отсутствие ключа — ошибки, а не вердикт по схеме."""
+    from src.config import settings
+    from src.exceptions.configuration import AdminConfigurationError
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = ConnectionError("provider is down")
+    gen = _fast_generator(client, retry_attempts=1, failure_threshold=5)
+
+    with pytest.raises(ConnectionError):
+        await gen.probe_schema_support(preset=None)
+
+    gen.default_client = None
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    calls_before = client.chat.completions.create.call_count
+
+    with pytest.raises(AdminConfigurationError):
+        await gen.probe_schema_support(preset={
+            "key": "shared", "name": "OpenRouter: gpt-5", "model": "openai/gpt-5",
+            "base_url": "https://openrouter.ai/api/v1",
+        })
+
+    assert client.chat.completions.create.call_count == calls_before  # в API не ходили
 
 
 def test_is_available_counts_usable_presets_not_the_global_key(monkeypatch):

@@ -93,6 +93,16 @@ class TestStepMatchesCause:
         assert "нашей стороне" in step
         assert "менять не нужно" in step
 
+    def test_quota_exhausted_does_not_promise_a_few_minutes(self):
+        """Квота подписки не восстановится «через несколько минут» — не обещаем."""
+        step = ep.processing_failure_step(
+            "Error code: 429 - Free allocated quota exceeded"
+        )
+
+        assert "нашей стороне" in step
+        assert "менять не нужно" in step
+        assert "несколько минут" not in step
+
     def test_unknown_error_keeps_retry_advice(self):
         """Неизвестный сбой — повтор всё ещё разумный первый шаг."""
         step = ep.processing_failure_step("нечто неопознанное")

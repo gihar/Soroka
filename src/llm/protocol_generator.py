@@ -3,8 +3,9 @@
 Двухэтапная генерация со строгими схемами (анализ → генерация), кеш
 OpenAI-совместимых клиентов по пресетам модели и стек надёжности
 (rate-limit → circuit-breaker → retry) — безусловно вокруг каждого вызова.
-402 (кончились кредиты) классифицируется в LLMInsufficientCreditsError,
-не ретраится и пролетает насквозь.
+Исчерпание ресурса провайдера классифицируется здесь и наверх идёт
+типизированным: 402 — LLMInsufficientCreditsError, 429/400 с квотным признаком —
+LLMQuotaExhaustedError. Ни то, ни другое не ретраится и пролетает насквозь.
 
 Каким клиентом и какой моделью идёт шаг, модуль не решает: вызов называет шаг и
 пресет, а маршрут разрешает `src.llm.model_step` — единственная такая точка.
@@ -13,9 +14,14 @@ OpenAI-совместимых клиентов по пресетам модел�
 своего нет: поэтому готовность модуля считается по наличию пригодных пресетов, а
 отсутствие ключа опознаётся как ошибка настройки до похода в API, а не по
 невнятному отказу SDK (ADR-0007).
+
+Здесь же живёт зонд строгих схем (`probe_schema_support`): применяет ли модель
+пресета затребованную схему — свойство модели, а не провайдера, и по коду
+ответа неразличимое, поэтому вердикт даёт только сравнение ключей.
 """
 import asyncio
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import openai
@@ -23,7 +29,10 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
-from src.exceptions.processing import LLMInsufficientCreditsError
+from src.exceptions.processing import (
+    LLMInsufficientCreditsError,
+    LLMQuotaExhaustedError,
+)
 from src.llm.json_utils import safe_json_parse
 from src.llm.model_step import ModelStep, resolve_step
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
@@ -55,6 +64,41 @@ def _is_insufficient_credits_error(exc: Exception) -> bool:
     return "error code: 402" in text or "more credits" in text
 
 
+# Коды, которыми провайдеры сообщают об исчерпании квоты подписки: 429 у Qwen
+# (Throttling.AllocationQuota), 400 у OpenAI-совместимых (insufficient_quota).
+_QUOTA_STATUS_CODES = (400, 429)
+
+# Признак именно исчерпания, а не обычного троттлинга: голое 429 — это
+# rate limit, он лечится повтором, и путать его с концом квоты нельзя.
+_QUOTA_EXHAUSTION_MARKERS = (
+    "insufficient_quota",
+    "insufficient quota",
+    "allocationquota",
+    "allocated quota",
+    "quota exceeded",
+    "exceeded your current quota",
+    "quota_exhausted",
+    "out of quota",
+)
+
+
+def _has_status(exc: Exception, code: int, text: str) -> bool:
+    """Ответ провайдера пришёл с этим HTTP-кодом (атрибут SDK или текст ошибки)."""
+    return getattr(exc, "status_code", None) == code or f"error code: {code}" in text
+
+
+def _is_quota_exhausted_error(exc: Exception) -> bool:
+    """Признак «квота подписки исчерпана»: код 429 или 400 с квотным признаком.
+
+    Кредиты провайдера (402) сюда не относятся: их лечит пополнение, квоту —
+    нет (CONTEXT.md), поэтому классы ошибок и алерты разные.
+    """
+    text = str(exc).lower()
+    if not any(_has_status(exc, code, text) for code in _QUOTA_STATUS_CODES):
+        return False
+    return any(marker in text for marker in _QUOTA_EXHAUSTION_MARKERS)
+
+
 def _select_generation_contract(
     template_name: Optional[str], template_variables: Dict[str, str]
 ) -> tuple[Dict[str, Any], str]:
@@ -75,6 +119,49 @@ def _select_generation_contract(
         PROTOCOL_DATA_SCHEMA,
         build_generation_system_prompt(template_variables=template_variables),
     )
+
+
+# Схема зонда: два ключа, которых нет ни в промпте, ни в здравом смысле.
+# Модель, применяющая строгую схему, вернёт ровно их; модель, схему выбросившая,
+# ответит своими — и то и другое приходит успешным ответом, поэтому вердикт
+# считается по ключам, а не по коду ответа (ADR-0007).
+SCHEMA_PROBE_SCHEMA: Dict[str, Any] = {
+    "name": "schema_probe",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "zqx_marker": {"type": "string"},
+            "unlikely_count": {"type": "integer"},
+        },
+        "required": ["zqx_marker", "unlikely_count"],
+        "additionalProperties": False,
+    },
+}
+
+# Промпт зонда — содержательный вопрос, ни словом не упоминающий ключи схемы:
+# иначе модель могла бы вернуть их из промпта, не читая схему, и вердикт
+# «применяется» ничего бы не значил.
+SCHEMA_PROBE_SYSTEM_PROMPT = "Ты помощник. Отвечай кратко и по существу."
+SCHEMA_PROBE_USER_PROMPT = (
+    "Одним предложением объясни, чем протокол встречи отличается от её транскрипции."
+)
+
+
+@dataclass(frozen=True)
+class SchemaProbeVerdict:
+    """Ответ зонда: применил ли пресет строгую схему — и что именно проверено.
+
+    ``model`` и ``base_url`` — не украшение ответа, а его половина: вердикт
+    принадлежит конкретной модели по конкретному адресу, и без них два пресета
+    не различить.
+    """
+
+    schema_honored: bool
+    model: str
+    base_url: Optional[str]
+    requested_keys: Tuple[str, ...]
+    returned_keys: Tuple[str, ...]
 
 
 class ProtocolGenerator:
@@ -248,6 +335,47 @@ class ProtocolGenerator:
             preset=preset,
         )
 
+    async def probe_schema_support(
+        self, *, preset: Optional[Dict[str, Any]] = None
+    ) -> SchemaProbeVerdict:
+        """Применяет ли модель пресета строгую схему ответа (ADR-0007).
+
+        Зонд посылает схему с невозможными ключами и содержательный вопрос, в
+        котором этих ключей нет, а вердикт выносит сравнением набора ключей
+        ответа с затребованным. По коду ответа отказ неотличим от успеха:
+        модель, выбросившая схему, отвечает успехом и валидным JSON — просто со
+        своими ключами.
+
+        Недоступность провайдера, неверный ключ и отсутствие ключа сюда не
+        попадают: они выходят наружу ошибкой, а не вердиктом.
+        """
+        self._require_provider_key(preset)
+        route = resolve_step(ModelStep.GENERATION, preset, self._get_client)
+
+        answer = await self.structured_call(
+            system_prompt=SCHEMA_PROBE_SYSTEM_PROMPT,
+            user_prompt=SCHEMA_PROBE_USER_PROMPT,
+            schema=SCHEMA_PROBE_SCHEMA,
+            step=ModelStep.GENERATION,
+            preset=preset,
+        )
+
+        requested = tuple(SCHEMA_PROBE_SCHEMA["schema"]["properties"])
+        returned = tuple(answer)
+        honored = set(returned) == set(requested)
+        logger.info(
+            f"Зонд схем: модель {route.model}, адрес {route.base_url}, "
+            f"схема {'применяется' if honored else 'принята и выброшена'} "
+            f"(ключи ответа: {', '.join(returned) or '—'})"
+        )
+        return SchemaProbeVerdict(
+            schema_honored=honored,
+            model=route.model,
+            base_url=route.base_url,
+            requested_keys=requested,
+            returned_keys=returned,
+        )
+
     # ----------------------------------------------------------- реализация
 
     async def _generate_two_stage(self, *, preset: Optional[Dict[str, Any]],
@@ -379,6 +507,10 @@ class ProtocolGenerator:
             logger.error(f"Ошибка при вызове OpenAI [{step_name}]: {e}")
             if _is_insufficient_credits_error(e):
                 raise LLMInsufficientCreditsError(
+                    str(e), provider="openai", model=route.model
+                ) from e
+            if _is_quota_exhausted_error(e):
+                raise LLMQuotaExhaustedError(
                     str(e), provider="openai", model=route.model
                 ) from e
             raise

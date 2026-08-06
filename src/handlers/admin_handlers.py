@@ -24,6 +24,32 @@ _STATS_FAILED = (
     "Попробуйте ещё раз через минуту."
 )
 
+# Провайдер отказал в доступе: ключ не принят. Отличается от «не ответил» —
+# и то и другое не вердикт зонда о схеме, но чинится по-разному (issue #116).
+_KEY_REFUSED_MARKERS = ("error code: 401", "error code: 403", "invalid api key",
+                        "incorrect api key", "unauthorized")
+
+# Длина причины в ответе админу: провайдеры присылают простыни JSON, целиком они
+# не помещаются в сообщение Telegram и ничего не добавляют — полный текст в логе.
+_REASON_LIMIT = 300
+
+
+def _is_key_refused_error(exc: Exception) -> bool:
+    """Провайдер отверг ключ (401/403), а не просто не ответил."""
+    if getattr(exc, "status_code", None) in (401, 403):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _KEY_REFUSED_MARKERS)
+
+
+def _probe_failure_reason(exc: Exception) -> str:
+    """Причина отказа зонда для админского ответа — коротко, но по существу."""
+    reason = " ".join(str(exc).split()) or exc.__class__.__name__
+    if len(reason) > _REASON_LIMIT:
+        reason = reason[:_REASON_LIMIT] + "…"
+    return reason
+
+
 # Импорт сервиса очистки
 try:
     from src.services.cleanup_service import cleanup_service
@@ -702,6 +728,58 @@ def setup_admin_handlers(processing_service: ProcessingService) -> Router:
         except Exception as e:
             logger.error(f"Ошибка в add_model_handler: {e}")
             await message.answer(f"❌ Ошибка при добавлении модели: {e}")
+
+    @router.message(Command("check_model"))
+    async def check_model_handler(message: Message):
+        """Зонд строгих схем: /check_model [key] — применяет ли модель схему.
+
+        Тонкая обёртка над операцией модуля генерации: разобрать пресет, позвать
+        зонд, показать вердикт. Вердикт считает зонд, а не команда.
+        """
+        if not is_admin(message.from_user.id):
+            await message.answer(ACCESS_DENIED)
+            return
+
+        from src.database import app_settings_repo, model_preset_repo
+        from src.exceptions.configuration import AdminConfigurationError
+        from src.llm import protocol_generator
+        from src.services.processing.llm_generation import resolve_active_preset
+
+        raw_args = (message.text or "").split(maxsplit=1)
+        key = raw_args[1].strip() if len(raw_args) > 1 else ""
+
+        try:
+            if key:
+                preset = await model_preset_repo.get_by_key(key)
+                if not preset:
+                    await safe_answer(message,
+                        f"❌ Модель <code>{esc(key)}</code> не найдена.\n"
+                        "Список моделей — /models.",
+                        parse_mode="HTML",
+                    )
+                    return
+            else:
+                preset = await resolve_active_preset(app_settings_repo, model_preset_repo)
+        except AdminConfigurationError as e:
+            await safe_answer(message,
+                f"❌ Проверять нечего: {esc(str(e))}.\n"
+                "Выберите активную модель в /models или укажите пресет: "
+                "<code>/check_model key</code>.",
+                parse_mode="HTML",
+            )
+            return
+
+        status_msg = await message.answer("⏳ Проверяю модель")
+        try:
+            verdict = await protocol_generator.probe_schema_support(preset=preset)
+            report = admin_views.model_check_verdict(preset["name"], verdict)
+        except Exception as e:
+            logger.error(f"Ошибка в check_model_handler [{preset.get('key')}]: {e}")
+            report = admin_views.model_check_failed(
+                preset["name"], preset.get("model"), preset.get("base_url"),
+                _probe_failure_reason(e), key_refused=_is_key_refused_error(e),
+            )
+        await safe_edit_text(status_msg, report, parse_mode="HTML")
 
     @router.message(Command("models"))
     async def models_handler(message: Message):

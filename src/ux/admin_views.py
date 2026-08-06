@@ -7,10 +7,15 @@
 Фаз 1–3; статусы и состояния называем словами, а не декоративными глифами.
 """
 
+from typing import TYPE_CHECKING, Optional
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.ux.html_text import esc
 from src.ux.speaker_mapping_ui import SELECTED_MARK
+
+if TYPE_CHECKING:  # только для аннотации: вид не тянет за собой модуль генерации
+    from src.llm.protocol_generator import SchemaProbeVerdict
 
 # Отказ в доступе был размножен по четырнадцати местам админской поверхности
 # (критика v10). Одна формулировка — одно место.
@@ -59,7 +64,8 @@ def admin_help_text() -> str:
 
         "<b>Управление моделями</b>\n"
         "• <code>/models</code> — список моделей с inline-управлением\n"
-        "• <code>/add_model</code> — добавить модель\n\n"
+        "• <code>/add_model</code> — добавить модель\n"
+        "• <code>/check_model</code> — применяет ли модель строгую схему\n\n"
 
         "<b>Очистка файлов</b>\n"
         "• <code>/cleanup</code> — статистика файлов и настройки очистки\n"
@@ -176,3 +182,59 @@ def transcription_mode_view(current_mode: str) -> tuple[str, InlineKeyboardMarku
         "Выберите новый режим:"
     )
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _checked_address(preset_name: str, model: str, base_url: Optional[str]) -> str:
+    """Кого проверяли: без модели и адреса вердикт не отличить от чужого."""
+    return (
+        f"Пресет: {esc(preset_name)}\n"
+        f"Модель: <code>{esc(model)}</code>\n"
+        f"Адрес: <code>{esc(base_url or 'по умолчанию')}</code>"
+    )
+
+
+def model_check_verdict(preset_name: str, verdict: "SchemaProbeVerdict") -> str:
+    """Вердикт зонда строгих схем (единый источник /check_model, ADR-0007).
+
+    Схему, принятую и выброшенную, помечаем ⚠️, а не ❌: провайдер ответил
+    успешно и сам по себе жив — непригодна для протоколов именно модель.
+    """
+    if verdict.schema_honored:
+        headline = "✅ Схема применяется"
+        note = (
+            "Модель вернула ровно затребованные ключи — контракт ответа она "
+            "соблюдает, можно отдавать в работу."
+        )
+    else:
+        returned = ", ".join(verdict.returned_keys) or "ни одного"
+        headline = "⚠️ Схема принята и выброшена"
+        note = (
+            f"Ответ успешен и валиден, но ключи в нём свои: <code>{esc(returned)}</code>.\n"
+            "Такой отказ бесшумен — протокол потеряет разделы молча. "
+            "Выберите другую модель: /models."
+        )
+    return (
+        "<b>Проверка модели</b>\n\n"
+        f"{headline}\n\n"
+        f"{_checked_address(preset_name, verdict.model, verdict.base_url)}\n\n"
+        f"{note}"
+    )
+
+
+def model_check_failed(preset_name: str, model: str, base_url: Optional[str],
+                       reason: str, *, key_refused: bool) -> str:
+    """Зонд не дошёл до модели: это не вердикт о схеме (единый источник)."""
+    if key_refused:
+        headline = "❌ Ключ не принят провайдером"
+        step = "Задайте пресету рабочий ключ через /add_model и повторите /check_model."
+    else:
+        headline = "❌ Провайдер не ответил"
+        step = "Проверьте адрес и доступность провайдера, затем повторите /check_model."
+    return (
+        "<b>Проверка модели</b>\n\n"
+        f"{headline}\n\n"
+        f"{_checked_address(preset_name, model, base_url)}\n\n"
+        "Вердикта о схеме нет: до модели не дошли.\n"
+        f"{step}\n\n"
+        f"Причина: <code>{esc(reason)}</code>"
+    )
