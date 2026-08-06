@@ -39,7 +39,6 @@ def sent(monkeypatch):
     monkeypatch.setattr(telegram_safe, "safe_send_message", delivered)
     monkeypatch.setattr(admin_alerts, "_get_alert_bot", lambda: object())
     monkeypatch.setattr(settings, "admins", [111, 222])
-    admin_alerts.reset_alert_throttle()
     return delivered
 
 

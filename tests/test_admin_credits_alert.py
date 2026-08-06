@@ -40,7 +40,6 @@ def _capture(monkeypatch, admins):
     monkeypatch.setattr(ts, "safe_send_message", sent)
     monkeypatch.setattr(admin_alerts, "_get_alert_bot", lambda: object())
     monkeypatch.setattr(settings, "admins", admins)
-    admin_alerts.reset_alert_throttle()
     return sent
 
 
