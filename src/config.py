@@ -21,6 +21,14 @@ class OpenAIModelPreset(BaseModel):
         None,
         description="Ключ провайдера этого пресета; пусто — наследуется общий OPENAI_API_KEY"
     )
+    analysis_model: Optional[str] = Field(
+        None,
+        description="Модель этапа анализа у этого пресета; пусто — основная модель пресета"
+    )
+    mapping_model: Optional[str] = Field(
+        None,
+        description="Модель сопоставления спикеров у этого пресета; пусто — основная модель пресета"
+    )
     extra_body: Optional[Dict[str, Any]] = Field(
         None,
         description="Дополнительные поля тела запроса к модели (например, enable_thinking у Qwen)"
@@ -41,8 +49,10 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(None, description="API ключ OpenAI")
     openai_base_url: Optional[str] = Field(None, description="Базовый URL для OpenAI API")
     openai_model: str = Field("gpt-3.5-turbo", description="Модель OpenAI для генерации")
-    speaker_mapping_model: str = Field("gpt-4o-mini", description="Модель для сопоставления спикеров (легкая задача)")
-    analysis_stage_model: str = Field("gpt-4o-mini", description="Модель для Stage 1 анализа (тип встречи, классификация)")
+    # Модели дешёвых шагов вне пресета — совместимость, а не точка правды
+    # (ADR-0007): шаг, который обслуживает пресет, берёт модель у него.
+    speaker_mapping_model: str = Field("gpt-4o-mini", description="Модель сопоставления спикеров, когда шаг идёт без пресета")
+    analysis_stage_model: str = Field("gpt-4o-mini", description="Модель Stage 1 анализа, когда шаг идёт без пресета")
 
     # Наборы моделей OpenAI с собственными базовыми URL (по одному API ключу)
     # Формат переменной окружения OPENAI_MODELS: JSON-массив объектов вида

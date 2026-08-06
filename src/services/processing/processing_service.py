@@ -764,7 +764,15 @@ class ProcessingService(BaseProcessingService):
             return ({}, None)
 
         try:
+            from src.database import app_settings_repo, model_preset_repo
+            from src.services.processing.llm_generation import resolve_active_preset
             from src.services.speaker_mapping_service import speaker_mapping_service
+
+            # Сопоставление идёт тем же адресом провайдера, что анализ и
+            # генерация: пресет переносит весь LLM-путь целиком (ADR-0007).
+            active_preset = await resolve_active_preset(
+                app_settings_repo, model_preset_repo
+            )
 
             logger.info(
                 f"НАЧАЛО СОПОСТАВЛЕНИЯ СПИКЕРОВ И ОПРЕДЕЛЕНИЯ ТИПА ВСТРЕЧИ: "
@@ -784,6 +792,7 @@ class ProcessingService(BaseProcessingService):
                     participants=request.participants_list,
                     transcription_text=transcription_result.transcription,
                     llm_provider=request.llm_provider,
+                    preset=active_preset,
                 )
             )
 

@@ -5,12 +5,11 @@
 какими заголовками идти. Ответ живёт здесь и больше нигде: вызывающий называет
 шаг и пресет модели, а получает готовый маршрут.
 
-Параметры провайдера — тело и заголовки — уже приходят из пресета: он их
-единственный источник (ADR-0007), и шаг получает ровно то, что объявил
-обслуживающий его пресет. Маршрутизация же пока историческая: пресет обслуживает
-только генерацию, дешёвые шаги идут глобальным клиентом с моделями из настроек.
-Все три шага под пресет (ADR-0007) приезжают следующим срезом — менять придётся
-только этот модуль.
+Пресет — полный адрес провайдера (ADR-0007): он обслуживает все три шага, и
+клиент, модель, тело и заголовки шаг получает от него одного. Дешёвым шагам
+внутри пресета можно назначить свои модели; пустое поле значит основную модель
+пресета. Глобальные настройки остаются точкой правды только там, где пресета не
+передали: имя модели бессмысленно вне своего провайдера.
 """
 from dataclasses import dataclass
 from enum import Enum
@@ -51,50 +50,57 @@ class StepRoute:
         )
 
 
-# Фабрика клиента по обслуживающему пресету (None — глобальный клиент).
+# Фабрика клиента по пресету (None — глобальный клиент).
 ClientFactory = Callable[[Optional[Dict[str, Any]]], Any]
 
 Preset = Optional[Dict[str, Any]]
 
 
-def _serving_preset(step: ModelStep, preset: Preset) -> Preset:
-    """Пресет, обслуживающий шаг.
+# Поле пресета с моделью дешёвого шага; пустое значит «основная модель пресета».
+_CHEAP_MODEL_FIELD = {
+    ModelStep.SPEAKER_MAPPING: "mapping_model",
+    ModelStep.ANALYSIS: "analysis_model",
+}
 
-    Сегодня пресет обслуживает только генерацию, дешёвые шаги идут глобальным
-    клиентом. ADR-0007 отдаёт пресету все три шага — здесь и поменяется.
+
+def _model_for(step: ModelStep, preset: Preset) -> str:
+    """Имя модели шага; пустое значение откатывается на основную модель.
+
+    Пресет обслуживает шаг → имя берётся у пресета: своё для дешёвого шага, а
+    при пустом поле — основная модель пресета (ADR-0007). Глобальные настройки
+    моделей дешёвых шагов остаются точкой правды только там, где пресета нет:
+    имя модели бессмысленно вне своего провайдера.
     """
-    return preset if step is ModelStep.GENERATION else None
-
-
-def _model_for(step: ModelStep, serving: Preset) -> str:
-    """Имя модели шага; пустое значение откатывается на основную модель."""
+    if preset:
+        cheap_field = _CHEAP_MODEL_FIELD.get(step)
+        cheap_model = preset.get(cheap_field) if cheap_field else None
+        return cheap_model or preset.get("model") or settings.openai_model
     if step is ModelStep.SPEAKER_MAPPING:
         return settings.speaker_mapping_model or settings.openai_model
     if step is ModelStep.ANALYSIS:
         return settings.analysis_stage_model or settings.openai_model
-    return (serving or {}).get("model") or settings.openai_model
+    return settings.openai_model
 
 
-def _provider_params(serving: Preset, field: str) -> Dict[str, Any]:
-    """Параметры провайдера из обслуживающего пресета — как есть, копией.
+def _provider_params(preset: Preset, field: str) -> Dict[str, Any]:
+    """Параметры провайдера из пресета — как есть, копией.
 
     Единственный источник (ADR-0007): атрибуция OpenRouter и выключение режима
-    рассуждения Qwen объявлены в своих пресетах, а не глобально. Шаг, который
-    пресет не обслуживает, посторонних параметров не несёт.
+    рассуждения Qwen объявлены в своих пресетах, а не глобально. Шаг, идущий без
+    пресета, посторонних параметров не несёт.
     """
-    params = (serving or {}).get(field) or {}
+    params = (preset or {}).get(field) or {}
     return dict(params)
 
 
 def resolve_step(step: ModelStep, preset: Preset, client_for: ClientFactory) -> StepRoute:
     """Разрешить «шаг + пресет» в клиента, модель, тело и заголовки вызова."""
-    serving = _serving_preset(step, preset)
     return StepRoute(
         step=step,
-        client=client_for(serving),
-        model=_model_for(step, serving),
-        preset_key=(serving or {}).get("key"),
-        base_url=(serving or {}).get("base_url") or settings.openai_base_url,
-        extra_body=_provider_params(serving, "extra_body"),
-        extra_headers=_provider_params(serving, "extra_headers"),
+        client=client_for(preset),
+        model=_model_for(step, preset),
+        preset_key=(preset or {}).get("key"),
+        base_url=(preset or {}).get("base_url") or settings.openai_base_url,
+        extra_body=_provider_params(preset, "extra_body"),
+        extra_headers=_provider_params(preset, "extra_headers"),
     )

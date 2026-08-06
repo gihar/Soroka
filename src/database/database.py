@@ -286,15 +286,19 @@ class Database:
                     is_enabled BOOLEAN DEFAULT 1,
                     extra_body TEXT,
                     extra_headers TEXT,
+                    analysis_model TEXT,
+                    mapping_model TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # Миграция: параметры провайдера в пресете (ADR-0007). Хранятся
-            # JSON-объектом; NULL значит «не задано» — пересинк из конфигурации
-            # такой пресет не затирает. Дубликат колонки на уже мигрированной
-            # БД — норма, прочие ошибки логируем.
-            for _column in ("extra_body", "extra_headers"):
+            # Миграция: параметры провайдера и модели дешёвых шагов в пресете
+            # (ADR-0007). Параметры хранятся JSON-объектом; NULL значит «не
+            # задано» — пересинк из конфигурации такой пресет не затирает, а
+            # пустая модель дешёвого шага означает основную модель пресета.
+            # Дубликат колонки на уже мигрированной БД — норма, прочие ошибки
+            # логируем.
+            for _column in ("extra_body", "extra_headers", "analysis_model", "mapping_model"):
                 try:
                     await db.execute(
                         f"ALTER TABLE model_presets ADD COLUMN {_column} TEXT"

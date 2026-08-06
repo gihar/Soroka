@@ -64,6 +64,67 @@ async def test_resync_keeps_key_set_by_admin_command(preset_repo, monkeypatch):
     assert stored["api_key"] == "sk-or-набранный-руками"
 
 
+# --------------------------------------------- модели дешёвых шагов в пресете
+
+
+@pytest.mark.asyncio
+async def test_config_cheap_step_models_reach_storage(preset_repo, monkeypatch):
+    """Модели этапа анализа и сопоставления объявлены в окружении — доезжают в хранилище."""
+    monkeypatch.setattr(settings, "openai_models", [
+        OpenAIModelPreset(
+            key="openrouter_gpt5",
+            name="OpenRouter: gpt-5",
+            model="openai/gpt-5",
+            base_url="https://openrouter.ai/api/v1",
+            analysis_model="openai/gpt-5-mini",
+            mapping_model="openai/gpt-5-nano",
+        )
+    ])
+
+    await preset_repo.sync_from_config()
+
+    stored = await preset_repo.get_by_key("openrouter_gpt5")
+    assert stored["analysis_model"] == "openai/gpt-5-mini"
+    assert stored["mapping_model"] == "openai/gpt-5-nano"
+
+
+@pytest.mark.asyncio
+async def test_preset_without_cheap_models_stores_them_empty(preset_repo):
+    """Пресет без моделей дешёвых шагов хранит их пустыми — значит «основная модель»."""
+    await preset_repo.upsert(
+        key="qwen_plus", name="Qwen: plus", model="qwen3.7-plus",
+        base_url="https://token-plan.example/compatible-mode/v1",
+    )
+
+    stored = await preset_repo.get_by_key("qwen_plus")
+    assert not stored["analysis_model"]
+    assert not stored["mapping_model"]
+
+
+@pytest.mark.asyncio
+async def test_resync_keeps_cheap_models_set_by_admin(preset_repo, monkeypatch):
+    """Модели дешёвых шагов, заданные вручную, переживают пересинк из конфигурации."""
+    monkeypatch.setattr(settings, "openai_models", [
+        OpenAIModelPreset(
+            key="openrouter_gpt5",
+            name="OpenRouter: gpt-5",
+            model="openai/gpt-5",
+            base_url="https://openrouter.ai/api/v1",
+        )
+    ])
+    await preset_repo.sync_from_config()
+    await preset_repo.upsert(
+        key="openrouter_gpt5", name="OpenRouter: gpt-5", model="openai/gpt-5",
+        base_url="https://openrouter.ai/api/v1",
+        analysis_model="openai/gpt-5-nano",
+    )
+
+    await preset_repo.sync_from_config()
+
+    stored = await preset_repo.get_by_key("openrouter_gpt5")
+    assert stored["analysis_model"] == "openai/gpt-5-nano"
+
+
 # ------------------------------------------- параметры провайдера в хранилище
 
 
@@ -177,33 +238,45 @@ async def test_existing_database_migrates_without_manual_steps(tmp_path):
     assert migrated["api_key"] == "sk-or-старый", "старый пресет пережил миграцию"
     assert migrated["extra_body"] == {}
     assert migrated["extra_headers"] == {}
+    assert not migrated["analysis_model"], "дешёвые шаги идут на основную модель"
+    assert not migrated["mapping_model"]
 
     await repo.upsert(
         key="legacy", name="Legacy", model="openai/gpt-5",
         base_url="https://openrouter.ai/api/v1",
         extra_headers={"X-Title": "Soroka"},
+        analysis_model="openai/gpt-5-mini",
     )
-    assert (await repo.get_by_key("legacy"))["extra_headers"] == {"X-Title": "Soroka"}
+    updated = await repo.get_by_key("legacy")
+    assert updated["extra_headers"] == {"X-Title": "Soroka"}
+    assert updated["analysis_model"] == "openai/gpt-5-mini"
 
 
 # ------------------------------------- от объявления в окружении до вызова модели
 
 
 @pytest.mark.asyncio
-async def test_preset_declared_in_environment_serves_generation(
+async def test_preset_declared_in_environment_serves_the_whole_path(
     test_db, preset_repo, app_settings_repo, monkeypatch
 ):
-    """Пресет объявлен в окружении — генерация идёт его ключом, адресом и параметрами."""
+    """Пресет объявлен в окружении — весь путь идёт его ключом, адресом и параметрами.
+
+    Общего ключа в окружении нет: деплой целиком на подписке — это ровно то, что
+    #115 обещает показать.
+    """
     import json
     from unittest.mock import MagicMock
 
     import openai
 
+    import src.services.speaker_mapping_service as sms
+    from src.models.diarization import Diarization, Segment
     from src.reliability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
     from src.reliability.rate_limiter import RateLimitConfig, RateLimiter
     from src.reliability.retry import RetryConfig, RetryManager
     from src.services.processing.llm_generation import resolve_active_preset
 
+    monkeypatch.setattr(settings, "openai_api_key", None)
     monkeypatch.setattr(settings, "openai_models", [
         OpenAIModelPreset(
             key="qwen_plus",
@@ -230,12 +303,14 @@ async def test_preset_declared_in_environment_serves_generation(
             RateLimitConfig(requests_per_window=1000, window_size=60.0, burst_limit=1000),
         ),
     )
-    global_client = MagicMock(name="global_client")
-    gen.default_client = global_client
+    assert gen.default_client is None, "без общего ключа глобального клиента нет"
+    assert gen.is_available() is True, "пригодный пресет объявлен — модуль готов"
+
     preset_client = MagicMock(name="preset_client")
     built = []
     monkeypatch.setattr(openai, "OpenAI", lambda **kw: (built.append(kw), preset_client)[1])
     monkeypatch.setattr(settings, "log_cache_metrics", False)
+    monkeypatch.setattr(sms, "protocol_generator", gen)
 
     def _response(payload):
         resp = MagicMock()
@@ -243,16 +318,30 @@ async def test_preset_declared_in_environment_serves_generation(
         resp.choices[0].message.content = json.dumps(payload, ensure_ascii=False)
         return resp
 
-    global_client.chat.completions.create.return_value = _response(
-        {"meeting_type": "status", "speaker_mappings": {}, "analysis_confidence": 0.9}
-    )
-    preset_client.chat.completions.create.return_value = _response(
-        {"protocol_data": {"decisions": "решения"}, "quality_score": 0.8}
-    )
-
     active = await resolve_active_preset(
         app_settings_repo=app_settings_repo, preset_repo=preset_repo
     )
+
+    preset_client.chat.completions.create.return_value = _response(
+        {"meeting_type": "status", "speaker_mappings": {"SPEAKER_0": "Анна Петрова"},
+         "confidence_scores": {"SPEAKER_0": 0.95}, "unmapped_speakers": []}
+    )
+    mapping, meeting_type = await sms.SpeakerMappingService().map_speakers_to_participants(
+        diarization_data=Diarization(segments=[
+            Segment(speaker="SPEAKER_0", text="Привет, начнём статус.", start=0.0, end=2.0),
+        ]),
+        participants=[{"name": "Анна Петрова", "role": "менеджер"}],
+        transcription_text="Привет, начнём статус.",
+        preset=active,
+    )
+    assert mapping == {"SPEAKER_0": "Анна Петрова"}
+    assert meeting_type == "status"
+
+    preset_client.chat.completions.create.side_effect = [
+        _response({"meeting_type": "status", "speaker_mappings": {},
+                   "analysis_confidence": 0.9}),
+        _response({"protocol_data": {"decisions": "решения"}, "quality_score": 0.8}),
+    ]
     result = await gen.generate(
         preset=active, transcription="SPEAKER_0: привет.",
         template_variables={"decisions": ""},
@@ -262,6 +351,8 @@ async def test_preset_declared_in_environment_serves_generation(
     assert built[0]["api_key"] == "sk-sp-qwen"
     assert built[0]["base_url"] == "https://token-plan.example/compatible-mode/v1"
 
-    generation_call = preset_client.chat.completions.create.call_args
-    assert generation_call.kwargs["model"] == "qwen3.7-plus"
-    assert generation_call.kwargs["extra_body"] == {"enable_thinking": False}
+    calls = preset_client.chat.completions.create.call_args_list
+    assert len(calls) == 3, "сопоставление, анализ и генерация — все у пресета"
+    for call in calls:
+        assert call.kwargs["model"] == "qwen3.7-plus"
+        assert call.kwargs["extra_body"] == {"enable_thinking": False}

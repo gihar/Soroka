@@ -33,7 +33,8 @@ class SpeakerMappingService:
         diarization_data: Optional[Diarization],
         participants: List[Dict[str, str]],
         transcription_text: str,
-        llm_provider: str = "openai"
+        llm_provider: str = "openai",
+        preset: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, str], str]:
         """
         Автоматическое сопоставление спикеров с участниками и определение типа встречи
@@ -43,7 +44,8 @@ class SpeakerMappingService:
             participants: Список участников с именами и ролями
             transcription_text: Полный текст транскрипции
             llm_provider: LLM провайдер для сопоставления
-            
+            preset: Пресет модели, обслуживающий вызов (адрес провайдера, ADR-0007)
+
         Returns:
             Tuple (speaker_mapping, meeting_type):
                 - speaker_mapping: Словарь сопоставления {speaker_id: participant_name}
@@ -79,7 +81,8 @@ class SpeakerMappingService:
             logger.info(f"Отправка запроса к LLM провайдеру: {llm_provider}")
             mapping_result = await self._call_llm_for_mapping(
                 mapping_prompt,
-                llm_provider
+                llm_provider,
+                preset,
             )
             
             # Извлекаем meeting_type из результата
@@ -516,7 +519,8 @@ class SpeakerMappingService:
     async def _call_llm_for_mapping(
         self,
         prompt: str,
-        llm_provider: str
+        llm_provider: str,
+        preset: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Вызов LLM для получения сопоставления"""
         
@@ -551,6 +555,7 @@ class SpeakerMappingService:
                 user_prompt=prompt,
                 schema=SPEAKER_MAPPING_SCHEMA,
                 step=ModelStep.SPEAKER_MAPPING,
+                preset=preset,
             )
 
             # Логирование ответа (если включено)

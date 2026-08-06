@@ -104,21 +104,24 @@ class ModelPresetRepository:
         admin_only: bool = False,
         extra_body: Optional[Dict[str, Any]] = None,
         extra_headers: Optional[Dict[str, str]] = None,
+        analysis_model: Optional[str] = None,
+        mapping_model: Optional[str] = None,
     ) -> None:
         """Insert or update a preset by key.
 
-        When api_key, extra_body or extra_headers is None the existing value is
-        preserved via COALESCE: a resync from config never wipes what an admin
-        set by hand.
+        When api_key, provider params or a cheap-step model is None the existing
+        value is preserved via COALESCE: a resync from config never wipes what an
+        admin set by hand. An empty cheap-step model means «the preset's main
+        model» (ADR-0007), so it needs no value of its own.
         """
         async with self._db.connect() as db:
             await db.execute(
                 """
                 INSERT INTO model_presets (
                     key, name, model, base_url, api_key, admin_only,
-                    extra_body, extra_headers
+                    extra_body, extra_headers, analysis_model, mapping_model
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     name = excluded.name,
                     model = excluded.model,
@@ -128,11 +131,18 @@ class ModelPresetRepository:
                     extra_body = COALESCE(excluded.extra_body, model_presets.extra_body),
                     extra_headers = COALESCE(
                         excluded.extra_headers, model_presets.extra_headers
+                    ),
+                    analysis_model = COALESCE(
+                        excluded.analysis_model, model_presets.analysis_model
+                    ),
+                    mapping_model = COALESCE(
+                        excluded.mapping_model, model_presets.mapping_model
                     )
                 """,
                 (
                     key, name, model, base_url, api_key, int(admin_only),
                     _encode_params(extra_body), _encode_params(extra_headers),
+                    analysis_model, mapping_model,
                 ),
             )
             await db.commit()
@@ -224,6 +234,8 @@ class ModelPresetRepository:
                 api_key=preset.api_key,
                 extra_body=preset.extra_body,
                 extra_headers=preset.extra_headers,
+                analysis_model=preset.analysis_model,
+                mapping_model=preset.mapping_model,
             )
             count += 1
 

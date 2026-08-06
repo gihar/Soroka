@@ -97,8 +97,8 @@ async def test_stage1_skipped_when_type_and_mapping_provided():
     assert result["_analysis_confidence"] == 0.0  # анализ не выполнялся
 
 
-async def test_preset_model_used_for_generation_stage():
-    """Модель ЭТАПА 2 берётся из пресета; ЭТАП 1 — из analysis_stage_model."""
+async def test_preset_models_used_for_both_stages():
+    """Оба этапа берут модель из пресета: ЭТАП 1 — модель анализа, ЭТАП 2 — основную."""
     client = MagicMock()
     client.chat.completions.create.side_effect = [
         _response(ANALYSIS_PAYLOAD),
@@ -109,15 +109,15 @@ async def test_preset_model_used_for_generation_stage():
 
     await gen.generate(
         preset={"key": "openai-gpt-5", "model": "openai/gpt-5",
-                "base_url": "https://or.example/v1", "api_key": "k"},
+                "base_url": "https://or.example/v1", "api_key": "k",
+                "analysis_model": "openai/gpt-5-mini"},
         transcription="т",
         template_variables={},
     )
 
-    from src.config import settings
     stage1_model = client.chat.completions.create.call_args_list[0].kwargs["model"]
     stage2_model = client.chat.completions.create.call_args_list[1].kwargs["model"]
-    assert stage1_model == settings.analysis_stage_model
+    assert stage1_model == "openai/gpt-5-mini"
     assert stage2_model == "openai/gpt-5"
 
 
@@ -248,9 +248,85 @@ def test_invalidate_cache_for_exact_entry_and_noop():
     assert gen._client_cache == {}
 
 
-def test_is_available_reflects_configured_client():
-    gen = _fast_generator()
-    assert gen.is_available() is True
+async def test_missing_provider_key_is_a_configuration_error_before_the_call(monkeypatch):
+    """Ключа нет ни у пресета, ни в окружении — ошибка настройки, а не поход в API."""
+    from src.config import settings
+    from src.exceptions.configuration import AdminConfigurationError
+    from src.llm.model_step import ModelStep
 
+    client = MagicMock()
+    gen = _fast_generator(client)
     gen.default_client = None
-    assert gen.is_available() is False
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    keyless_preset = {
+        "key": "shared", "name": "OpenRouter: gpt-5", "model": "openai/gpt-5",
+        "base_url": "https://openrouter.ai/api/v1",
+    }
+
+    with pytest.raises(AdminConfigurationError):
+        await gen.generate(
+            preset=keyless_preset, transcription="т", template_variables={},
+        )
+    with pytest.raises(AdminConfigurationError):
+        await gen.structured_call(
+            system_prompt="s", user_prompt="u", schema={"name": "mapping"},
+            step=ModelStep.SPEAKER_MAPPING, preset=keyless_preset,
+        )
+
+    client.chat.completions.create.assert_not_called()
+
+
+async def test_preset_with_its_own_key_works_without_the_global_one(monkeypatch):
+    """Пресет несёт свой ключ — протокол делается без OPENAI_API_KEY в окружении."""
+    from src.config import settings
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        _response(ANALYSIS_PAYLOAD),
+        _response(GENERATION_PAYLOAD),
+    ]
+    gen = _fast_generator(client)
+    gen.default_client = None  # глобального клиента без ключа не существует
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    gen._client_cache[("https://token-plan.example/compatible-mode/v1", hash("sk-sp-qwen"))] = client
+
+    result = await gen.generate(
+        preset={"key": "qwen_plus", "model": "qwen3.7-plus",
+                "base_url": "https://token-plan.example/compatible-mode/v1",
+                "api_key": "sk-sp-qwen"},
+        transcription="т",
+        template_variables={"decisions": ""},
+    )
+
+    assert result["decisions"] == "решения"
+    models = [c.kwargs["model"] for c in client.chat.completions.create.call_args_list]
+    assert models == ["qwen3.7-plus", "qwen3.7-plus"]
+
+
+def test_is_available_counts_usable_presets_not_the_global_key(monkeypatch):
+    """Готовность — по наличию пригодного пресета: со своим ключом или под общим."""
+    from src.config import OpenAIModelPreset, settings
+
+    gen = _fast_generator()
+    gen.default_client = None  # чисто-пресетный деплой: глобального клиента нет
+    monkeypatch.setattr(settings, "openai_api_key", None)
+
+    monkeypatch.setattr(settings, "openai_models", [
+        OpenAIModelPreset(
+            key="qwen_plus", name="Qwen: plus", model="qwen3.7-plus",
+            base_url="https://token-plan.example/compatible-mode/v1",
+            api_key="sk-sp-qwen",
+        )
+    ])
+    assert gen.is_available() is True, "пресет несёт свой ключ — модуль готов"
+
+    monkeypatch.setattr(settings, "openai_models", [
+        OpenAIModelPreset(
+            key="shared", name="OpenRouter: gpt-5", model="openai/gpt-5",
+            base_url="https://openrouter.ai/api/v1",
+        )
+    ])
+    assert gen.is_available() is False, "ключа нет ни у пресета, ни в окружении"
+
+    monkeypatch.setattr(settings, "openai_api_key", "sk-общий")
+    assert gen.is_available() is True, "общий ключ покрывает пресет без своего"

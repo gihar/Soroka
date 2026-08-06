@@ -14,13 +14,21 @@ TELEGRAM_TOKEN=your_telegram_bot_token_here
 # =============================================================================
 
 # OpenAI API
+# OPENAI_API_KEY необязателен: пресет может нести свой ключ, и тогда бот работает
+# целиком по нему. Без общего ключа и без пресета с ключом бот сообщит об ошибке
+# настройки при первой же генерации.
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-3.5-turbo
 
 # Опционально: Несколько пресетов моделей (JSON-массив)
-# Пресет — полный адрес провайдера: модель, адрес, свой ключ и параметры,
-# специфичные для провайдера. Пустой api_key означает «наследовать OPENAI_API_KEY».
+# Пресет — полный адрес провайдера: модель, адрес, свой ключ, модели дешёвых
+# шагов и параметры, специфичные для провайдера. Он обслуживает все три вызова
+# модели — сопоставление спикеров, анализ и генерацию, — поэтому смена пресета
+# переносит весь путь целиком. Пустой api_key означает «наследовать OPENAI_API_KEY».
+# analysis_model / mapping_model — модели этапа анализа и сопоставления спикеров;
+# пустые означают основную модель пресета (размен «дорогая на протокол, дешёвая
+# на анализ» задаётся там, где провайдер это позволяет).
 # extra_body — дополнительные поля тела запроса, extra_headers — заголовки:
 # оба словаря уходят в вызов модели как есть и только у своего пресета.
 # Если не задано, пресет по умолчанию будет собран из OPENAI_MODEL/OPENAI_BASE_URL
@@ -28,10 +36,13 @@ OPENAI_MODEL=gpt-3.5-turbo
 # OPENAI_MODELS=[
 #   {"key": "openai_gpt4o", "name": "OpenAI: gpt-4o", "model": "gpt-4o", "base_url": "https://api.openai.com/v1"},
 #   {"key": "openrouter_llama3_70b", "name": "OpenRouter: Llama 3.1 70B", "model": "meta-llama/llama-3.1-70b-instruct", "base_url": "https://openrouter.ai/api/v1",
+#    "analysis_model": "openai/gpt-4o-mini", "mapping_model": "openai/gpt-4o-mini",
 #    "extra_headers": {"HTTP-Referer": "https://github.com/gihar/Soroka", "X-Title": "Soroka"}},
 #   {"key": "qwen_plus", "name": "Qwen: plus", "model": "qwen3.7-plus", "base_url": "https://token-plan.<region>.maas.aliyuncs.com/compatible-mode/v1",
 #    "api_key": "sk-sp-xxx", "extra_body": {"enable_thinking": false}}
 # ]
+# У Qwen-пресета модели дешёвых шагов не заданы осознанно: все три вызова идут со
+# строгими схемами, а единственная дешёвая модель этого эндпоинта их выбрасывает.
 # Атрибуция OpenRouter (HTTP-Referer/X-Title) задаётся в extra_headers своего
 # пресета: глобальной настройки для неё больше нет, чужим эндпоинтам она не летит.
 # Выключение режима рассуждения Qwen (enable_thinking) — поле тела, а не заголовок;

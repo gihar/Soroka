@@ -8,6 +8,11 @@ OpenAI-совместимых клиентов по пресетам модел�
 
 Каким клиентом и какой моделью идёт шаг, модуль не решает: вызов называет шаг и
 пресет, а маршрут разрешает `src.llm.model_step` — единственная такая точка.
+
+Ключ провайдера несёт пресет, а общий из окружения только подставляется, когда
+своего нет: поэтому готовность модуля считается по наличию пригодных пресетов, а
+отсутствие ключа опознаётся как ошибка настройки до похода в API, а не по
+невнятному отказу SDK (ADR-0007).
 """
 import asyncio
 from typing import Any, Dict, Optional
@@ -17,6 +22,7 @@ import openai
 from loguru import logger
 
 from src.config import settings
+from src.exceptions.configuration import AdminConfigurationError
 from src.exceptions.processing import LLMInsufficientCreditsError
 from src.llm.json_utils import safe_json_parse
 from src.llm.model_step import ModelStep, resolve_step
@@ -105,13 +111,32 @@ class ProtocolGenerator:
 
     # ------------------------------------------------------------------ клиенты
 
+    def _provider_key_for(self, preset: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Ключ, которым идёт вызов: свой ключ пресета либо общий из окружения."""
+        return (preset or {}).get("api_key") or settings.openai_api_key
+
+    def _require_provider_key(self, preset: Optional[Dict[str, Any]]) -> None:
+        """Проверить адрес до вызова: без ключа идти некуда.
+
+        Отсутствие ключа — настройка, а не сбой провайдера, поэтому оно
+        опознаётся здесь, а не по невнятной ошибке SDK на первом же вызове.
+        """
+        if self._provider_key_for(preset):
+            return
+        preset_name = (preset or {}).get("name") or (preset or {}).get("key")
+        whose = f"Пресет «{preset_name}»" if preset_name else "Активный пресет"
+        raise AdminConfigurationError(
+            f"{whose} не несёт ключа провайдера, и общий OPENAI_API_KEY не задан. "
+            "Задайте ключ пресету через /add_model или укажите OPENAI_API_KEY в окружении."
+        )
+
     def _get_client(self, preset: dict = None):
         """Get or create an OpenAI client for the given preset."""
         if not preset:
             return self.default_client
 
         base_url = preset.get('base_url') or settings.openai_base_url
-        api_key = preset.get('api_key') or settings.openai_api_key
+        api_key = self._provider_key_for(preset)
 
         cache_key = (base_url, hash(api_key) if api_key else None)
 
@@ -152,8 +177,16 @@ class ProtocolGenerator:
             logger.info(f"Invalidated {len(keys_to_remove)} OpenAI client(s) for {base_url}")
 
     def is_available(self) -> bool:
-        """Клиент сконфигурирован и модуль готов принимать вызовы."""
-        return self.default_client is not None
+        """Есть ли пригодный пресет — тот, к которому есть чем пойти.
+
+        Готовность считается по пресетам, а не по глобальному ключу (ADR-0007):
+        иначе деплой целиком на подписке, где ключ несёт сам пресет, выглядел бы
+        ненастроенным. Общий ключ покрывает любой пресет без своего, поэтому
+        конфигурация на одном ключе остаётся готовой как была.
+        """
+        if settings.openai_api_key:
+            return True
+        return any(preset.api_key for preset in settings.openai_models)
 
     # ------------------------------------------------------------- надёжность
 
@@ -188,8 +221,7 @@ class ProtocolGenerator:
         ``best_transcript`` (формат из диаризации либо сырой), генератору знать о
         диаризации не нужно.
         """
-        if not self.is_available():
-            raise ValueError("OpenAI API не настроен")
+        self._require_provider_key(preset)
         return await self._protected(
             self._generate_two_stage,
             preset=preset,
@@ -206,8 +238,7 @@ class ProtocolGenerator:
         Клиента и модель выбирает маршрут шага: вызывающий называет шаг, а не
         модель.
         """
-        if not self.is_available():
-            raise ValueError("OpenAI API не настроен")
+        self._require_provider_key(preset)
         return await self._protected(
             self._call_openai,
             system_prompt=system_prompt,
