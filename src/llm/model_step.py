@@ -5,10 +5,12 @@
 какими заголовками идти. Ответ живёт здесь и больше нигде: вызывающий называет
 шаг и пресет модели, а получает готовый маршрут.
 
-Сегодня маршрут повторяет исторический расклад один в один: пресет обслуживает
+Параметры провайдера — тело и заголовки — уже приходят из пресета: он их
+единственный источник (ADR-0007), и шаг получает ровно то, что объявил
+обслуживающий его пресет. Маршрутизация же пока историческая: пресет обслуживает
 только генерацию, дешёвые шаги идут глобальным клиентом с моделями из настроек.
-Пресет как полный адрес провайдера (ADR-0007) приезжает следующими срезами —
-менять придётся только этот модуль.
+Все три шага под пресет (ADR-0007) приезжают следующим срезом — менять придётся
+только этот модуль.
 """
 from dataclasses import dataclass
 from enum import Enum
@@ -73,14 +75,15 @@ def _model_for(step: ModelStep, serving: Preset) -> str:
     return (serving or {}).get("model") or settings.openai_model
 
 
-def _extra_headers() -> Dict[str, str]:
-    """Заголовки запроса — пока атрибуция из глобальных настроек, одна на всех."""
-    headers: Dict[str, str] = {}
-    if settings.http_referer:
-        headers["HTTP-Referer"] = settings.http_referer
-    if settings.x_title:
-        headers["X-Title"] = settings.x_title
-    return headers
+def _provider_params(serving: Preset, field: str) -> Dict[str, Any]:
+    """Параметры провайдера из обслуживающего пресета — как есть, копией.
+
+    Единственный источник (ADR-0007): атрибуция OpenRouter и выключение режима
+    рассуждения Qwen объявлены в своих пресетах, а не глобально. Шаг, который
+    пресет не обслуживает, посторонних параметров не несёт.
+    """
+    params = (serving or {}).get(field) or {}
+    return dict(params)
 
 
 def resolve_step(step: ModelStep, preset: Preset, client_for: ClientFactory) -> StepRoute:
@@ -92,6 +95,6 @@ def resolve_step(step: ModelStep, preset: Preset, client_for: ClientFactory) -> 
         model=_model_for(step, serving),
         preset_key=(serving or {}).get("key"),
         base_url=(serving or {}).get("base_url") or settings.openai_base_url,
-        extra_body={},  # дополнительных полей тела сегодня не задаёт никто
-        extra_headers=_extra_headers(),
+        extra_body=_provider_params(serving, "extra_body"),
+        extra_headers=_provider_params(serving, "extra_headers"),
     )

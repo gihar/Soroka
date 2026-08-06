@@ -284,9 +284,27 @@ class Database:
                     api_key TEXT,
                     admin_only BOOLEAN DEFAULT 0,
                     is_enabled BOOLEAN DEFAULT 1,
+                    extra_body TEXT,
+                    extra_headers TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Миграция: параметры провайдера в пресете (ADR-0007). Хранятся
+            # JSON-объектом; NULL значит «не задано» — пересинк из конфигурации
+            # такой пресет не затирает. Дубликат колонки на уже мигрированной
+            # БД — норма, прочие ошибки логируем.
+            for _column in ("extra_body", "extra_headers"):
+                try:
+                    await db.execute(
+                        f"ALTER TABLE model_presets ADD COLUMN {_column} TEXT"
+                    )
+                    logger.info(f"Добавлено поле {_column} в таблицу model_presets")
+                except Exception as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        logger.error(
+                            f"Миграция {_column} в model_presets не применилась: {exc}"
+                        )
 
             # Таблица глобальных настроек приложения (key-value)
             await db.execute("""

@@ -1,11 +1,14 @@
-"""Характеризация маршрута трёх вызовов модели (#112).
+"""Маршрут трёх вызовов модели: клиент, модель, тело и заголовки (#112, #114).
 
-Три вызова — сопоставление спикеров, ЭТАП 1 анализа, ЭТАП 2 генерации — сегодня
-решают по-своему, каким клиентом и какой моделью идти. Тесты фиксируют это
-решение ДО префактора: мок стоит на границе клиента модели
-(``chat.completions.create``), как в характеризации генератора, и проверяет, что
-именно ушло в вызов. Внутренний кеш клиентов тесты не трогают: клиент пресета
-подменяется на границе конструктора ``openai.OpenAI``.
+Три вызова — сопоставление спикеров, ЭТАП 1 анализа, ЭТАП 2 генерации — решают,
+каким клиентом и какой моделью идти. Маршрутизация здесь ещё историческая
+(пресет обслуживает генерацию, дешёвые шаги — глобальный клиент), а параметры
+провайдера уже приходят из пресета: свои у своего шага, ничего общего на всех.
+
+Мок стоит на границе клиента модели (``chat.completions.create``), как в
+характеризации генератора, и проверяет, что именно ушло в вызов. Внутренний кеш
+клиентов тесты не трогают: клиент пресета подменяется на границе конструктора
+``openai.OpenAI``.
 """
 import json
 from unittest.mock import MagicMock
@@ -22,6 +25,15 @@ PRESET = {
     "model": "openai/gpt-5",
     "base_url": "https://preset.example/v1",
     "api_key": "preset-key",
+}
+
+# Пресет — полный адрес провайдера (ADR-0007): вместе с ключом несёт параметры,
+# без которых провайдер не работает (у Qwen выключение режима рассуждения) и
+# атрибуцию, которая касается только его (у OpenRouter).
+PRESET_WITH_PARAMS = {
+    **PRESET,
+    "extra_body": {"enable_thinking": False},
+    "extra_headers": {"HTTP-Referer": "https://example.test/soroka", "X-Title": "Сорока"},
 }
 
 ANALYSIS_PAYLOAD = {
@@ -164,16 +176,30 @@ async def test_generation_without_preset_goes_to_global_client(monkeypatch):
     assert built == []
 
 
-# ------------------------------------------------ заголовки и тело: одни на всех
+# --------------------------------------- заголовки и тело: из пресета, не общие
 
 
-async def test_every_step_carries_attribution_headers_and_no_extra_body(monkeypatch):
-    """Все три вызова несут одни и те же заголовки атрибуции; тела запроса нет."""
+async def test_provider_params_reach_the_call_unchanged(monkeypatch):
+    """Оба словаря пресета доходят до вызова модели как есть."""
+    gen, global_client, preset_client, _ = _generator_with_two_clients(monkeypatch)
+    global_client.chat.completions.create.return_value = _response(ANALYSIS_PAYLOAD)
+    preset_client.chat.completions.create.return_value = _response(GENERATION_PAYLOAD)
+
+    await gen.generate(
+        preset=PRESET_WITH_PARAMS, transcription="т", template_variables={"decisions": ""}
+    )
+
+    call = preset_client.chat.completions.create.call_args
+    assert call.kwargs["extra_body"] == PRESET_WITH_PARAMS["extra_body"]
+    assert call.kwargs["extra_headers"] == PRESET_WITH_PARAMS["extra_headers"]
+    assert call.kwargs["temperature"] == 0.1
+
+
+async def test_attribution_is_not_sent_to_a_preset_that_did_not_ask_for_it(monkeypatch):
+    """Пресет без атрибуции её не получает: посторонние заголовки в чужой эндпоинт не летят."""
     import src.services.speaker_mapping_service as sms
 
     gen, global_client, preset_client, _ = _generator_with_two_clients(monkeypatch)
-    monkeypatch.setattr(settings, "http_referer", "https://example.test/soroka")
-    monkeypatch.setattr(settings, "x_title", "Сорока")
     monkeypatch.setattr(sms, "protocol_generator", gen)
 
     global_client.chat.completions.create.return_value = _response(MAPPING_PAYLOAD)
@@ -189,10 +215,6 @@ async def test_every_step_carries_attribution_headers_and_no_extra_body(monkeypa
     preset_client.chat.completions.create.return_value = _response(GENERATION_PAYLOAD)
     await gen.generate(preset=PRESET, transcription="т", template_variables={"decisions": ""})
 
-    expected_headers = {
-        "HTTP-Referer": "https://example.test/soroka",
-        "X-Title": "Сорока",
-    }
     calls = [
         mapping_call,
         *global_client.chat.completions.create.call_args_list,
@@ -200,9 +222,40 @@ async def test_every_step_carries_attribution_headers_and_no_extra_body(monkeypa
     ]
     assert len(calls) == 3
     for call in calls:
-        assert call.kwargs["extra_headers"] == expected_headers
+        assert call.kwargs["extra_headers"] == {}
         assert "extra_body" not in call.kwargs
-        assert call.kwargs["temperature"] == 0.1
+
+
+async def test_attribution_of_one_preset_does_not_leak_into_another_step(monkeypatch):
+    """Атрибуция OpenRouter-пресета не уезжает в шаг, который он не обслуживает."""
+    gen, global_client, preset_client, _ = _generator_with_two_clients(monkeypatch)
+    global_client.chat.completions.create.return_value = _response(ANALYSIS_PAYLOAD)
+    preset_client.chat.completions.create.return_value = _response(GENERATION_PAYLOAD)
+
+    await gen.generate(
+        preset=PRESET_WITH_PARAMS, transcription="т", template_variables={"decisions": ""}
+    )
+
+    analysis_call = global_client.chat.completions.create.call_args
+    assert analysis_call.kwargs["extra_headers"] == {}
+    assert "extra_body" not in analysis_call.kwargs
+
+
+async def test_preset_without_key_inherits_the_shared_one(monkeypatch):
+    """Пресет без своего ключа наследует общий: старая конфигурация работает как была."""
+    gen, global_client, preset_client, built = _generator_with_two_clients(monkeypatch)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-общий")
+    global_client.chat.completions.create.return_value = _response(ANALYSIS_PAYLOAD)
+    preset_client.chat.completions.create.return_value = _response(GENERATION_PAYLOAD)
+
+    shared_key_preset = {k: v for k, v in PRESET.items() if k != "api_key"}
+    await gen.generate(
+        preset=shared_key_preset, transcription="т", template_variables={"decisions": ""}
+    )
+
+    assert len(built) == 1
+    assert built[0]["api_key"] == "sk-общий"
+    assert built[0]["base_url"] == PRESET["base_url"]
 
 
 # ------------------------------------------------------------------------- лог

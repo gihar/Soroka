@@ -18,20 +18,27 @@ OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-3.5-turbo
 
-# Опционально: Несколько пресетов моделей OpenAI (JSON-массив)
+# Опционально: Несколько пресетов моделей (JSON-массив)
+# Пресет — полный адрес провайдера: модель, адрес, свой ключ и параметры,
+# специфичные для провайдера. Пустой api_key означает «наследовать OPENAI_API_KEY».
+# extra_body — дополнительные поля тела запроса, extra_headers — заголовки:
+# оба словаря уходят в вызов модели как есть и только у своего пресета.
 # Если не задано, пресет по умолчанию будет собран из OPENAI_MODEL/OPENAI_BASE_URL
 # Пример:
 # OPENAI_MODELS=[
 #   {"key": "openai_gpt4o", "name": "OpenAI: gpt-4o", "model": "gpt-4o", "base_url": "https://api.openai.com/v1"},
-#   {"key": "openrouter_llama3_70b", "name": "OpenRouter: Llama 3.1 70B", "model": "meta-llama/llama-3.1-70b-instruct", "base_url": "https://openrouter.ai/api/v1"}
+#   {"key": "openrouter_llama3_70b", "name": "OpenRouter: Llama 3.1 70B", "model": "meta-llama/llama-3.1-70b-instruct", "base_url": "https://openrouter.ai/api/v1",
+#    "extra_headers": {"HTTP-Referer": "https://github.com/gihar/Soroka", "X-Title": "Soroka"}},
+#   {"key": "qwen_plus", "name": "Qwen: plus", "model": "qwen3.7-plus", "base_url": "https://token-plan.<region>.maas.aliyuncs.com/compatible-mode/v1",
+#    "api_key": "sk-sp-xxx", "extra_body": {"enable_thinking": false}}
 # ]
+# Атрибуция OpenRouter (HTTP-Referer/X-Title) задаётся в extra_headers своего
+# пресета: глобальной настройки для неё больше нет, чужим эндпоинтам она не летит.
+# Выключение режима рассуждения Qwen (enable_thinking) — поле тела, а не заголовок;
+# без него ответ не укладывается в LLM_TIMEOUT_SECONDS.
 
 # Таймаут ожидания ответа от LLM (в секундах)
 LLM_TIMEOUT_SECONDS=30
-
-# HTTP заголовки для LLM запросов
-HTTP_REFERER=https://github.com/gihar/Soroka
-X_TITLE=Soroka
 
 # =============================================================================
 # БАЗА ДАННЫХ
