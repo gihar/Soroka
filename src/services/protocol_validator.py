@@ -3,12 +3,14 @@
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional
 
 from loguru import logger
 
 from src.models.diarization import Diarization
-from src.models.validation import ValidationResult
+from src.models.validation import BriefConformance, ValidationResult
+from src.services.brief_compiler import brief_protocol_keys
+from src.services.protocol_briefs import get_brief_for
 
 
 class ProtocolValidator:
@@ -26,26 +28,69 @@ class ProtocolValidator:
             "неизвестно"
         ]
     
+    def check_brief_conformance(
+        self,
+        protocol: Dict[str, Any],
+        template_name: Optional[str]
+    ) -> Optional[BriefConformance]:
+        """Сверить набор ключей ответа модели с ключами брифа системного шаблона.
+
+        Args:
+            protocol: Ответ модели (протокол + служебные поля)
+            template_name: Имя шаблона; бриф ищется по нему
+
+        Returns:
+            Итог сверки, либо ``None`` для кастомного шаблона (брифа нет —
+            сверять не с чем, полнота считается по переменным шаблона).
+        """
+        brief = get_brief_for(template_name) if template_name else None
+        if brief is None:
+            return None
+
+        expected = brief_protocol_keys(brief)
+        answered = {key for key in protocol if self._is_content_field(key)}
+        return BriefConformance(
+            template_name=brief.template_name,
+            missing_keys=tuple(key for key in expected if key not in answered),
+            unexpected_keys=tuple(sorted(answered - set(expected))),
+        )
+
+    def expected_fields(
+        self,
+        template_name: Optional[str],
+        template_variables: Dict[str, str]
+    ) -> Collection[str]:
+        """Поля, которые протокол обязан принести.
+
+        Системный шаблон — ключи брифа: тот самый контракт, по которому раздел
+        и должен был прийти. Кастомный шаблон — переменные шаблона, как и
+        раньше: брифа у него нет, сверять не с чем.
+        """
+        brief = get_brief_for(template_name) if template_name else None
+        if brief is None:
+            return template_variables
+        return brief_protocol_keys(brief)
+
     def validate_completeness(
         self,
         protocol: Dict[str, Any],
-        template_variables: Dict[str, str]
+        expected_fields: Collection[str]
     ) -> tuple[float, List[str], List[str]]:
         """
         Проверить полноту протокола
-        
+
         Args:
             protocol: Сгенерированный протокол
-            template_variables: Ожидаемые переменные шаблона
-            
+            expected_fields: Имена ожидаемых полей (см. :meth:`expected_fields`)
+
         Returns:
             (оценка полноты, список отсутствующих полей, список пустых полей)
         """
         missing_fields = []
         empty_fields = []
-        
+
         # Проверяем наличие всех ожидаемых полей
-        for field_name in template_variables.keys():
+        for field_name in expected_fields:
             if field_name not in protocol:
                 missing_fields.append(field_name)
                 continue
@@ -64,7 +109,7 @@ class ProtocolValidator:
                     empty_fields.append(field_name)
         
         # Вычисляем оценку полноты
-        total_fields = len(template_variables)
+        total_fields = len(expected_fields)
         filled_fields = total_fields - len(missing_fields) - len(empty_fields)
         completeness_score = filled_fields / total_fields if total_fields > 0 else 0
         
@@ -241,13 +286,18 @@ class ProtocolValidator:
 
         return diarization_usage, suggestions
 
+    @staticmethod
+    def _is_content_field(key: str) -> bool:
+        """Поле протокола, а не служебное поле генератора (``_meeting_type`` и пр.)."""
+        return not key.startswith("_")
+
     def _protocol_content_text(self, protocol: Dict[str, Any]) -> str:
         """Склеить содержательные поля протокола, отбросив служебные (_meeting_type,
         _speaker_mapping и пр.): их значения несут метки/имена и исказили бы проверку."""
         return " ".join(
             str(value)
             for key, value in protocol.items()
-            if not key.startswith("_")
+            if self._is_content_field(key)
         )
 
     def _has_responsible_info(
@@ -285,7 +335,8 @@ class ProtocolValidator:
         transcription: str,
         template_variables: Dict[str, str],
         diarization_data: Optional[Diarization] = None,
-        speaker_mapping: Optional[Dict[str, str]] = None
+        speaker_mapping: Optional[Dict[str, str]] = None,
+        template_name: Optional[str] = None
     ) -> ValidationResult:
         """
         Вычислить общую оценку качества протокола
@@ -293,17 +344,20 @@ class ProtocolValidator:
         Args:
             protocol: Сгенерированный протокол
             transcription: Исходная транскрипция
-            template_variables: Ожидаемые переменные шаблона
+            template_variables: Переменные шаблона (ожидаемые поля кастомного шаблона)
             diarization_data: Данные диаризации (опционально)
             speaker_mapping: Сопоставление спикеров с участниками (опционально)
+            template_name: Имя шаблона; у системного ожидаемые поля берутся из брифа
 
         Returns:
             Результат валидации с оценками и рекомендациями
         """
         logger.info("Начало валидации протокола")
-        
-        # 1. Проверка полноты
-        completeness, missing, empty = self.validate_completeness(protocol, template_variables)
+
+        # 1. Проверка полноты — по контракту шаблона (бриф либо переменные)
+        completeness, missing, empty = self.validate_completeness(
+            protocol, self.expected_fields(template_name, template_variables)
+        )
         
         # 2. Проверка структуры
         structure, struct_warnings = self.validate_structure(protocol)

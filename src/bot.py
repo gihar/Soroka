@@ -322,9 +322,12 @@ class EnhancedTelegramBot:
             from src.llm import protocol_generator
 
             openai_available = protocol_generator.is_available()
-            logger.info(f"OpenAI провайдер доступен: {openai_available}")
+            logger.info(f"Модель настроена: {openai_available}")
             if not openai_available:
-                logger.error("OpenAI провайдер недоступен (нет API ключа)!")
+                logger.error(
+                    "Пригодных пресетов нет: ни один не несёт ключа провайдера, "
+                    "и общий OPENAI_API_KEY не задан!"
+                )
 
             preset_repo = model_preset_repo
             active_key = await app_settings_repo.get_active_model_key()

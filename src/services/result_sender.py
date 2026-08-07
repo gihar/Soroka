@@ -72,6 +72,10 @@ def _build_result_dict(
             "diarization": transcription.diarization if transcription else None,
             "compression_info": transcription.compression_info if transcription else None,
         },
+        # Модель называется в сводке, только когда её выбирали руками: обкатка
+        # сравнивает два протокола одной записи, и без имени они неразличимы.
+        # На обычном пути модель остаётся технической деталью и уходит в логи.
+        "model_is_chosen": bool(getattr(request, "model_preset_key", None)),
         "processing_duration": getattr(result, "processing_duration", None),
         "speaker_mapping": getattr(request, "speaker_mapping", None),
         # Оговорки едут в сводке ПЕРЕД протоколом (см. _document_notes), а не

@@ -608,3 +608,393 @@ async def test_regen_go_rejects_malformed_data_gracefully(monkeypatch):
     regen_mock.assert_not_awaited()
     assert answers and answers[-1]  # пользователь получил вежливый отказ
     assert not any("protocol_regen_go_callback" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Обкатка модели через перегенерацию (#118): экран виден только администратору
+# ---------------------------------------------------------------------------
+
+def _as_admin(monkeypatch, allowed: bool) -> None:
+    """Права администратора — единственное, что делит эти экраны надвое."""
+    import src.utils.admin_utils as admin_utils
+
+    monkeypatch.setattr(admin_utils, "is_admin", lambda _uid: allowed)
+
+
+def _stored_row(**overrides):
+    row = {
+        "id": 7,
+        "user_id": 42,
+        "file_name": "meeting.mp3",
+        "template_id": 5,
+        "transcription_text": "полная расшифровка встречи",
+        "result_text": "# Старый протокол",
+    }
+    row.update(overrides)
+    return row
+
+
+def _presets():
+    return [
+        {"key": "openrouter-gpt-5-mini", "name": "GPT-5 mini"},
+        {"key": "qwen-token-plan", "name": "Qwen3.7 Plus"},
+    ]
+
+
+def _model_callback(data: str, user_id: int = 1):
+    return SimpleNamespace(
+        data=data,
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1), answer=AsyncMock()),
+        bot=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_model_picker_offers_every_enabled_preset_to_admin(monkeypatch):
+    from src.ux.protocol_actions_callback_data import ProtoModelGo, ProtoModels
+
+    pac, handler = _actions_handler("protocol_models_callback")
+    _as_admin(monkeypatch, True)
+    monkeypatch.setattr(pac, "_safe_callback_answer", AsyncMock())
+
+    edited = {}
+
+    async def fake_edit(_message, text, **kwargs):
+        edited.update(text=text, markup=kwargs.get("reply_markup"))
+
+    monkeypatch.setattr(pac, "safe_edit_text", fake_edit)
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row()),
+    )
+    monkeypatch.setattr(
+        db_module.model_preset_repo, "get_enabled",
+        AsyncMock(return_value=_presets()),
+    )
+
+    data = ProtoModels(history_id=7)
+    await handler(_model_callback(data.pack()), data)
+
+    datas = _keyboard_datas(edited["markup"])
+    assert ProtoModelGo(history_id=7, preset_key="qwen-token-plan").pack() in datas
+    assert ProtoModelGo(history_id=7, preset_key="openrouter-gpt-5-mini").pack() in datas
+    texts = {btn.text for row in edited["markup"].inline_keyboard for btn in row}
+    assert "Qwen3.7 Plus" in texts  # выбирают по имени, а не по ключу
+
+
+@pytest.mark.asyncio
+async def test_model_picker_refuses_non_admin(monkeypatch):
+    """Не-администратор получает отказ, а не список моделей."""
+    from src.ux.protocol_actions_callback_data import ProtoModels
+
+    pac, handler = _actions_handler("protocol_models_callback")
+    _as_admin(monkeypatch, False)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    edit_mock = AsyncMock()
+    monkeypatch.setattr(pac, "safe_edit_text", edit_mock)
+
+    import src.database as db_module
+
+    presets_mock = AsyncMock(return_value=_presets())
+    monkeypatch.setattr(db_module.model_preset_repo, "get_enabled", presets_mock)
+
+    data = ProtoModels(history_id=7)
+    await handler(_model_callback(data.pack(), user_id=999), data)
+
+    presets_mock.assert_not_awaited()  # список моделей даже не запрашивался
+    edit_mock.assert_not_awaited()
+    assert answers and "администратор" in answers[-1]
+
+
+def _regen_screen_handler():
+    from unittest.mock import MagicMock
+
+    import src.handlers.callbacks.protocol_actions_callbacks as pac
+
+    class FakeTemplateService:
+        async def get_all_templates(self):
+            return [SimpleNamespace(id=5, name="Дейли")]
+
+    router = pac.setup_protocol_actions_callbacks(
+        user_service=MagicMock(), template_service=FakeTemplateService()
+    )
+    handler = next(
+        h.callback for h in router.callback_query.handlers
+        if h.callback.__name__ == "protocol_regen_callback"
+    )
+    return pac, handler
+
+
+async def _regen_screen_datas(monkeypatch, *, admin: bool) -> set:
+    pac, handler = _regen_screen_handler()
+    _as_admin(monkeypatch, admin)
+    monkeypatch.setattr(pac, "_safe_callback_answer", AsyncMock())
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row()),
+    )
+
+    cb = _model_callback("proto_regen_7")
+    await handler(cb)
+
+    markup = cb.message.answer.await_args.kwargs["reply_markup"]
+    return _keyboard_datas(markup)
+
+
+@pytest.mark.asyncio
+async def test_regen_screen_offers_model_choice_to_admin(monkeypatch):
+    from src.ux.protocol_actions_callback_data import ProtoModels
+
+    datas = await _regen_screen_datas(monkeypatch, admin=True)
+
+    assert ProtoModels(history_id=7).pack() in datas
+    assert "proto_regen_go_7_5" in datas  # выбор шаблона на месте
+
+
+@pytest.mark.asyncio
+async def test_regen_screen_hides_model_choice_from_everyone_else(monkeypatch):
+    from src.ux.protocol_actions_callback_data import ProtoModels
+
+    datas = await _regen_screen_datas(monkeypatch, admin=False)
+
+    assert ProtoModels(history_id=7).pack() not in datas
+    assert "proto_regen_go_7_5" in datas  # обычный путь не пострадал
+
+
+@pytest.mark.asyncio
+async def test_model_go_regenerates_with_chosen_preset_and_stored_template(monkeypatch):
+    """Выбранный пресет уходит в перегенерацию; активный пресет бота не трогается."""
+    from src.ux.protocol_actions_callback_data import ProtoModelGo
+
+    pac, handler = _actions_handler("protocol_model_go_callback")
+    _as_admin(monkeypatch, True)
+    monkeypatch.setattr(pac, "_safe_callback_answer", AsyncMock())
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row()),
+    )
+    qwen = {"key": "qwen-token-plan", "name": "Qwen3.7 Plus", "is_enabled": True}
+    monkeypatch.setattr(
+        db_module.model_preset_repo, "get_by_key", AsyncMock(return_value=qwen)
+    )
+    set_active = AsyncMock()
+    monkeypatch.setattr(db_module.app_settings_repo, "set_active_model_key", set_active)
+
+    import src.services.protocol_actions as pa
+
+    captured = {}
+
+    async def fake_regen(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(pa, "regenerate_protocol", fake_regen)
+
+    data = ProtoModelGo(history_id=7, preset_key="qwen-token-plan")
+    await handler(_model_callback(data.pack()), data)
+
+    assert captured["history_id"] == 7
+    assert captured["template_id"] == 5  # шаблон записи — меняется только модель
+    assert captured["preset"] == qwen
+    set_active.assert_not_awaited()  # обкатка не переводит на модель всех разом
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_preset",
+    [None, {"key": "qwen-token-plan", "name": "Qwen3.7 Plus", "is_enabled": False}],
+    ids=["удалён", "выключен"],
+)
+async def test_model_go_refuses_a_preset_that_left_between_screens(
+    monkeypatch, stored_preset
+):
+    """Пресет успели удалить или выключить, пока экран висел — запуска нет.
+
+    Экран выбора живёт своей жизнью: между показом списка и нажатием кнопки
+    администратор мог убрать пресет в /models. Молча уйти на него значило бы
+    генерировать адресом, которого больше нет.
+    """
+    from src.ux.protocol_actions_callback_data import ProtoModelGo
+
+    pac, handler = _actions_handler("protocol_model_go_callback")
+    _as_admin(monkeypatch, True)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row()),
+    )
+    monkeypatch.setattr(
+        db_module.model_preset_repo, "get_by_key",
+        AsyncMock(return_value=stored_preset),
+    )
+
+    import src.services.protocol_actions as pa
+
+    regen_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(pa, "regenerate_protocol", regen_mock)
+
+    data = ProtoModelGo(history_id=7, preset_key="qwen-token-plan")
+    await handler(_model_callback(data.pack()), data)
+
+    regen_mock.assert_not_awaited()
+    assert answers and "недоступна" in answers[-1]
+
+
+@pytest.mark.asyncio
+async def test_model_go_refuses_non_admin(monkeypatch):
+    """Кнопка модели, доставшаяся не-администратору, не запускает перегенерацию."""
+    from src.ux.protocol_actions_callback_data import ProtoModelGo
+
+    pac, handler = _actions_handler("protocol_model_go_callback")
+    _as_admin(monkeypatch, False)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    monkeypatch.setattr(pac, "safe_edit_text", AsyncMock())
+
+    import src.services.protocol_actions as pa
+
+    regen_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(pa, "regenerate_protocol", regen_mock)
+
+    data = ProtoModelGo(history_id=7, preset_key="qwen-token-plan")
+    await handler(_model_callback(data.pack(), user_id=999), data)
+
+    regen_mock.assert_not_awaited()
+    assert answers and "администратор" in answers[-1]
+
+
+@pytest.mark.asyncio
+async def test_model_picker_refuses_record_without_transcription(monkeypatch):
+    """Без сохранённой расшифровки перегенерации нет — и на экране модели тоже."""
+    from src.ux.protocol_actions_callback_data import ProtoModels
+
+    pac, handler = _actions_handler("protocol_models_callback")
+    _as_admin(monkeypatch, True)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+    edit_mock = AsyncMock()
+    monkeypatch.setattr(pac, "safe_edit_text", edit_mock)
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row(transcription_text="")),
+    )
+
+    data = ProtoModels(history_id=7)
+    await handler(_model_callback(data.pack()), data)
+
+    edit_mock.assert_not_awaited()  # экрана выбора не было
+    assert answers and "Расшифровка не сохранена" in answers[-1]
+
+
+# ---------------------------------------------------------------------------
+# Сводка называет модель ровно тогда, когда её выбирали
+# ---------------------------------------------------------------------------
+
+async def _delivered_texts(monkeypatch, request, result) -> list:
+    sent = []
+
+    async def fake_send(bot, chat_id, **kwargs):
+        sent.append(kwargs.get("text", ""))
+        return object()
+
+    monkeypatch.setattr(result_sender, "safe_send_message", fake_send)
+    _patch_user(monkeypatch)
+
+    ok = await result_sender.send_result_to_user(
+        AsyncMock(), 1, 1, request, result
+    )
+    assert ok is True
+    return sent
+
+
+@pytest.mark.asyncio
+async def test_summary_names_the_model_when_it_was_chosen(monkeypatch):
+    """Обкатка: без имени модели два протокола на одной записи не различить."""
+    request = ProcessingRequest(
+        file_name="meeting.mp3", llm_provider="openai", user_id=1,
+        model_preset_key="qwen-token-plan",
+    )
+    result = _result(history_id=7)
+    result.llm_model_used = "Qwen3.7 Plus"
+
+    texts = await _delivered_texts(monkeypatch, request, result)
+
+    assert any("Модель: Qwen3.7 Plus" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_summary_keeps_model_out_of_ordinary_delivery(monkeypatch):
+    """Обычная доставка не обрастает техникой: модель по-прежнему уходит в логи."""
+    result = _result(history_id=7)
+    result.llm_model_used = "GPT-5 mini"
+
+    texts = await _delivered_texts(monkeypatch, _request(), result)
+
+    assert not any("Модель" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_regen_screen_still_refuses_record_without_transcription(monkeypatch):
+    """Старая запись без расшифровки объясняет отказ, а не показывает пикер."""
+    pac, handler = _regen_screen_handler()
+    _as_admin(monkeypatch, True)
+
+    answers = []
+
+    async def fake_answer(_callback, text=None, **kwargs):
+        answers.append(text)
+
+    monkeypatch.setattr(pac, "_safe_callback_answer", fake_answer)
+
+    import src.database as db_module
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value=_stored_row(transcription_text="")),
+    )
+
+    cb = _model_callback("proto_regen_7")
+    await handler(cb)
+
+    cb.message.answer.assert_not_awaited()
+    assert answers and "Расшифровка не сохранена" in answers[-1]

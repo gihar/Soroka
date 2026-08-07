@@ -110,7 +110,9 @@ async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch)
         meeting_type="technical",
         speaker_mapping={"SPEAKER_1": "Иван Иванов"},
     )
-    generation = next(c for c in calls if c.get("step_name") == "Generation")
+    from src.llm import ModelStep
+
+    generation = next(c for c in calls if c.get("step") is ModelStep.GENERATION)
     assert "ГОТОВЫЙ_ТЕКСТ" in generation["user_prompt"]
 
 

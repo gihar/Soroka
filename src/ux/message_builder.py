@@ -19,6 +19,10 @@ TEMPLATES_EMPTY = (
 
 PROTOCOL_GONE = "Протокол не найден — возможно, история очищена."
 
+# Отказ на админских экранах: настройки бота и выбор модели при перегенерации
+# говорят это одними словами (критика v10 — одна формулировка, одно место).
+ADMIN_ONLY = "❌ Доступно только администратору"
+
 # Общий текст «что-то пошло не так»: восемь копий в трёх модулях (критика v11).
 SOMETHING_WENT_WRONG = (
     "❌ Произошла ошибка.\n"
@@ -141,6 +145,13 @@ class MessageBuilder:
         template_name = (result.get("template_used") or {}).get("name")
         if template_name:
             lines.append(f"Шаблон: {_html.escape(template_name)}")
+
+        # Модель — техническая деталь и по умолчанию живёт в логах. Исключение
+        # одно: её выбрали руками (обкатка через перегенерацию, ADR-0007) —
+        # тогда без имени модели два протокола одной записи не различить.
+        model_name = result.get("llm_model_name")
+        if result.get("model_is_chosen") and model_name:
+            lines.append(f"Модель: {_html.escape(str(model_name))}")
 
         participants_line = cls._participants_line(result)
         if participants_line:

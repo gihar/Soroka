@@ -3,19 +3,38 @@
 Двухэтапная генерация со строгими схемами (анализ → генерация), кеш
 OpenAI-совместимых клиентов по пресетам модели и стек надёжности
 (rate-limit → circuit-breaker → retry) — безусловно вокруг каждого вызова.
-402 (кончились кредиты) классифицируется в LLMInsufficientCreditsError,
-не ретраится и пролетает насквозь.
+Исчерпание ресурса провайдера классифицируется здесь и наверх идёт
+типизированным: 402 — LLMInsufficientCreditsError, 429/400 с квотным признаком —
+LLMQuotaExhaustedError. Ни то, ни другое не ретраится и пролетает насквозь.
+
+Каким клиентом и какой моделью идёт шаг, модуль не решает: вызов называет шаг и
+пресет, а маршрут разрешает `src.llm.model_step` — единственная такая точка.
+
+Ключ провайдера несёт пресет, а общий из окружения только подставляется, когда
+своего нет: поэтому готовность модуля считается по наличию пригодных пресетов, а
+отсутствие ключа опознаётся как ошибка настройки до похода в API, а не по
+невнятному отказу SDK (ADR-0007).
+
+Здесь же живёт зонд строгих схем (`probe_schema_support`): применяет ли модель
+пресета затребованную схему — свойство модели, а не провайдера, и по коду
+ответа неразличимое, поэтому вердикт даёт только сравнение ключей.
 """
 import asyncio
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import openai
 from loguru import logger
 
 from src.config import settings
-from src.exceptions.processing import LLMInsufficientCreditsError
+from src.exceptions.configuration import AdminConfigurationError
+from src.exceptions.processing import (
+    LLMInsufficientCreditsError,
+    LLMQuotaExhaustedError,
+)
 from src.llm.json_utils import safe_json_parse
+from src.llm.model_step import ModelStep, resolve_step
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import (
     build_analysis_prompt,
@@ -33,6 +52,7 @@ from src.reliability import (
     global_rate_limiter,
 )
 from src.services.brief_compiler import brief_field_rules, brief_to_schema
+from src.services.error_presentation import is_quota_exhausted
 from src.services.protocol_briefs import get_brief_for
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
@@ -43,6 +63,33 @@ def _is_insufficient_credits_error(exc: Exception) -> bool:
         return True
     text = str(exc).lower()
     return "error code: 402" in text or "more credits" in text
+
+
+# Коды, которыми провайдеры сообщают об исчерпании квоты подписки: 429 у Qwen
+# (Throttling.AllocationQuota), 400 у OpenAI-совместимых (insufficient_quota).
+_QUOTA_STATUS_CODES = (400, 429)
+
+def _has_status(exc: Exception, code: int, text: str) -> bool:
+    """Ответ провайдера пришёл с этим HTTP-кодом (атрибут SDK или текст ошибки)."""
+    return getattr(exc, "status_code", None) == code or f"error code: {code}" in text
+
+
+def _is_quota_exhausted_error(exc: Exception) -> bool:
+    """Признак «квота подписки исчерпана»: код 429 или 400 с квотным признаком.
+
+    Квотный признак — именно исчерпание, а не обычный троттлинг: голое 429 это
+    rate limit, он лечится повтором, и путать его с концом квоты нельзя. Слова
+    признака берутся из ``src.services.error_presentation`` — там же их читает
+    путь ниже по течению, у которого от исключения остался один текст. Второй
+    таблицы нет: разойдясь, они развели бы классификацию и совет админу.
+
+    Кредиты провайдера (402) сюда не относятся: их лечит пополнение, квоту —
+    нет (CONTEXT.md), поэтому классы ошибок и алерты разные.
+    """
+    text = str(exc).lower()
+    if not any(_has_status(exc, code, text) for code in _QUOTA_STATUS_CODES):
+        return False
+    return is_quota_exhausted(text)
 
 
 def _select_generation_contract(
@@ -65,6 +112,57 @@ def _select_generation_contract(
         PROTOCOL_DATA_SCHEMA,
         build_generation_system_prompt(template_variables=template_variables),
     )
+
+
+# Схема зонда: два ключа, которых нет ни в промпте, ни в здравом смысле.
+# Модель, применяющая строгую схему, вернёт ровно их; модель, схему выбросившая,
+# ответит своими — и то и другое приходит успешным ответом, поэтому вердикт
+# считается по ключам, а не по коду ответа (ADR-0007).
+SCHEMA_PROBE_SCHEMA: Dict[str, Any] = {
+    "name": "schema_probe",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "zqx_marker": {"type": "string"},
+            "unlikely_count": {"type": "integer"},
+        },
+        "required": ["zqx_marker", "unlikely_count"],
+        "additionalProperties": False,
+    },
+}
+
+# Промпт зонда — содержательный вопрос, ни словом не упоминающий ключи схемы:
+# иначе модель могла бы вернуть их из промпта, не читая схему, и вердикт
+# «применяется» ничего бы не значил.
+#
+# Слово «json» в сообщениях — не украшение, а условие ответа. Провайдер,
+# понижающий `json_schema` до `json_object` (живой замер 2026-08-06:
+# `qwen3.6-flash`), без него отвечает HTTP 400 «messages must contain the word
+# json», и зонд вместо вердикта сообщал бы о недоступности провайдера — ровно в
+# том случае, ради которого он заведён. Формат — не содержание: сказать «верни
+# json» можно, не подсказав ни одного ключа.
+SCHEMA_PROBE_SYSTEM_PROMPT = "Ты помощник. Отвечай кратко и по существу, в формате JSON."
+SCHEMA_PROBE_USER_PROMPT = (
+    "Одним предложением объясни, чем протокол встречи отличается от её транскрипции. "
+    "Ответ верни json-объектом."
+)
+
+
+@dataclass(frozen=True)
+class SchemaProbeVerdict:
+    """Ответ зонда: применил ли пресет строгую схему — и что именно проверено.
+
+    ``model`` и ``base_url`` — не украшение ответа, а его половина: вердикт
+    принадлежит конкретной модели по конкретному адресу, и без них два пресета
+    не различить.
+    """
+
+    schema_honored: bool
+    model: str
+    base_url: Optional[str]
+    requested_keys: Tuple[str, ...]
+    returned_keys: Tuple[str, ...]
 
 
 class ProtocolGenerator:
@@ -101,13 +199,32 @@ class ProtocolGenerator:
 
     # ------------------------------------------------------------------ клиенты
 
+    def _provider_key_for(self, preset: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Ключ, которым идёт вызов: свой ключ пресета либо общий из окружения."""
+        return (preset or {}).get("api_key") or settings.openai_api_key
+
+    def _require_provider_key(self, preset: Optional[Dict[str, Any]]) -> None:
+        """Проверить адрес до вызова: без ключа идти некуда.
+
+        Отсутствие ключа — настройка, а не сбой провайдера, поэтому оно
+        опознаётся здесь, а не по невнятной ошибке SDK на первом же вызове.
+        """
+        if self._provider_key_for(preset):
+            return
+        preset_name = (preset or {}).get("name") or (preset or {}).get("key")
+        whose = f"Пресет «{preset_name}»" if preset_name else "Активный пресет"
+        raise AdminConfigurationError(
+            f"{whose} не несёт ключа провайдера, и общий OPENAI_API_KEY не задан. "
+            "Задайте ключ пресету через /add_model или укажите OPENAI_API_KEY в окружении."
+        )
+
     def _get_client(self, preset: dict = None):
         """Get or create an OpenAI client for the given preset."""
         if not preset:
             return self.default_client
 
         base_url = preset.get('base_url') or settings.openai_base_url
-        api_key = preset.get('api_key') or settings.openai_api_key
+        api_key = self._provider_key_for(preset)
 
         cache_key = (base_url, hash(api_key) if api_key else None)
 
@@ -148,8 +265,16 @@ class ProtocolGenerator:
             logger.info(f"Invalidated {len(keys_to_remove)} OpenAI client(s) for {base_url}")
 
     def is_available(self) -> bool:
-        """Клиент сконфигурирован и модуль готов принимать вызовы."""
-        return self.default_client is not None
+        """Есть ли пригодный пресет — тот, к которому есть чем пойти.
+
+        Готовность считается по пресетам, а не по глобальному ключу (ADR-0007):
+        иначе деплой целиком на подписке, где ключ несёт сам пресет, выглядел бы
+        ненастроенным. Общий ключ покрывает любой пресет без своего, поэтому
+        конфигурация на одном ключе остаётся готовой как была.
+        """
+        if settings.openai_api_key:
+            return True
+        return any(preset.api_key for preset in settings.openai_models)
 
     # ------------------------------------------------------------- надёжность
 
@@ -184,8 +309,7 @@ class ProtocolGenerator:
         ``best_transcript`` (формат из диаризации либо сырой), генератору знать о
         диаризации не нужно.
         """
-        if not self.is_available():
-            raise ValueError("OpenAI API не настроен")
+        self._require_provider_key(preset)
         return await self._protected(
             self._generate_two_stage,
             preset=preset,
@@ -195,21 +319,62 @@ class ProtocolGenerator:
         )
 
     async def structured_call(self, *, system_prompt: str, user_prompt: str,
-                              schema: Dict[str, Any], model: str = None,
-                              preset: Optional[Dict[str, Any]] = None,
-                              step_name: str = "StructuredCall") -> Dict[str, Any]:
-        """Один вызов модели со строгой схемой ответа (с надёжностью)."""
-        if not self.is_available():
-            raise ValueError("OpenAI API не настроен")
-        client = self._get_client(preset)
+                              schema: Dict[str, Any], step: ModelStep,
+                              preset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Один вызов модели со строгой схемой ответа (с надёжностью).
+
+        Клиента и модель выбирает маршрут шага: вызывающий называет шаг, а не
+        модель.
+        """
+        self._require_provider_key(preset)
         return await self._protected(
             self._call_openai,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             schema=schema,
-            step_name=step_name,
-            model=model,
-            client=client,
+            step=step,
+            preset=preset,
+        )
+
+    async def probe_schema_support(
+        self, *, preset: Optional[Dict[str, Any]] = None
+    ) -> SchemaProbeVerdict:
+        """Применяет ли модель пресета строгую схему ответа (ADR-0007).
+
+        Зонд посылает схему с невозможными ключами и содержательный вопрос, в
+        котором этих ключей нет, а вердикт выносит сравнением набора ключей
+        ответа с затребованным. По коду ответа отказ неотличим от успеха:
+        модель, выбросившая схему, отвечает успехом и валидным JSON — просто со
+        своими ключами.
+
+        Недоступность провайдера, неверный ключ и отсутствие ключа сюда не
+        попадают: они выходят наружу ошибкой, а не вердиктом.
+        """
+        self._require_provider_key(preset)
+        route = resolve_step(ModelStep.GENERATION, preset, self._get_client)
+
+        answer = await self.structured_call(
+            system_prompt=SCHEMA_PROBE_SYSTEM_PROMPT,
+            user_prompt=SCHEMA_PROBE_USER_PROMPT,
+            schema=SCHEMA_PROBE_SCHEMA,
+            step=ModelStep.GENERATION,
+            preset=preset,
+        )
+
+        requested = tuple(SCHEMA_PROBE_SCHEMA["schema"]["properties"])
+        returned = tuple(answer)
+        honored = set(returned) == set(requested)
+        logger.info(
+            f"Зонд схем: модель {route.model}, адрес {route.base_url}, "
+            f"схема {'применяется' if honored else 'принята и выброшена'} "
+            f"(ключи ответа: {', '.join(returned) or '—'})"
+        )
+        return SchemaProbeVerdict(
+            schema_honored=honored,
+            model=route.model,
+            base_url=route.base_url,
+            requested_keys=requested,
+            returned_keys=returned,
         )
 
     # ----------------------------------------------------------- реализация
@@ -240,15 +405,6 @@ class ProtocolGenerator:
         provided_meeting_type = kwargs.get('meeting_type')
         provided_speaker_mapping = kwargs.get('speaker_mapping')
 
-        if preset and preset.get('model'):
-            selected_model = preset['model']
-            logger.info(
-                f"Используется модель: {selected_model} "
-                f"(ключ: {preset.get('key')})"
-            )
-        else:
-            selected_model = settings.openai_model
-
         if provided_meeting_type and provided_speaker_mapping:
             logger.info(
                 f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление "
@@ -270,8 +426,8 @@ class ProtocolGenerator:
                     project_list=kwargs.get('project_list')
                 ),
                 schema=MEETING_ANALYSIS_SCHEMA,
-                step_name="Analysis",
-                model=settings.analysis_stage_model
+                step=ModelStep.ANALYSIS,
+                preset=preset,
             )
 
             meeting_type = analysis_result.get('meeting_type', 'general')
@@ -280,8 +436,6 @@ class ProtocolGenerator:
             logger.info(f"ЭТАП 1 завершен. Тип: {meeting_type}, Спикеров сопоставлено: {len(speaker_mapping)}")
 
         logger.info("Запуск ЭТАПА 2: Генерация протокола")
-
-        client = self._get_client(preset)
 
         # Единая точка: бриф-контракт для системного шаблона, legacy — для кастомного.
         generation_schema, generation_system_prompt = _select_generation_contract(
@@ -299,9 +453,8 @@ class ProtocolGenerator:
                 project_list=kwargs.get('project_list')
             ),
             schema=generation_schema,
-            step_name="Generation",
-            model=selected_model,
-            client=client
+            step=ModelStep.GENERATION,
+            preset=preset,
         )
 
         protocol_data = generation_result.get('protocol_data', {})
@@ -317,31 +470,27 @@ class ProtocolGenerator:
 
         return final_result
 
-    async def _call_openai(self, system_prompt: str, user_prompt: str, schema: Dict[str, Any],
-                           step_name: str, model: str = None, client=None) -> Dict[str, Any]:
-        """Helper method for OpenAI API calls."""
-        selected_model = model or settings.openai_model
-        active_client = client or self.default_client
+    async def _call_openai(self, *, system_prompt: str, user_prompt: str,
+                           schema: Dict[str, Any], step: ModelStep,
+                           preset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Единственный исполнитель вызова: маршрут шага → запрос → разбор ответа."""
+        route = resolve_step(step, preset, self._get_client)
+        step_name = step.value
 
-        extra_headers = {}
-        if settings.http_referer:
-            extra_headers["HTTP-Referer"] = settings.http_referer
-        if settings.x_title:
-            extra_headers["X-Title"] = settings.x_title
-
-        logger.info(f"Отправляем запрос в OpenAI [{step_name}] с моделью {selected_model}")
+        logger.info(route.describe())
 
         try:
             response = await asyncio.to_thread(
-                active_client.chat.completions.create,
-                model=selected_model,
+                route.client.chat.completions.create,
+                model=route.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
                 response_format={"type": "json_schema", "json_schema": schema},
-                extra_headers=extra_headers
+                extra_headers=route.extra_headers,
+                **({"extra_body": route.extra_body} if route.extra_body else {}),
             )
             content = response.choices[0].message.content
 
@@ -349,7 +498,7 @@ class ProtocolGenerator:
                 log_cached_tokens_usage(
                     response=response,
                     context=f"generate_protocol_{step_name}",
-                    model_name=selected_model,
+                    model_name=route.model,
                     provider="openai"
                 )
 
@@ -359,7 +508,11 @@ class ProtocolGenerator:
             logger.error(f"Ошибка при вызове OpenAI [{step_name}]: {e}")
             if _is_insufficient_credits_error(e):
                 raise LLMInsufficientCreditsError(
-                    str(e), provider="openai", model=selected_model
+                    str(e), provider="openai", model=route.model
+                ) from e
+            if _is_quota_exhausted_error(e):
+                raise LLMQuotaExhaustedError(
+                    str(e), provider="openai", model=route.model
                 ) from e
             raise
 

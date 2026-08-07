@@ -1,5 +1,6 @@
 """Model preset data access."""
 
+import json
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -11,6 +12,40 @@ _ALLOWED_FIELDS = frozenset({
     "name", "model", "base_url", "api_key",
     "admin_only", "is_enabled",
 })
+
+# Provider params stored as a JSON object; the repository is their boundary —
+# callers get dicts, never raw JSON text.
+_JSON_FIELDS = ("extra_body", "extra_headers")
+
+
+def _decode_params(key: str, field: str, raw: Any) -> Dict[str, Any]:
+    """Decode a stored JSON object into a dict; anything unusable becomes {}."""
+    if raw in (None, ""):
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"Пресет '{key}': поле {field} не разобралось как JSON ({e})")
+        return {}
+    if not isinstance(decoded, dict):
+        logger.warning(f"Пресет '{key}': поле {field} — не объект, игнорируется")
+        return {}
+    return decoded
+
+
+def _encode_params(params: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Encode provider params for storage; None stays None (means «not set»)."""
+    if params is None:
+        return None
+    return json.dumps(params, ensure_ascii=False)
+
+
+def _to_preset(row) -> Dict[str, Any]:
+    """Row → preset dict with provider params decoded into dicts."""
+    preset = dict(row)
+    for field in _JSON_FIELDS:
+        preset[field] = _decode_params(preset.get("key", "?"), field, preset.get(field))
+    return preset
 
 
 class ModelPresetRepository:
@@ -26,7 +61,7 @@ class ModelPresetRepository:
                 "SELECT * FROM model_presets ORDER BY created_at"
             )
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [_to_preset(row) for row in rows]
 
     async def get_enabled(self) -> List[Dict[str, Any]]:
         """Get enabled presets ordered by created_at."""
@@ -35,7 +70,7 @@ class ModelPresetRepository:
                 "SELECT * FROM model_presets WHERE is_enabled = 1 ORDER BY created_at"
             )
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [_to_preset(row) for row in rows]
 
     async def get_available_for_user(self, user_id: int) -> List[Dict[str, Any]]:
         """Get enabled presets available to a specific user.
@@ -57,7 +92,7 @@ class ModelPresetRepository:
                 (key,),
             )
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return _to_preset(row) if row else None
 
     async def upsert(
         self,
@@ -67,24 +102,48 @@ class ModelPresetRepository:
         base_url: str,
         api_key: Optional[str] = None,
         admin_only: bool = False,
+        extra_body: Optional[Dict[str, Any]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+        analysis_model: Optional[str] = None,
+        mapping_model: Optional[str] = None,
     ) -> None:
         """Insert or update a preset by key.
 
-        When api_key is None the existing value is preserved via COALESCE.
+        When api_key, provider params or a cheap-step model is None the existing
+        value is preserved via COALESCE: a resync from config never wipes what an
+        admin set by hand. An empty cheap-step model means «the preset's main
+        model» (ADR-0007), so it needs no value of its own.
         """
         async with self._db.connect() as db:
             await db.execute(
                 """
-                INSERT INTO model_presets (key, name, model, base_url, api_key, admin_only)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO model_presets (
+                    key, name, model, base_url, api_key, admin_only,
+                    extra_body, extra_headers, analysis_model, mapping_model
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     name = excluded.name,
                     model = excluded.model,
                     base_url = excluded.base_url,
                     api_key = COALESCE(excluded.api_key, model_presets.api_key),
-                    admin_only = excluded.admin_only
+                    admin_only = excluded.admin_only,
+                    extra_body = COALESCE(excluded.extra_body, model_presets.extra_body),
+                    extra_headers = COALESCE(
+                        excluded.extra_headers, model_presets.extra_headers
+                    ),
+                    analysis_model = COALESCE(
+                        excluded.analysis_model, model_presets.analysis_model
+                    ),
+                    mapping_model = COALESCE(
+                        excluded.mapping_model, model_presets.mapping_model
+                    )
                 """,
-                (key, name, model, base_url, api_key, int(admin_only)),
+                (
+                    key, name, model, base_url, api_key, int(admin_only),
+                    _encode_params(extra_body), _encode_params(extra_headers),
+                    analysis_model, mapping_model,
+                ),
             )
             await db.commit()
 
@@ -172,6 +231,11 @@ class ModelPresetRepository:
                 name=preset.name,
                 model=preset.model,
                 base_url=base_url,
+                api_key=preset.api_key,
+                extra_body=preset.extra_body,
+                extra_headers=preset.extra_headers,
+                analysis_model=preset.analysis_model,
+                mapping_model=preset.mapping_model,
             )
             count += 1
 

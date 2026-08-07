@@ -10,7 +10,14 @@ from typing import Any, Callable, List, Optional, Type
 
 from loguru import logger
 
-from src.exceptions.processing import LLMInsufficientCreditsError
+from src.exceptions.processing import (
+    LLMInsufficientCreditsError,
+    LLMQuotaExhaustedError,
+)
+
+# Исчерпание ресурса провайдера: против кончившегося баланса и закрытого периода
+# подписки повтор бессилен — он лишь заставляет пользователя ждать до таймаута.
+NON_RETRYABLE_LLM_ERRORS = (LLMInsufficientCreditsError, LLMQuotaExhaustedError)
 
 
 class RetryConfig:
@@ -55,8 +62,8 @@ class RetryManager:
     
     def is_retryable_exception(self, exception: Exception) -> bool:
         """Проверить, стоит ли повторять при данном исключении"""
-        # Никогда не повторяем при недостатке кредитов
-        if isinstance(exception, LLMInsufficientCreditsError):
+        # Никогда не повторяем при исчерпании кредитов или квоты подписки
+        if isinstance(exception, NON_RETRYABLE_LLM_ERRORS):
             return False
         return any(isinstance(exception, exc_type) for exc_type in self.config.retryable_exceptions)
     

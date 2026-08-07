@@ -24,6 +24,35 @@ def back_to_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[BACK_TO_SETTINGS]])
 
 
+def build_model_picker(
+    presets: Sequence,
+    callback_data: Callable[[dict], str],
+    *,
+    cancel_callback: Optional[str] = None,
+    cancel_text: str = "Отмена",
+) -> InlineKeyboardMarkup:
+    """Список моделей по одной в строке — вид пикера пресетов.
+
+    Одна колонка, а не сетка выбора шаблона: имена пресетов длиннее имён
+    шаблонов («Qwen3.7 Plus (подписка)») и в две колонки обрезаются. Порядок —
+    как отдал репозиторий (по времени создания), чтобы список не перетасовывался
+    между показами. Маркера выбора нет: экран ничего не выбирает заранее, он
+    спрашивает — ровно как пикер шаблона.
+    """
+    rows: List[_Row] = [
+        [InlineKeyboardButton(
+            text=preset["name"],
+            callback_data=callback_data(preset),
+        )]
+        for preset in presets
+    ]
+
+    if cancel_callback:
+        rows.append([InlineKeyboardButton(text=cancel_text, callback_data=cancel_callback)])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_template_picker(
     templates: Sequence,
     callback_data: Callable[[object], str],
