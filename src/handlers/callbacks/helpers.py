@@ -6,10 +6,17 @@ from aiogram.types import CallbackQuery
 from loguru import logger
 
 
-async def _safe_callback_answer(callback: CallbackQuery, text: str = None):
-    """Безопасный ответ на callback query с обработкой устаревших запросов"""
+async def _safe_callback_answer(
+    callback: CallbackQuery, text: str = None, show_alert: bool = False
+):
+    """Безопасный ответ на callback query с обработкой устаревших запросов
+
+    ``show_alert`` поднимает ответ из всплывающей подсказки в модальное окно —
+    для отказов, которые пользователь обязан увидеть (нет прав, устаревшая
+    кнопка), а не заметить краем глаза.
+    """
     try:
-        await callback.answer(text=text)
+        await callback.answer(text=text, show_alert=show_alert)
     except Exception as e:
         error_str = str(e).lower()
         # Экранируем фигурные скобки в сообщении об ошибке для безопасного логирования

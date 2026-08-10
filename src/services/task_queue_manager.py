@@ -4,7 +4,7 @@
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import uuid4
 
@@ -15,11 +15,7 @@ from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
-from src.services import error_presentation
-
-# Не чаще одного алерта админам об окончании кредитов LLM в этот интервал —
-# при исчерпании баланса падает каждая задача, иначе админов завалит сообщениями.
-_CREDITS_ALERT_THROTTLE = timedelta(minutes=10)
+from src.services import admin_alerts, error_presentation, preset_failover
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -40,8 +36,7 @@ class TaskQueueManager:
         self.is_running = False
         self._lock = asyncio.Lock()
         self.bot = None  # Будет инициализирован при старте воркеров
-        self._last_credits_alert_at: Optional[datetime] = None
-        
+
         # Определяем максимальное количество параллельных задач
         if settings.max_concurrent_tasks:
             self.max_concurrent = settings.max_concurrent_tasks
@@ -357,15 +352,14 @@ class TaskQueueManager:
                 except Exception as tracker_error:
                     logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
             
-            # При исчерпании кредитов LLM — алертим админов (это сбой на нашей
-            # стороне, который ломает обработку у всех пользователей).
-            if self._is_insufficient_credits(str(e).lower()):
-                try:
-                    await self._notify_admins_insufficient_credits(e)
-                except Exception as admin_error:
-                    logger.error(
-                        f"Не удалось уведомить админов об окончании кредитов: {admin_error}"
-                    )
+            # При исчерпании ресурса провайдера — алертим админов (это сбой на
+            # нашей стороне, который ломает обработку у всех пользователей).
+            try:
+                await self._notify_admins_provider_exhausted(e)
+            except Exception as admin_error:
+                logger.error(
+                    f"Не удалось уведомить админов о сбое провайдера: {admin_error}"
+                )
 
             # НЕ пробрасываем исключение - обрабатываем локально
         
@@ -381,69 +375,30 @@ class TaskQueueManager:
                     logger.error(f"Ошибка при завершении трекера: {e}")
     
     @staticmethod
-    def _is_insufficient_credits(error_lower: str) -> bool:
-        """Признак ошибки «закончились кредиты на LLM» (HTTP 402).
+    async def _notify_admins_provider_exhausted(exc: Exception) -> None:
+        """Сообщить админам, если задача упала на исчерпании ресурса провайдера.
 
-        Правило общее с путём возобновления — живёт в
-        ``src.services.error_presentation``, чтобы два пути не разошлись в том,
-        что считать исчерпанием кредитов.
+        Поводов два, и они не взаимозаменяемы: кредиты провайдера лечатся
+        пополнением, квота подписки — нет (CONTEXT.md), поэтому у каждого свой
+        текст и своё окно троттлинга. Признак сбоя берётся из
+        ``src.services.error_presentation`` — оттуда же его читают и
+        пользовательский текст, и классификация на границе клиента модели
+        (``QUOTA_EXHAUSTION_MARKERS``), так что три пути не расходятся в том,
+        что считать исчерпанием. Доставка и троттлинг — в ``admin_alerts``,
+        единственном канале до администраторов.
+
+        Разница поводов доходит и до действий: квотную стену бот пробует обойти
+        сам, переведя активный пресет на резервный (``preset_failover``), а
+        кредитную — нет, там лечение другое и минутное (пополнение). Задача,
+        упавшая на стене, уже завершилась ошибкой выше по стеку: автовозврат
+        достаётся следующим прогонам, модель внутри упавшего не подменяется.
         """
-        return error_presentation.is_insufficient_credits(error_lower)
-
-    @staticmethod
-    def _build_admin_credits_alert(exc: Exception) -> str:
-        """Текст алерта администраторам об исчерпании кредитов LLM."""
-        details = getattr(exc, "details", None) or {}
-        model = details.get("model") if isinstance(details, dict) else None
-
-        raw = str(exc)
-        if len(raw) > 300:
-            raw = raw[:297] + "..."
-
-        model_line = f"Модель: {model}\n" if model else ""
-        return (
-            "🚨 LLM: закончились кредиты (HTTP 402)\n\n"
-            "Запросы к LLM-провайдеру падают — пользователи сейчас получают "
-            "«Сервис временно недоступен».\n\n"
-            f"{model_line}"
-            f"Детали: {raw}\n\n"
-            "➡️ Пополните баланс провайдера "
-            "(например, https://openrouter.ai/settings/credits)."
-        )
-
-    async def _notify_admins_insufficient_credits(self, exc: Exception) -> None:
-        """Уведомить администраторов об окончании кредитов LLM (с троттлингом)."""
-        if not settings.admins:
-            logger.warning(
-                "LLM 402: список ADMINS пуст — некого уведомить об окончании кредитов"
-            )
-            return
-
-        now = datetime.now()
-        if (
-            self._last_credits_alert_at is not None
-            and now - self._last_credits_alert_at < _CREDITS_ALERT_THROTTLE
-        ):
-            logger.debug("LLM 402: алерт админам пропущен (троттлинг)")
-            return
-        self._last_credits_alert_at = now
-
-        from src.utils.telegram_safe import safe_send_message
-
-        text = self._build_admin_credits_alert(exc)
-        for admin_id in settings.admins:
-            try:
-                await safe_send_message(
-                    self.bot, admin_id, text, disable_web_page_preview=True
-                )
-            except Exception as send_error:
-                logger.error(
-                    f"Не удалось уведомить админа {admin_id} об окончании кредитов: "
-                    f"{send_error}"
-                )
-        logger.info(
-            f"Алерт об окончании кредитов LLM отправлен админам: {settings.admins}"
-        )
+        error_text = str(exc).lower()
+        if error_presentation.is_quota_exhausted(error_text):
+            switched_to = await preset_failover.return_to_fallback()
+            await admin_alerts.notify_quota_exhausted(exc, switched_to=switched_to)
+        elif error_presentation.is_insufficient_credits(error_text):
+            await admin_alerts.notify_insufficient_credits(exc)
 
     async def _check_resources_available(self) -> bool:
         """Проверить доступность ресурсов для обработки"""

@@ -1,6 +1,28 @@
 """Модель результата валидации протокола."""
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
+
+
+@dataclass(frozen=True)
+class BriefConformance:
+    """Сверка набора ключей ответа модели с ключами брифа системного шаблона.
+
+    Строгая схема — обещание провайдера, а не гарантия: модель может ответить
+    успехом и валидным JSON, молча выбросив схему (ADR-0007). Отличить такой
+    ответ от честного нечем, кроме набора ключей, поэтому расхождение считается
+    в обе стороны: ``missing_keys`` — разделы, которых протокол недосчитался,
+    ``unexpected_keys`` — ключи, которых бриф не заказывал (подпись выброшенной
+    схемы: модель вернула собственный набор).
+    """
+
+    template_name: str
+    missing_keys: Tuple[str, ...] = ()
+    unexpected_keys: Tuple[str, ...] = ()
+
+    @property
+    def matches(self) -> bool:
+        """Ответ пришёл ровно по контракту брифа."""
+        return not self.missing_keys and not self.unexpected_keys
 
 
 @dataclass

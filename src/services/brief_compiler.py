@@ -51,12 +51,13 @@ def brief_to_template_content(brief: ProtocolBrief) -> str:
     return title + _header(brief) + "\n" + body
 
 
-def _protocol_data_keys(brief: ProtocolBrief) -> tuple[str, ...]:
+def brief_protocol_keys(brief: ProtocolBrief) -> tuple[str, ...]:
     """Порядок фиксированных ключей ``protocol_data``: шапка + extra + секции.
 
-    Единый источник ключей для схемы (``brief_to_schema``) и правил промпта
-    (``brief_field_rules``) — чтобы набор ключей в схеме и в промпте не
-    разъезжался: новый ключ автоматически попадёт и туда, и туда.
+    Единый источник ключей для схемы (``brief_to_schema``), правил промпта
+    (``brief_field_rules``) и сверки ответа модели (``ProtocolValidator``) —
+    чтобы наборы не разъезжались: новый ключ автоматически попадёт и в схему, и
+    в промпт, и в сверку.
     """
     return (
         *HEADER_FIELDS,
@@ -72,7 +73,7 @@ def _protocol_data_object(brief: ProtocolBrief) -> dict:
     strict mode начинает гарантировать покрытие секций (в отличие от legacy
     Dict[str, str], где ключи динамические).
     """
-    properties = {key: {"type": "string"} for key in _protocol_data_keys(brief)}
+    properties = {key: {"type": "string"} for key in brief_protocol_keys(brief)}
     return {
         "type": "object",
         "properties": properties,
@@ -102,7 +103,7 @@ def brief_to_schema(brief: ProtocolBrief) -> dict:
 def brief_field_rules(brief: ProtocolBrief) -> dict[str, str]:
     """Правила извлечения для промпта: {ключ: инструкция} для ВСЕХ ключей схемы.
 
-    Ключи — тот же источник, что и у схемы (``_protocol_data_keys``), поэтому
+    Ключи — тот же источник, что и у схемы (``brief_protocol_keys``), поэтому
     правила и схема не разъезжаются. Шапочные и extra-поля (лекция: lecturer)
     тоже получают правила: паритет с legacy-путём — иначе LLM теряет форматы
     meeting_title/participants/date/time (тихая деградация шапки). Тексты — из
@@ -111,5 +112,5 @@ def brief_field_rules(brief: ProtocolBrief) -> dict[str, str]:
     section_rules = {section.key: section.instruction for section in brief.sections}
     return {
         key: section_rules.get(key, FIELD_SPECIFIC_RULES.get(key, ""))
-        for key in _protocol_data_keys(brief)
+        for key in brief_protocol_keys(brief)
     }

@@ -72,8 +72,14 @@ async def regenerate_protocol(
     template_id: int,
     user_service,
     template_service,
+    preset: Optional[Dict] = None,
 ) -> bool:
     """Сгенерировать протокол заново по другому шаблону из сохранённой истории.
+
+    ``preset`` — необязательный пресет модели: без него генерация идёт активным
+    пресетом, как раньше. С ним весь LLM-путь этой перегенерации уезжает на
+    указанного провайдера, а глобальный активный пресет остаётся нетронутым —
+    обкатка модели на реальной записи (ADR-0007), доступная администратору.
 
     Возвращает ``True``, только если новый протокол доставлен пользователю.
     """
@@ -107,6 +113,7 @@ async def regenerate_protocol(
         file_name=row["file_name"],
         template_id=template_id,
         llm_provider="openai",
+        model_preset_key=(preset or {}).get("key"),
         user_id=telegram_user_id,
         language="ru",
         speaker_mapping=stored_speaker_mapping,
@@ -121,7 +128,7 @@ async def regenerate_protocol(
     from src.services.processing.protocol_formatter import ProtocolFormatter
 
     deps = CompletionDeps(
-        llm_gen=LLMGenerationService(user_service, template_service),
+        llm_gen=LLMGenerationService(user_service, template_service, preset=preset),
         formatter=ProtocolFormatter(),
         history=_StoredHistory(row["user_id"]),
     )

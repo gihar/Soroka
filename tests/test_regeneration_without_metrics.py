@@ -163,3 +163,77 @@ async def test_regenerate_end_to_end_without_stubbing_llm_service(monkeypatch):
 
     assert ok is True, "перегенерация должна доходить до доставки без метрик"
     assert "Согласовать бюджет" in delivered["result"].protocol_text
+
+
+async def test_regenerate_with_chosen_preset_routes_and_shows_that_model(monkeypatch):
+    """Обкатка (#118): указанный пресет обслуживает вызов и виден в результате.
+
+    Активный пресет бота при этом не спрашивается — иначе «сравнить бок о бок»
+    сравнивало бы модель с ней же самой.
+    """
+    import src.database as db_module
+    import src.services.processing.llm_generation as lg
+    from src.llm import protocol_generator
+    from src.services import protocol_actions
+
+    monkeypatch.setattr(
+        db_module.history_repo, "get_result_for_user",
+        AsyncMock(return_value={
+            "id": 7, "user_id": 42, "file_name": "meeting.mp3", "template_id": 5,
+            "transcription_text": "полная расшифровка встречи",
+            "result_text": "# Старый протокол",
+            "speaker_mapping": None, "meeting_type": None,
+        }),
+    )
+    monkeypatch.setattr(
+        db_module.history_repo, "save_processing_result", AsyncMock(return_value=101)
+    )
+
+    active_preset = AsyncMock(return_value={"key": "openrouter-gpt-5", "name": "GPT-5",
+                                            "model": "openai/gpt-5"})
+    monkeypatch.setattr(lg, "resolve_active_preset", active_preset)
+    monkeypatch.setattr(lg.settings, "enable_protocol_validation", False)
+
+    generate = AsyncMock(return_value={
+        "meeting_title": "Планёрка",
+        "decisions": (
+            "1. Согласовать бюджет проекта до конца недели\n"
+            "2. Перенести релиз на следующий спринт"
+        ),
+    })
+    monkeypatch.setattr(protocol_generator, "generate", generate)
+
+    class FakeTemplateService:
+        async def get_template_by_id(self, _tid):
+            return SimpleNamespace(
+                id=5, name="Дейли",
+                content="# {{ meeting_title }}\n\n## Решения\n{{ decisions }}",
+            )
+
+        def extract_template_variables(self, _content):
+            return ["meeting_title", "decisions"]
+
+    delivered = {}
+
+    async def fake_send_result(bot, chat_id, user_id, request, result,
+                               progress_tracker=None):
+        delivered["result"] = result
+        return True
+
+    monkeypatch.setattr(protocol_actions, "send_result_to_user", fake_send_result)
+
+    qwen = {"key": "qwen-token-plan", "name": "Qwen3.7 Plus",
+            "model": "qwen3.7-plus", "is_enabled": True}
+
+    ok = await protocol_actions.regenerate_protocol(
+        bot=AsyncMock(), chat_id=1, telegram_user_id=1,
+        history_id=7, template_id=5,
+        user_service=SimpleNamespace(), template_service=FakeTemplateService(),
+        preset=qwen,
+    )
+
+    assert ok is True
+    assert generate.await_args.kwargs["preset"] == qwen
+    active_preset.assert_not_awaited()
+    # В результате видно, какая модель его сделала — иначе два протокола не различить.
+    assert delivered["result"].llm_model_used == "Qwen3.7 Plus"

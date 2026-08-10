@@ -12,6 +12,18 @@ os.environ.setdefault("TELEGRAM_TOKEN", "test:fake-token")
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_admin_alert_throttle():
+    """Окна троттлинга алертов админам — процессная память: обнуляем на каждый тест.
+
+    Иначе тест, отправивший алерт, молча глушил бы алерт того же повода в
+    следующем тесте, и порядок запуска решал бы исход.
+    """
+    from src.services import admin_alerts
+
+    admin_alerts.reset_alert_throttle()
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

@@ -150,6 +150,25 @@ async def test_resume_402_still_marks_queue_task_failed(monkeypatch):
     assert marked.get("status") == "failed"
 
 
+async def test_resume_quota_says_it_is_our_limit_not_a_blip(monkeypatch):
+    """Квота подписки — не «сбой сервиса на несколько минут», и не про файл."""
+    from src.exceptions.processing import LLMQuotaExhaustedError
+
+    sent, _ = await _run_resume_failure(
+        monkeypatch,
+        LLMQuotaExhaustedError(
+            "Error code: 429 - Free allocated quota exceeded",
+            provider="openai",
+            model="qwen3.7-plus",
+        ),
+    )
+
+    text = "\n".join(sent).lower()
+    assert "нашей стороне" in text
+    assert "несколько минут" not in text
+    assert "429" not in text  # внутренности провайдера остаются в логах
+
+
 async def test_resume_other_errors_keep_their_hint(monkeypatch):
     """Не-кредитные ошибки не потеряли осмысленную подсказку."""
     sent, _ = await _run_resume_failure(monkeypatch, RuntimeError("connection reset"))

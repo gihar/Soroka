@@ -113,14 +113,14 @@ class LLMHealthCheck(HealthCheck):
             if not is_available:
                 return HealthCheckResult(
                     status=HealthStatus.UNHEALTHY,
-                    message="OpenAI провайдер недоступен",
+                    message="Пригодных пресетов модели нет",
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )
             else:
                 return HealthCheckResult(
                     status=HealthStatus.HEALTHY,
-                    message="Доступен OpenAI провайдер",
+                    message="Пресет модели настроен",
                     response_time=response_time,
                     details={"available_providers": available_providers}
                 )

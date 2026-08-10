@@ -3,7 +3,7 @@
 """
 
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +17,26 @@ class OpenAIModelPreset(BaseModel):
     name: str = Field(..., description="Отображаемое имя в меню")
     model: str = Field(..., description="ID модели для API")
     base_url: Optional[str] = Field(None, description="Базовый URL для этого пресета")
+    api_key: Optional[str] = Field(
+        None,
+        description="Ключ провайдера этого пресета; пусто — наследуется общий OPENAI_API_KEY"
+    )
+    analysis_model: Optional[str] = Field(
+        None,
+        description="Модель этапа анализа у этого пресета; пусто — основная модель пресета"
+    )
+    mapping_model: Optional[str] = Field(
+        None,
+        description="Модель сопоставления спикеров у этого пресета; пусто — основная модель пресета"
+    )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Дополнительные поля тела запроса к модели (например, enable_thinking у Qwen)"
+    )
+    extra_headers: Optional[Dict[str, str]] = Field(
+        None,
+        description="Дополнительные заголовки запроса (например, атрибуция HTTP-Referer/X-Title у OpenRouter)"
+    )
 
 
 class Settings(BaseSettings):
@@ -29,8 +49,10 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(None, description="API ключ OpenAI")
     openai_base_url: Optional[str] = Field(None, description="Базовый URL для OpenAI API")
     openai_model: str = Field("gpt-3.5-turbo", description="Модель OpenAI для генерации")
-    speaker_mapping_model: str = Field("gpt-4o-mini", description="Модель для сопоставления спикеров (легкая задача)")
-    analysis_stage_model: str = Field("gpt-4o-mini", description="Модель для Stage 1 анализа (тип встречи, классификация)")
+    # Модели дешёвых шагов вне пресета — совместимость, а не точка правды
+    # (ADR-0007): шаг, который обслуживает пресет, берёт модель у него.
+    speaker_mapping_model: str = Field("gpt-4o-mini", description="Модель сопоставления спикеров, когда шаг идёт без пресета")
+    analysis_stage_model: str = Field("gpt-4o-mini", description="Модель Stage 1 анализа, когда шаг идёт без пресета")
 
     # Наборы моделей OpenAI с собственными базовыми URL (по одному API ключу)
     # Формат переменной окружения OPENAI_MODELS: JSON-массив объектов вида
@@ -45,10 +67,9 @@ class Settings(BaseSettings):
     # LLM Таймауты
     llm_timeout_seconds: float = Field(30.0, description="Общий таймаут ожидания ответа от LLM (в секундах)")
     
-    # HTTP заголовки для LLM запросов
-    http_referer: Optional[str] = Field("https://github.com/gihar/Soroka", description="HTTP Referer заголовок для LLM запросов")
-    x_title: Optional[str] = Field("Soroka", description="X-Title заголовок для LLM запросов")
-    
+    # Заголовки и поля тела запроса к модели живут в пресете (ADR-0007):
+    # атрибуция OpenRouter — в OpenRouter-пресетах, параметры Qwen — в Qwen-пресете.
+
     # База данных
     database_url: str = Field("sqlite:///bot.db", description="URL базы данных")
     

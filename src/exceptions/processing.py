@@ -79,7 +79,7 @@ class LLMError(BotException):
 
 class LLMInsufficientCreditsError(LLMError):
     """Ошибка недостатка кредитов на LLM API"""
-    
+
     def __init__(self, message: str, provider: str = None, model: str = None):
         # Форматируем сообщение для пользователя
         user_message = f"Недостаточно кредитов на токены для LLM: {message}"
@@ -89,3 +89,22 @@ class LLMInsufficientCreditsError(LLMError):
             model=model
         )
         self.error_code = "LLM_INSUFFICIENT_CREDITS"
+
+
+class LLMQuotaExhaustedError(LLMError):
+    """Исчерпана квота подписки провайдера LLM.
+
+    Отдельный класс, а не наследник ``LLMInsufficientCreditsError``: кредиты
+    провайдера лечатся пополнением, квота подписки — нет (только следующий
+    период или другой пресет, CONTEXT.md). Действия администратора
+    противоположны, поэтому события не должны сливаться ни в классификации,
+    ни в тексте (ADR-0007).
+    """
+
+    def __init__(self, message: str, provider: str = None, model: str = None):
+        super().__init__(
+            message=f"Исчерпана квота подписки провайдера LLM: {message}",
+            provider=provider,
+            model=model
+        )
+        self.error_code = "LLM_QUOTA_EXHAUSTED"

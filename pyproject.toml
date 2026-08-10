@@ -38,4 +38,5 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "live_synology: живой тест против реального NAS (нужна SYNOLOGY_LIVE_SHARE_URL)",
+    "live_schema_probe: живой зонд строгих схем против реального провайдера (нужен LIVE_LLM_API_KEY)",
 ]

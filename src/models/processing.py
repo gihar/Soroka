@@ -18,6 +18,12 @@ class ProcessingRequest(BaseModel):
     file_url: Optional[str] = Field(None, description="Оригинальный URL для внешних файлов")
     template_id: Optional[int] = Field(None, description="ID шаблона (None для умного выбора)")
     llm_provider: str = Field(..., description="LLM провайдер")
+    # Пустой ключ — обычный путь: обработку обслуживает активный пресет модели.
+    # Непустой означает, что модель для этого запроса выбрали руками (обкатка
+    # через перегенерацию, ADR-0007), поэтому сводка её называет.
+    model_preset_key: Optional[str] = Field(
+        None, description="Ключ выбранного пресета модели (обкатка)"
+    )
     user_id: int = Field(..., description="ID пользователя")
     language: str = Field("ru", description="Язык транскрипции")
     is_external_file: bool = Field(False, description="Флаг внешнего файла")

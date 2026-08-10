@@ -193,7 +193,10 @@ def test_transcription_mode_view_is_html_and_marks_active_with_check():
 
 def test_admin_surface_source_is_html_canon():
     """admin_handlers и admin_views: без `**`-разметки, латинского MB и декор-глифов."""
-    for rel in ("handlers/admin_handlers.py", "ux/admin_views.py"):
+    # Управление пресетами уехало из admin_handlers в свой модуль — инвариант
+    # следует за поверхностью, иначе переезд снимал бы с неё охрану.
+    for rel in ("handlers/admin_handlers.py", "handlers/admin_model_handlers.py",
+                "ux/admin_views.py"):
         src = _source(rel)
         assert "**" not in src, f"осталась `**`-разметка в {rel}"
         assert "MB" not in src, f"латинское «MB» вместо «МБ» в {rel}"
