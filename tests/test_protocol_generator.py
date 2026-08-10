@@ -535,3 +535,32 @@ def test_is_available_counts_usable_presets_not_the_global_key(monkeypatch):
 
     monkeypatch.setattr(settings, "openai_api_key", "sk-общий")
     assert gen.is_available() is True, "общий ключ покрывает пресет без своего"
+
+
+async def test_injected_client_is_enough_without_any_key(monkeypatch):
+    """Подставленный клиент делает генератор готовым — ключ не требуется.
+
+    Проверка ключа существует, чтобы отсутствие настройки не выглядело сбоем
+    провайдера. Но когда клиент уже подставлен снаружи (тесты, свой транспорт),
+    идти есть чем, и требовать ключ не за чем. Тест держит именно этот случай:
+    без него результат прогона зависел бы от того, лежит ли у разработчика
+    локальный .env с настоящим ключом, — и CI расходился бы с машиной.
+    """
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "openai_models", [])
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        _response(ANALYSIS_PAYLOAD),
+        _response(GENERATION_PAYLOAD),
+    ]
+    gen = _fast_generator(client)
+
+    result = await gen.generate(
+        preset=None, transcription="текст", template_variables={"decisions": ""}
+    )
+
+    assert result["decisions"] == "решения"
+    assert client.chat.completions.create.call_count == 2

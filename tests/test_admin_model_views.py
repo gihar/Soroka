@@ -9,7 +9,6 @@
 поверхность здесь не задача.
 """
 
-import pytest
 
 from src.ux import admin_views
 
