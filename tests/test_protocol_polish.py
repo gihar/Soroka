@@ -5,7 +5,8 @@ from jinja2 import Environment, meta
 from src.models.processing import TranscriptionResult
 from src.services.processing.protocol_formatter import ProtocolFormatter
 from src.services.template_library import TemplateLibrary
-from src.utils.pdf_converter import _format_inline, _is_horizontal_rule, strip_emoji
+from src.utils.pdf_converter import _format_inline, _is_horizontal_rule
+from src.utils.text_processing import strip_emoji
 
 # ---------------------------------------------------------------------------
 # PDF: markdown-линейка не должна печататься текстом «---»

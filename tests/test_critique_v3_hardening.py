@@ -11,7 +11,7 @@ from src.models.processing import (
     TranscriptionResult,
 )
 from src.services import result_sender
-from src.utils.pdf_converter import strip_emoji
+from src.utils.text_processing import strip_emoji
 
 
 def _request() -> ProcessingRequest:

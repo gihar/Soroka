@@ -23,12 +23,17 @@ from reportlab.platypus import (
     Spacer,
 )
 
+from src.utils import document_palette as palette
+from src.utils.text_processing import strip_emoji
+
 # --- Color palette (corporate minimalist) ---
-COLOR_PRIMARY = colors.HexColor('#1a1a2e')    # near-black for titles
-COLOR_SECONDARY = colors.HexColor('#2c3e50')  # dark slate for headings
-COLOR_MUTED = colors.HexColor('#7f8c8d')      # grey for meta/footer
-COLOR_RULE = colors.HexColor('#bdc3c7')        # light grey for lines
-COLOR_BODY = colors.HexColor('#2d2d2d')        # soft black for body
+# Общая с Word-каналом: цвета живут в document_palette, здесь только обёртка
+# в тип ReportLab (см. src/services/protocol_render/docx_styles.py).
+COLOR_PRIMARY = colors.HexColor(palette.COLOR_TITLE)      # near-black for titles
+COLOR_SECONDARY = colors.HexColor(palette.COLOR_HEADING)  # dark slate for headings
+COLOR_MUTED = colors.HexColor(palette.COLOR_MUTED)        # grey for meta/footer
+COLOR_RULE = colors.HexColor(palette.COLOR_RULE)          # light grey for lines
+COLOR_BODY = colors.HexColor(palette.COLOR_BODY)          # soft black for body
 
 
 def _font_candidates():
@@ -203,24 +208,6 @@ def _section_rule():
 def _is_horizontal_rule(stripped_line: str) -> bool:
     """Строка-линейка Markdown (---): в PDF это линия, а не текст «---»."""
     return bool(re.match(r'^-{3,}$', stripped_line))
-
-
-# Диапазоны ниже U+2600 добавлены выборочно (‼ ℹ стрелки ⌚–⏺ ▪–◾ ⬅–⭕ ⤴⤵),
-# чтобы не задеть типографику: тире U+2013/2014, буллет U+2022, № U+2116, … U+2026.
-_EMOJI_RUN = (
-    r"[‼⁉ℹ↔-↪⌚-⏺Ⓜ▪-◾"
-    r"⤴⤵⬅-⭕☀-➿\U0001F000-\U0001FAFF️]+"
-)
-# Эмодзи после начала строки, пробела или ** снимается вместе с хвостовым
-# пробелом, чтобы не оставлять дыр («**👥 Участники:**» → «**Участники:**»).
-_EMOJI_AT_BOUNDARY_RE = re.compile(rf"(^|\s|\*\*){_EMOJI_RUN}\s?")
-_EMOJI_ANYWHERE_RE = re.compile(_EMOJI_RUN)
-
-
-def strip_emoji(text: str) -> str:
-    """Снять эмодзи из текста PDF: глифов в TTF-шрифтах нет, вместо них — тофу."""
-    without_boundary = _EMOJI_AT_BOUNDARY_RE.sub(r"\1", text)
-    return _EMOJI_ANYWHERE_RE.sub("", without_boundary).strip()
 
 
 def _format_inline(text):

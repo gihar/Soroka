@@ -6,7 +6,8 @@ strip_emoji внутри _format_inline; точечных стрипперов �
 """
 
 from src.utils import pdf_converter
-from src.utils.pdf_converter import _format_inline, strip_emoji
+from src.utils.pdf_converter import _format_inline
+from src.utils.text_processing import strip_emoji
 
 
 def test_heading_emoji_stripped():
