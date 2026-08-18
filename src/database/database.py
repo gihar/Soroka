@@ -98,6 +98,18 @@ class Database:
                 )
             """)
             
+            # Журнал одноразовых миграций. Сторож по данным ненадёжен: состояние,
+            # по которому миграция решала «я уже применялась», правит другой
+            # компонент — и она запускается снова на каждом старте (см.
+            # _consolidate_templates). Отметка о применении такого поворота не
+            # допускает.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS applied_migrations (
+                    name TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Таблица метрик производительности
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS performance_metrics (
@@ -442,37 +454,72 @@ class Database:
         except Exception as e:
             logger.warning(f"Не удалось синхронизировать владельцев шаблонов: {e}")
 
-    async def _consolidate_templates(self, db):
-        """One-time migration: reduce templates from 27 to 7, remove categories."""
-        # Check if migration already ran
+    async def _migration_applied(self, db, name: str) -> bool:
+        """Применялась ли одноразовая миграция (отметка, а не догадка по данным)."""
         cursor = await db.execute(
-            "SELECT COUNT(*) FROM templates WHERE category IS NOT NULL AND category != ''"
+            "SELECT 1 FROM applied_migrations WHERE name = ?", (name,)
+        )
+        return await cursor.fetchone() is not None
+
+    async def _mark_migration_applied(self, db, name: str) -> None:
+        await db.execute(
+            "INSERT OR IGNORE INTO applied_migrations (name) VALUES (?)", (name,)
+        )
+
+    # Шаблоны, которые снимала консолидация 27 -> 7. Список исторический и
+    # закрытый: по нему же определяется, нужна ли миграция вообще.
+    _CONSOLIDATED_TEMPLATE_IDS = (
+        7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 31,
+    )
+
+    async def _consolidate_templates(self, db):
+        """Одноразовая миграция: 27 шаблонов -> 7.
+
+        Раньше сторожем служило «есть ли у шаблонов непустая категория», а сама
+        миграция категории обнуляла. Но категории системных шаблонов задаёт
+        TemplateLibrary, и синхронизация возвращала их в БД на каждом старте —
+        сторож взводился обратно. Итог: «одноразовая» миграция отрабатывала при
+        каждом запуске, после неё синхронизация переписывала все семь шаблонов и
+        честно сообщала «обновлено 7», хотя не менялось ничего.
+
+        Поэтому сторож теперь — отметка о применении, а обнуление категорий
+        убрано совсем: категории живы (по ним группируются меню шаблонов), и
+        чистить их незачем. У выживших семи они и так равны эталонным.
+        """
+        name = "consolidate_templates_27_to_7"
+        if await self._migration_applied(db, name):
+            return
+
+        placeholders = ",".join("?" * len(self._CONSOLIDATED_TEMPLATE_IDS))
+        cursor = await db.execute(
+            f"SELECT COUNT(*) FROM templates WHERE id IN ({placeholders})",
+            self._CONSOLIDATED_TEMPLATE_IDS,
         )
         row = await cursor.fetchone()
-        if row[0] == 0:
-            return  # Already migrated
 
-        logger.info("Running template consolidation migration (27 -> 7)...")
+        if row[0]:
+            logger.info("Running template consolidation migration (27 -> 7)...")
 
-        # Merge OD template duplicates: redirect history from 31 to 22
-        await db.execute("UPDATE processing_history SET template_id = 22 WHERE template_id = 31")
+            # Merge OD template duplicates: redirect history from 31 to 22
+            await db.execute(
+                "UPDATE processing_history SET template_id = 22 WHERE template_id = 31"
+            )
 
-        # Reset user defaults pointing to templates being deleted
-        deleted_ids = (7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 31)
-        placeholders = ",".join("?" * len(deleted_ids))
-        await db.execute(
-            f"UPDATE users SET default_template_id = NULL WHERE default_template_id IN ({placeholders})",
-            deleted_ids
-        )
+            # Reset user defaults pointing to templates being deleted
+            await db.execute(
+                f"UPDATE users SET default_template_id = NULL "
+                f"WHERE default_template_id IN ({placeholders})",
+                self._CONSOLIDATED_TEMPLATE_IDS,
+            )
 
-        # Delete templates
-        await db.execute(f"DELETE FROM templates WHERE id IN ({placeholders})", deleted_ids)
+            await db.execute(
+                f"DELETE FROM templates WHERE id IN ({placeholders})",
+                self._CONSOLIDATED_TEMPLATE_IDS,
+            )
+            logger.info("Template consolidation migration complete")
 
-        # Clear category on remaining templates
-        await db.execute("UPDATE templates SET category = NULL")
-
+        await self._mark_migration_applied(db, name)
         await db.commit()
-        logger.info("Template consolidation migration complete")
 
 # Глобальный экземпляр базы данных
 db = Database()
