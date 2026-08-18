@@ -19,11 +19,28 @@ _DATE_BLOCK = (
 _LECTURER_BLOCK = "{% if lecturer %}**Лектор:** {{ lecturer }}\n{% endif %}"
 _PARTICIPANTS_BLOCK = "{% if participants %}**👥 Участники:**\n{{ participants }}\n{% endif %}"
 
+# Критика v12: столбик имён съедал 56-69% первого мобильного экрана краткого
+# резюме (медиана 7 участников), и на протоколах без длинной шапки первый экран
+# заканчивался ровно на заголовке «✅ Решения» — ноль содержания за первые три
+# секунды. Инлайн-вариант складывает те же имена в одну строку: 11 строк → 5.
+# Модель по-прежнему возвращает имена построчно (правило participants общее) —
+# склейку делает шаблон, поэтому контракт с LLM не меняется.
+_PARTICIPANTS_INLINE_BLOCK = (
+    "{% if participants %}**👥 Участники:** "
+    r"{{ participants.split('\n') | map('trim') | select | join(', ') }}"
+    "\n{% endif %}"
+)
+
+
+def _participants_block(brief: ProtocolBrief) -> str:
+    return _PARTICIPANTS_INLINE_BLOCK if brief.inline_participants else _PARTICIPANTS_BLOCK
+
 
 def _header(brief: ProtocolBrief) -> str:
+    participants = _participants_block(brief)
     if brief.include_lecturer_in_header:
-        return _DATE_BLOCK + _LECTURER_BLOCK + _PARTICIPANTS_BLOCK
-    return _DATE_BLOCK + _PARTICIPANTS_BLOCK
+        return _DATE_BLOCK + _LECTURER_BLOCK + participants
+    return _DATE_BLOCK + participants
 
 
 def _header_extra_keys(brief: ProtocolBrief) -> tuple[str, ...]:

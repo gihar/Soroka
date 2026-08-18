@@ -40,14 +40,30 @@ class ProtocolBrief:
     title_fallback: str  # "# {{ meeting_title or '<title_fallback>' }}"
     sections: tuple[BriefSection, ...]
     include_lecturer_in_header: bool = False  # шапка лекции содержит строку «Лектор»
+    inline_participants: bool = False  # участники одной строкой через запятую
 
 
-def _section(key: str, heading: str, *, empty_text: str | None = None) -> BriefSection:
-    """Секция с инструкцией из FIELD_SPECIFIC_RULES (пустая, если правила нет)."""
+def _section(
+    key: str,
+    heading: str,
+    *,
+    empty_text: str | None = None,
+    instruction: str | None = None,
+) -> BriefSection:
+    """Секция с инструкцией из FIELD_SPECIFIC_RULES (пустая, если правила нет).
+
+    ``instruction`` переопределяет общее правило поля для ЭТОГО брифа: одно и то
+    же поле может требовать разного в разных шаблонах (критика v12 — в кратком
+    резюме «Ключевые выводы» должны быть жёстче, чем в Стандартном, где рядом
+    есть ещё шесть секций). Переопределение осознанное и точечное; по умолчанию
+    правило берётся из общего словаря.
+    """
     return BriefSection(
         key=key,
         heading=heading,
-        instruction=FIELD_SPECIFIC_RULES.get(key, ""),
+        instruction=(
+            instruction if instruction is not None else FIELD_SPECIFIC_RULES.get(key, "")
+        ),
         empty_text=empty_text,
     )
 
@@ -70,13 +86,25 @@ _STANDARD = ProtocolBrief(
 )
 
 
+# Критика v12: «Ключевые выводы» краткого резюме стали стоком для секций,
+# которых в брифе нет. Замеры по 19 живым прод-протоколам: секция занимает 36,6%
+# документа и единственная выросла против Стандартного (839 → 973 знака, +16%),
+# тогда как Решения и Задачи не изменились; 10% пунктов Решений и Выводов несут
+# маркеры риска (13 протоколов из 19), 13% выводов — телеграф-атрибуция «Имя:».
+# Отсюда два хода: вернуть отдельную секцию рисков и ужесточить сами выводы.
+_BRIEF_SUMMARY_KEY_POINTS = """key_points — Ключевые выводы встречи (3-5 пунктов).
+Формат: НУМЕРОВАННЫЙ список. "N. Вывод". Одна мысль на пункт, до 160 знаков; цепочки через ";" не собирай — лишнее вынеси отдельным пунктом или отбрось. Без атрибуции: пункт не начинается с "Имя:", кто именно высказался — в выводах не важно. Риски, блокеры и неготовность сюда НЕ включай: для них есть своя секция. Только additive: НЕ повторяй Решения и Задачи — ни дословно, ни пересказом другими словами; вывод несёт только то, чего нет в других секциях (контекст, значимые цифры, инсайты)."""
+
+
 _BRIEF_SUMMARY = ProtocolBrief(
     template_name="Краткое резюме встречи",
     title_fallback="Резюме встречи",
+    inline_participants=True,
     sections=(
         _section("decisions", "✅ Решения"),
         _section("action_items", "📌 Задачи и сроки"),
-        _section("key_points", "💡 Ключевые выводы"),
+        _section("risks_and_blockers", "⚠️ Блокеры и риски"),
+        _section("key_points", "💡 Ключевые выводы", instruction=_BRIEF_SUMMARY_KEY_POINTS),
     ),
 )
 

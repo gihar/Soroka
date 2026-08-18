@@ -161,11 +161,38 @@ def test_field_rules_cover_header_extras_and_sections(brief):
     assert brief_field_rules(brief) == expected
 
 
+# Переопределения правил: (шаблон, ключ) -> бриф диктует полю своё правило
+# вместо общего. Список исчерпывающий и осознанный — всё, чего здесь нет,
+# обязано приходить из FIELD_SPECIFIC_RULES.
+BRIEF_RULE_OVERRIDES = {("Краткое резюме встречи", "key_points")}
+
+
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
 def test_field_rules_come_from_field_specific_rules(brief):
+    """Правила берутся из общего словаря везде, кроме объявленных исключений."""
     rules = brief_field_rules(brief)
     for key, instruction in rules.items():
+        if (brief.template_name, key) in BRIEF_RULE_OVERRIDES:
+            continue
         assert instruction == FIELD_SPECIFIC_RULES.get(key, "")
+
+
+def test_declared_overrides_actually_differ_from_the_shared_rule():
+    """Объявленное переопределение — не копия общего правила (иначе оно мусор)."""
+    for template_name, key in BRIEF_RULE_OVERRIDES:
+        rules = brief_field_rules(get_brief_for(template_name))
+        assert rules[key] != FIELD_SPECIFIC_RULES[key], (template_name, key)
+
+
+def test_no_undeclared_overrides_slip_in():
+    """Обратная сторона: незаявленных расхождений с общим словарём нет."""
+    actual = {
+        (brief.template_name, key)
+        for brief in ALL_BRIEFS
+        for key, instruction in brief_field_rules(brief).items()
+        if instruction != FIELD_SPECIFIC_RULES.get(key, "")
+    }
+    assert actual == BRIEF_RULE_OVERRIDES
 
 
 def test_field_rules_standard_carry_real_texts():
