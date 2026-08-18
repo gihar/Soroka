@@ -2,8 +2,8 @@
 
 Четвёртый канал ADR-0001: тот же канонический Markdown, что и чат/PDF,
 но представлен нативными стилями Word (Heading 1/2, List Number, List Bullet),
-чтобы документ можно было править в Word. В отличие от PDF, эмодзи остаются —
-глифы берёт шрифт Word, а не встроенный TTF.
+чтобы документ можно было править в Word. Эмодзи снимаются, как и в PDF:
+документные каналы идут в строгом деловом стиле (ADR-0009).
 
 Тесты читают сгенерированный .docx обратно python-docx'ом и проверяют
 наблюдаемое: стиль абзаца, текст, жирные runs.
@@ -84,11 +84,14 @@ def test_regular_text_becomes_normal_paragraph():
     assert ("Обычный абзац протокола.", "Normal") in texts, texts
 
 
-def test_emoji_preserved_in_headings_and_text():
-    # В отличие от PDF, эмодзи в docx остаются — глиф даёт шрифт Word.
+def test_emoji_stripped_from_headings_and_text():
+    # Как и в PDF: документ пересылают «наверх», цветной глиф выдаёт в нём чат.
     doc = _render("## 🎯 Цели\n- 🚀 Запуск\n")
     joined = "\n".join(p.text for p in doc.paragraphs)
-    assert "🎯" in joined and "🚀" in joined, joined
+    assert "🎯" not in joined and "🚀" not in joined, joined
+    # Текст при этом целый и без дыры на месте снятого глифа.
+    assert "Цели" in joined and "Запуск" in joined, joined
+    assert " Цели" not in joined and " Запуск" not in joined, joined
 
 
 def test_horizontal_rule_is_not_literal_text():
@@ -135,9 +138,9 @@ def test_full_protocol_structure():
     doc = _render(_SAMPLE_PROTOCOL)
     structure = [(p.style.name, p.text) for p in doc.paragraphs if p.text]
 
-    # Заголовок документа и секции — нативные стили Word.
+    # Заголовок документа и секции — нативные стили Word, имена секций без меток.
     assert ("Heading 1", "Планёрка команды продукта") in structure
-    assert ("Heading 2", "✅ Решения") in structure
+    assert ("Heading 2", "Решения") in structure
     # Нумерованные секции: явные номера сняты, стиль List Number.
     decisions = [t for s, t in structure if s == "List Number"]
     assert "Запускаем бету в ноябре. Обоснование: готовность фич." in decisions

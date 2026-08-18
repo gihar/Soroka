@@ -2,8 +2,12 @@
 
 Канонический формат протокола — Markdown. Этот модуль представляет его нативными
 стилями Word (Heading 1/2, List Number, List Bullet), чтобы документ открывался
-и правился в Word как обычный текст, а не как «картинка». В отличие от PDF,
-эмодзи НЕ снимаются: их глифы даёт шрифт Word.
+и правился в Word как обычный текст, а не как «картинка». Облик этих стилей
+задаёт ``docx_styles``; здесь — только разбор Markdown.
+
+Документные каналы (Word и PDF) идут без эмодзи и в строгом деловом стиле:
+файл пересылают «наверх», и цветной глиф в заголовке выдаёт в нём чат, а не
+документ (ADR-0009). Чат и `.md` эмодзи-метки сохраняют.
 
 Нумерованные списки каждой секции нумеруются самим Word (стиль List Number),
 поэтому явный «1. » из Markdown снимается. Чтобы Word не продолжал нумерацию
@@ -14,21 +18,43 @@
 import io
 import re
 
-from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+
+from src.services.protocol_render.docx_styles import (
+    META_STYLE,
+    build_protocol_document,
+)
+from src.utils.text_processing import strip_emoji
 
 # Нумерованный пункт канонического Markdown: «1. », «2. » … Явный номер снимается.
 _NUMBERED_RE = re.compile(r"^\d+\.\s+(.*)$")
 # Инлайновый **жирный** — согласовано с чат-рендером и PDF: только двойные звёзды.
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 
+_TITLE_STYLE = "Heading 1"
+# Префикс Markdown → стиль Word. Порядок важен: «#### » должен проверяться до
+# «### », иначе более короткий префикс съест более длинный.
+_BLOCK_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("#### ", "Heading 4"),
+    ("### ", "Heading 3"),
+    ("## ", "Heading 2"),
+    ("# ", _TITLE_STYLE),
+    ("- ", "List Bullet"),
+    ("* ", "List Bullet"),
+)
+
+
+def _block_style(stripped: str) -> tuple[str | None, str]:
+    """Стиль Word и текст без префикса; ``None`` — обычный абзац."""
+    for prefix, style in _BLOCK_PREFIXES:
+        if stripped.startswith(prefix):
+            return style, stripped[len(prefix):].strip()
+    return None, stripped
+
 
 def _add_inline_runs(paragraph, text: str) -> None:
-    """Разложить `**жирный**` на runs; остальной текст — обычными runs.
-
-    Эмодзи не трогаем (в отличие от PDF): их отображает шрифт Word.
-    """
+    """Разложить `**жирный**` на runs; остальной текст — обычными runs."""
     pos = 0
     for match in _BOLD_RE.finditer(text):
         if match.start() > pos:
@@ -82,17 +108,26 @@ def _apply_num(paragraph, num_id: int) -> None:
 
 def convert_protocol_to_docx(protocol_text: str) -> bytes:
     """Собрать .docx из канонического Markdown протокола, вернуть его байты."""
-    document = Document()
+    document = build_protocol_document()
     abstract_num_id = _list_number_abstract_id(document)
     current_num_id: int | None = None  # нумерация текущего блока; None — блока нет
+    # Шапка — абзацы между заголовком документа и первой секцией (дата,
+    # участники, лектор). Блок закрывается первой же пустой строкой после своего
+    # начала или любым другим содержимым: у нестандартного пользовательского
+    # шаблона тише станет максимум первый абзац, а не весь документ.
+    in_header = False
+    header_started = False
 
     for line in protocol_text.split("\n"):
-        stripped = line.strip()
+        stripped = strip_emoji(line.strip())
         if not stripped:
+            if header_started:
+                in_header = False
             continue  # пустая строка — разделитель, но не разрыв нумерованного блока
 
         numbered = _NUMBERED_RE.match(stripped)
         if numbered:
+            in_header = False
             if current_num_id is None:
                 current_num_id = _new_restarting_num(document, abstract_num_id)
             paragraph = document.add_paragraph(style="List Number")
@@ -104,29 +139,23 @@ def convert_protocol_to_docx(protocol_text: str) -> bytes:
         # Линейка-разделитель Markdown (---): в Word секции разводят стили
         # заголовков, литеральное «---» было бы мусором.
         if re.match(r"^-{3,}$", stripped):
+            in_header = False
             continue
-        if stripped.startswith("#### "):
-            _add_inline_runs(
-                document.add_paragraph(style="Heading 4"), stripped[5:].strip()
-            )
-        elif stripped.startswith("### "):
-            _add_inline_runs(
-                document.add_paragraph(style="Heading 3"), stripped[4:].strip()
-            )
-        elif stripped.startswith("## "):
-            _add_inline_runs(
-                document.add_paragraph(style="Heading 2"), stripped[3:].strip()
-            )
-        elif stripped.startswith("# "):
-            _add_inline_runs(
-                document.add_paragraph(style="Heading 1"), stripped[2:].strip()
-            )
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            _add_inline_runs(
-                document.add_paragraph(style="List Bullet"), stripped[2:].strip()
-            )
+
+        block_style, text = _block_style(stripped)
+        if block_style is None and in_header:
+            style = META_STYLE  # строка шапки: дата, лектор, участники
+            header_started = True
         else:
-            _add_inline_runs(document.add_paragraph(), stripped)
+            style = block_style
+            in_header = block_style == _TITLE_STYLE
+
+        if style == _TITLE_STYLE and not document.core_properties.title:
+            # Заголовок документа — и его имя в свойствах файла: так протокол
+            # подписан в списке вложений, а не «Документ1».
+            document.core_properties.title = text
+
+        _add_inline_runs(document.add_paragraph(style=style), text)
 
     buffer = io.BytesIO()
     document.save(buffer)
