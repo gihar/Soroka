@@ -115,6 +115,7 @@ def test_brief_summary_exact_schema_keys():
         "participants",
         "decisions",
         "action_items",
+        "risks_and_blockers",  # возвращена критикой v12
         "key_points",
     }
 
