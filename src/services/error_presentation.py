@@ -18,6 +18,11 @@
 ``parse_mode``, поэтому звёздочки и теги показались бы буквально.
 """
 
+import re
+
+# Формат ответа провайдера у OpenAI-совместимых клиентов: «Error code: NNN — …».
+_PROVIDER_STATUS_RE = re.compile(r"error code: \d{3}")
+
 
 def is_insufficient_credits(error_text: str) -> bool:
     """Признак ошибки «закончились кредиты на LLM» (HTTP 402).
@@ -55,6 +60,28 @@ QUOTA_EXHAUSTION_MARKERS = (
 )
 
 
+# Слова, которыми провайдер сообщает, что доступ к модели не оплачен. Таблица
+# одна на оба пути опознания — как квотная, и по той же причине: разойдясь, они
+# развели бы классификацию и совет администратору.
+ACCESS_NOT_PURCHASED_MARKERS = (
+    "доступ к модели не оплачен",
+    "accessdenied.unpurchased",
+    "access to model denied",
+)
+
+
+def is_access_not_purchased(error_text: str) -> bool:
+    """Признак ошибки «доступ к модели не оплачен».
+
+    Отличать от квоты обязательно, хотя выглядят они одинаково («модель не
+    отвечает») и бот реагирует на них одинаково. Расходится совет
+    администратору: квота вернётся в следующем периоде сама, здесь оплаченного
+    периода нет вовсе, и «подождите» — ловушка (CONTEXT.md, ADR-0010).
+    """
+    lowered = (error_text or "").lower()
+    return any(marker in lowered for marker in ACCESS_NOT_PURCHASED_MARKERS)
+
+
 def is_quota_exhausted(error_text: str) -> bool:
     """Признак ошибки «исчерпана квота подписки».
 
@@ -82,6 +109,38 @@ def is_transient_api_error(error_text: str) -> bool:
             'connection', 'timeout', 'network',
         )
     )
+
+
+def is_provider_refusal(error_text: str) -> bool:
+    """Ответ провайдера с HTTP-кодом — сбой LLM, а не файла или окружения.
+
+    Реакция на сбой вызывается из общей ветки, куда приходит что угодно: битый
+    контейнер, нехватка памяти, отвалившийся ffmpeg. Признак отделяет то, что
+    сказал провайдер, от того, что случилось у нас, — иначе сетка под
+    незнакомыми отказами завалила бы администратора чужими mp4.
+    """
+    return bool(_PROVIDER_STATUS_RE.search((error_text or "").lower()))
+
+
+def is_unknown_provider_refusal(error_text: str) -> bool:
+    """Отказ провайдера, не подошедший ни под один известный класс.
+
+    Сетка под классификацией: за одиннадцать дней прод отказал пятнадцать раз
+    и не написал администратору ни разу, потому что алерт уходил только по
+    опознанному поводу. Незнакомое больше не падает молча.
+
+    Временные сбои сюда не попадают — таймаут и rate limit это обычная жизнь
+    провайдера, а не инцидент; их лечит повтор, а не человек.
+    """
+    if not is_provider_refusal(error_text):
+        return False
+    if (
+        is_insufficient_credits(error_text)
+        or is_quota_exhausted(error_text)
+        or is_access_not_purchased(error_text)
+    ):
+        return False
+    return not is_transient_api_error(error_text)
 
 
 def is_memory_pressure(error_text: str) -> bool:
@@ -132,6 +191,12 @@ def processing_failure_step(error_text: str) -> str:
     ветка временного сбоя, а обещать «через несколько минут» здесь нельзя —
     период подписки минутами не измеряется.
     """
+    if is_access_not_purchased(error_text):
+        return (
+            "Это ограничение на нашей стороне, файл менять не нужно — "
+            "мы уже знаем о сбое, попробуйте позже."
+        )
+
     if is_quota_exhausted(error_text):
         return (
             "Это ограничение на нашей стороне, файл менять не нужно — "
@@ -188,6 +253,14 @@ def resume_failure_message(error_text: str) -> str:
     поможет через несколько минут, в остальных случаях — повторная отправка
     записи.
     """
+    if is_access_not_purchased(error_text):
+        return (
+            "❌ Не получилось продолжить обработку: "
+            "доступ к модели сейчас закрыт.\n"
+            "Это ограничение на нашей стороне, файл менять не нужно — "
+            "мы уже знаем о сбое, попробуйте позже."
+        )
+
     if is_quota_exhausted(error_text):
         return (
             "❌ Не получилось продолжить обработку: "

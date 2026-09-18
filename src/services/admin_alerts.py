@@ -37,6 +37,16 @@ PROVIDER_ERROR_LIMIT = 300
 REASON_BRIEF_MISMATCH = "brief_mismatch"
 REASON_INSUFFICIENT_CREDITS = "insufficient_credits"
 REASON_QUOTA_EXHAUSTED = "quota_exhausted"
+REASON_ACCESS_NOT_PURCHASED = "access_not_purchased"
+REASON_UNKNOWN_PROVIDER_REFUSAL = "unknown_provider_refusal"
+
+# Автовозврату некуда идти: резерв не назначен. Строка нужна в алерте, а не
+# только в логе, — прод простоял на стене одиннадцать дней, и администратор
+# ниоткуда не узнавал, что бот пытался переехать и не смог (ADR-0010).
+_NO_RESERVE_LINE = (
+    "Резервный пресет не задан — автовозврат не сработал. "
+    "Назначить резерв можно в /models.\n\n"
+)
 
 # Один Bot на весь процесс для алертов (по образцу file_service._get_file_bot):
 # создаётся лениво, переиспользуется, aiohttp-сессия закрывается свипом на
@@ -134,7 +144,80 @@ def build_credits_alert(exc: Exception) -> str:
     )
 
 
-def build_quota_alert(exc: Exception, *, switched_to: Optional[str] = None) -> str:
+def _switch_outcome(
+    *, switched_to: Optional[str], fallback_configured: bool, wait_helps: str
+) -> str:
+    """Что бот сделал с активным пресетом и что остаётся человеку.
+
+    Общая концовка у обеих стен, которые запускают автовозврат. Различает три
+    исхода: переехали (звать в /models за сделанной работой незачем), резерв не
+    назначен вовсе (об этом надо сказать прямо) и резерв есть, но не сработал.
+
+    ``wait_helps`` — единственное, чем стены расходятся: у квоты следующий
+    период наступит сам, у неоплаченного доступа ждать нечего (CONTEXT.md).
+    """
+    if switched_to:
+        return (
+            f"Активный пресет переключён на «{switched_to}» — следующие протоколы "
+            f"идут на нём.\n\n➡️ {wait_helps} Вернуть прежний пресет можно в /models."
+        )
+
+    no_reserve = "" if fallback_configured else _NO_RESERVE_LINE
+    return (
+        f"{no_reserve}➡️ {wait_helps} Чтобы протоколы шли сейчас, "
+        "смените активный пресет (/models)."
+    )
+
+
+def build_access_not_purchased_alert(
+    exc: Exception,
+    *,
+    switched_to: Optional[str] = None,
+    fallback_configured: bool = True,
+) -> str:
+    """Текст алерта о неоплаченном доступе к модели.
+
+    Совет расходится с квотным ровно в одном: ждать нечего. Квота вернётся в
+    следующем периоде сама, здесь оплаченного периода нет — и обещание «ждите»
+    держало прод лежачим одиннадцать дней (ADR-0010).
+    """
+    return (
+        "🚨 LLM: доступ к модели не оплачен\n\n"
+        "Провайдер отказывает в доступе — пользователи сейчас получают отказ.\n\n"
+        + _incident_details(exc)
+        + _switch_outcome(
+            switched_to=switched_to,
+            fallback_configured=fallback_configured,
+            wait_helps=(
+                "Сам собой доступ не вернётся: продлите подписку у провайдера "
+                "или останьтесь на другом пресете."
+            ),
+        )
+    )
+
+
+def build_unknown_refusal_alert(exc: Exception) -> str:
+    """Текст алерта об отказе провайдера, не подошедшем ни под один класс.
+
+    Диагноза нет, поэтому и совета нет — есть повод посмотреть лог. Молчать
+    хуже: именно молчание неопознанного повода стоило одиннадцати дней.
+    """
+    return (
+        "🚨 LLM: незнакомый отказ провайдера\n\n"
+        "Запрос к модели отклонён, и причина не подошла ни под один известный "
+        "класс — протоколы сейчас не генерируются.\n\n"
+        + _incident_details(exc)
+        + "➡️ Посмотрите лог бота и решите, нужен ли другой пресет (/models). "
+        "Если это новый вид стены — его стоит добавить в классификацию."
+    )
+
+
+def build_quota_alert(
+    exc: Exception,
+    *,
+    switched_to: Optional[str] = None,
+    fallback_configured: bool = True,
+) -> str:
     """Текст алерта об исчерпании квоты подписки.
 
     Совет противоположен кредитному: пополнять нечего — квота вернётся в
@@ -145,24 +228,15 @@ def build_quota_alert(exc: Exception, *, switched_to: Optional[str] = None) -> s
     Тогда шаг администратора другой: просить сменить пресет, который бот сменил
     сам, значит слать в /models за уже сделанной работой.
     """
-    if switched_to:
-        next_step = (
-            f"Активный пресет переключён на «{switched_to}» — следующие протоколы "
-            "идут на нём.\n\n"
-            "➡️ Квота вернётся в следующем периоде подписки. Вернуть прежний "
-            "пресет можно в /models."
-        )
-    else:
-        next_step = (
-            "➡️ Квота вернётся в следующем периоде подписки. Чтобы протоколы шли "
-            "сейчас, смените активный пресет (/models)."
-        )
-
     return (
         "🚨 LLM: исчерпана квота подписки\n\n"
         "Запросы к модели падают — пользователи сейчас получают отказ.\n\n"
         + _incident_details(exc)
-        + next_step
+        + _switch_outcome(
+            switched_to=switched_to,
+            fallback_configured=fallback_configured,
+            wait_helps="Квота вернётся в следующем периоде подписки.",
+        )
     )
 
 
@@ -210,14 +284,44 @@ async def notify_insufficient_credits(exc: Exception) -> None:
 
 
 async def notify_quota_exhausted(
-    exc: Exception, *, switched_to: Optional[str] = None
+    exc: Exception,
+    *,
+    switched_to: Optional[str] = None,
+    fallback_configured: bool = True,
 ) -> None:
     """Сообщить администраторам об исчерпании квоты подписки.
 
     ``switched_to`` называет пресет, на который увёл автовозврат (если увёл):
     одно сообщение вместо двух — и повод, и то, что бот с ним сделал.
+    ``fallback_configured`` отличает «резерв не назначен» от «резерв есть, но
+    не сработал»: первое лечится одним нажатием, второе — разбирательством.
     """
     await notify_admins(
-        build_quota_alert(exc, switched_to=switched_to),
+        build_quota_alert(
+            exc, switched_to=switched_to, fallback_configured=fallback_configured
+        ),
         reason=REASON_QUOTA_EXHAUSTED,
+    )
+
+
+async def notify_access_not_purchased(
+    exc: Exception,
+    *,
+    switched_to: Optional[str] = None,
+    fallback_configured: bool = True,
+) -> None:
+    """Сообщить администраторам, что доступ к модели не оплачен."""
+    await notify_admins(
+        build_access_not_purchased_alert(
+            exc, switched_to=switched_to, fallback_configured=fallback_configured
+        ),
+        reason=REASON_ACCESS_NOT_PURCHASED,
+    )
+
+
+async def notify_unknown_provider_refusal(exc: Exception) -> None:
+    """Сообщить администраторам об отказе провайдера без известного диагноза."""
+    await notify_admins(
+        build_unknown_refusal_alert(exc),
+        reason=REASON_UNKNOWN_PROVIDER_REFUSAL,
     )

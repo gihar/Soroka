@@ -6,6 +6,7 @@ from .base import BotException
 from .configuration import ActivePresetDeletionError, AdminConfigurationError
 from .file import FileError, FileSizeError, FileTypeError
 from .processing import (
+    LLMAccessNotPurchasedError,
     LLMError,
     LLMInsufficientCreditsError,
     LLMQuotaExhaustedError,
@@ -20,7 +21,7 @@ __all__ = [
     "UserNotFoundError", "UserCreationError",
     "TemplateNotFoundError", "TemplateValidationError",
     "ProcessingError", "TranscriptionError", "LLMError", "LLMInsufficientCreditsError",
-    "LLMQuotaExhaustedError",
+    "LLMQuotaExhaustedError", "LLMAccessNotPurchasedError",
     "FileError", "FileSizeError", "FileTypeError",
     "AdminConfigurationError", "ActivePresetDeletionError"
 ]

@@ -108,3 +108,22 @@ class LLMQuotaExhaustedError(LLMError):
             model=model
         )
         self.error_code = "LLM_QUOTA_EXHAUSTED"
+
+
+class LLMAccessNotPurchasedError(LLMError):
+    """Доступ к модели у провайдера не оплачен.
+
+    Третий класс, а не разновидность квоты: квота — лимит внутри оплаченного
+    периода, и следующий период наступит сам. Здесь оплаченного периода нет
+    вовсе, ждать нечего (CONTEXT.md: «Неоплаченный доступ»). Совет «дождитесь
+    следующего периода» на этой стене — ловушка: прод простоял на ней
+    одиннадцать дней (ADR-0010).
+    """
+
+    def __init__(self, message: str, provider: str = None, model: str = None):
+        super().__init__(
+            message=f"Доступ к модели не оплачен: {message}",
+            provider=provider,
+            model=model
+        )
+        self.error_code = "LLM_ACCESS_NOT_PURCHASED"

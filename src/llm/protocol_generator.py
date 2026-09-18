@@ -5,7 +5,8 @@ OpenAI-совместимых клиентов по пресетам модел�
 (rate-limit → circuit-breaker → retry) — безусловно вокруг каждого вызова.
 Исчерпание ресурса провайдера классифицируется здесь и наверх идёт
 типизированным: 402 — LLMInsufficientCreditsError, 429/400 с квотным признаком —
-LLMQuotaExhaustedError. Ни то, ни другое не ретраится и пролетает насквозь.
+LLMQuotaExhaustedError, 403 с признаком отказа доступа —
+LLMAccessNotPurchasedError. Ни одно из трёх не ретраится и пролетает насквозь.
 
 Каким клиентом и какой моделью идёт шаг, модуль не решает: вызов называет шаг и
 пресет, а маршрут разрешает `src.llm.model_step` — единственная такая точка.
@@ -30,6 +31,7 @@ from loguru import logger
 from src.config import settings
 from src.exceptions.configuration import AdminConfigurationError
 from src.exceptions.processing import (
+    LLMAccessNotPurchasedError,
     LLMInsufficientCreditsError,
     LLMQuotaExhaustedError,
 )
@@ -52,7 +54,7 @@ from src.reliability import (
     global_rate_limiter,
 )
 from src.services.brief_compiler import brief_field_rules, brief_to_schema
-from src.services.error_presentation import is_quota_exhausted
+from src.services.error_presentation import is_access_not_purchased, is_quota_exhausted
 from src.services.protocol_briefs import get_brief_for
 from src.utils.token_cache_logger import log_cached_tokens_usage
 
@@ -72,6 +74,31 @@ _QUOTA_STATUS_CODES = (400, 429)
 def _has_status(exc: Exception, code: int, text: str) -> bool:
     """Ответ провайдера пришёл с этим HTTP-кодом (атрибут SDK или текст ошибки)."""
     return getattr(exc, "status_code", None) == code or f"error code: {code}" in text
+
+
+# Код, которым провайдер отказывает в доступе к модели. Один, а не набор: 403
+# честно многозначен — им же отвечают на отозванный ключ, поэтому голого кода
+# мало и решает пара «код + слово» (ADR-0010).
+_ACCESS_DENIED_STATUS_CODES = (403,)
+
+
+def is_access_not_purchased_error(exc: Exception) -> bool:
+    """Признак «доступ к модели не оплачен»: код 403 со словом про отказ доступа.
+
+    Публичный, в отличие от соседей: пару «код + слово» читает и зонд
+    ``/check_model``, которому 403 раньше казался отвергнутым ключом.
+
+    Пара «код + слово» повторяет форму квотного признака и по той же причине:
+    голое 403 сливает неоплаченную подписку с украденным секретом, а лечатся
+    они противоположно — сменой пресета и ротацией ключа.
+
+    Слова берутся из ``src.services.error_presentation`` — там же их читает путь
+    ниже по течению, у которого от исключения остался один текст.
+    """
+    text = str(exc).lower()
+    if not any(_has_status(exc, code, text) for code in _ACCESS_DENIED_STATUS_CODES):
+        return False
+    return is_access_not_purchased(text)
 
 
 def _is_quota_exhausted_error(exc: Exception) -> bool:
@@ -521,6 +548,10 @@ class ProtocolGenerator:
                 ) from e
             if _is_quota_exhausted_error(e):
                 raise LLMQuotaExhaustedError(
+                    str(e), provider="openai", model=route.model
+                ) from e
+            if is_access_not_purchased_error(e):
+                raise LLMAccessNotPurchasedError(
                     str(e), provider="openai", model=route.model
                 ) from e
             raise

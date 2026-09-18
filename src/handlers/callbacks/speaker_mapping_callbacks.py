@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
+from src.services.error_presentation import resume_failure_message
 from src.services.mapping_session import MappingSession, mapping_sessions
 from src.services.participants_service import (
     is_valid_manual_name,
@@ -56,12 +57,6 @@ _DELIVERED_TEXT = (
     "Имена спикеров в готовом протоколе можно поправить только "
     "повторной обработкой."
 )
-
-_PROCESSING_ERROR_TEXT = (
-    "❌ Не получилось продолжить обработку.\n"
-    "Отправьте запись заново — обычно повторная попытка помогает."
-)
-
 
 _SKIP_CONTINUED_TEXT = (
     "⏭ <b>Сопоставление пропущено</b>\n\n"
@@ -193,7 +188,11 @@ def card_handler(
             except Exception as e:
                 logger.opt(exception=True).error(f"Ошибка в {core.__name__}: {e}")
                 if on_error == "edit":
-                    await safe_edit_text(callback.message, _PROCESSING_ERROR_TEXT)
+                    # Текст — из классификатора, а не из константы: карточка не
+                    # должна спорить с сообщением о сбое, которое приходит
+                    # следом. Пока спорила, человек 15.09.2026 нажимал
+                    # «повторить» одиннадцать раз подряд (ADR-0010).
+                    await safe_edit_text(callback.message, resume_failure_message(str(e)))
                 else:
                     await _safe_callback_answer(callback, "Не получилось, попробуйте ещё раз")
 
