@@ -23,6 +23,7 @@ from src.performance.cache_system import performance_cache
 from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
+from src.services import provider_failure
 from src.services.base_processing_service import BaseProcessingService
 from src.services.error_presentation import resume_failure_message
 from src.services.mapping_session import MappingSession
@@ -738,6 +739,15 @@ class ProcessingService(BaseProcessingService):
             )
         except Exception as notify_error:
             logger.error(f"Не удалось уведомить пользователя об ошибке: {notify_error}")
+
+        # Сбой после паузы — такой же сбой, как в воркере, и администратору он
+        # адресован ровно так же. Своей ветки уведомления здесь нет: решение
+        # «когда писать» одно на оба пути (provider_failure). Пока его тут не
+        # было, четырнадцать отказов из пятнадцати не доходили ни до кого.
+        try:
+            await provider_failure.report_llm_failure(error)
+        except Exception as admin_error:
+            logger.error(f"Не удалось уведомить админов о сбое провайдера: {admin_error}")
 
         if isinstance(error, ProcessingError):
             raise error

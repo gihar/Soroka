@@ -46,11 +46,11 @@ def no_failover(monkeypatch):
     monkeypatch.setattr(preset_failover, "return_to_fallback", AsyncMock(return_value=None))
 
 
-def _worker():
-    """Воркер очереди без запуска: нужен только его разбор причины сбоя."""
-    from src.services.task_queue_manager import TaskQueueManager
+async def _react(exc):
+    """Реакция бота на сбой LLM — общая для воркера очереди и возобновления."""
+    from src.services import provider_failure
 
-    return TaskQueueManager.__new__(TaskQueueManager)
+    await provider_failure.report_llm_failure(exc)
 
 
 async def test_out_of_quota_reaches_the_admin_as_a_quota_wall(sent):
@@ -59,7 +59,7 @@ async def test_out_of_quota_reaches_the_admin_as_a_quota_wall(sent):
     Совет «пополните баланс» на исчерпанной квоте не работает: пополнять
     нечего, лечит только следующий период или другой пресет.
     """
-    await _worker()._notify_admins_provider_exhausted(
+    await _react(
         RuntimeError("Error code: 429 - The request is out of quota")
     )
 

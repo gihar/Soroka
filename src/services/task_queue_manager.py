@@ -15,7 +15,7 @@ from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
-from src.services import admin_alerts, error_presentation, preset_failover
+from src.services import provider_failure
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -352,10 +352,12 @@ class TaskQueueManager:
                 except Exception as tracker_error:
                     logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
             
-            # При исчерпании ресурса провайдера — алертим админов (это сбой на
-            # нашей стороне, который ломает обработку у всех пользователей).
+            # Сбой провайдера — повод написать администраторам: он ломает
+            # обработку у всех сразу. Решение «когда писать» живёт в
+            # provider_failure: путей сбоя два, и у второго (возобновление
+            # после паузы) своей ветки уведомления быть не должно.
             try:
-                await self._notify_admins_provider_exhausted(e)
+                await provider_failure.report_llm_failure(e)
             except Exception as admin_error:
                 logger.error(
                     f"Не удалось уведомить админов о сбое провайдера: {admin_error}"
@@ -374,32 +376,6 @@ class TaskQueueManager:
                 except Exception as e:
                     logger.error(f"Ошибка при завершении трекера: {e}")
     
-    @staticmethod
-    async def _notify_admins_provider_exhausted(exc: Exception) -> None:
-        """Сообщить админам, если задача упала на исчерпании ресурса провайдера.
-
-        Поводов два, и они не взаимозаменяемы: кредиты провайдера лечатся
-        пополнением, квота подписки — нет (CONTEXT.md), поэтому у каждого свой
-        текст и своё окно троттлинга. Признак сбоя берётся из
-        ``src.services.error_presentation`` — оттуда же его читают и
-        пользовательский текст, и классификация на границе клиента модели
-        (``QUOTA_EXHAUSTION_MARKERS``), так что три пути не расходятся в том,
-        что считать исчерпанием. Доставка и троттлинг — в ``admin_alerts``,
-        единственном канале до администраторов.
-
-        Разница поводов доходит и до действий: квотную стену бот пробует обойти
-        сам, переведя активный пресет на резервный (``preset_failover``), а
-        кредитную — нет, там лечение другое и минутное (пополнение). Задача,
-        упавшая на стене, уже завершилась ошибкой выше по стеку: автовозврат
-        достаётся следующим прогонам, модель внутри упавшего не подменяется.
-        """
-        error_text = str(exc).lower()
-        if error_presentation.is_quota_exhausted(error_text):
-            switched_to = await preset_failover.return_to_fallback()
-            await admin_alerts.notify_quota_exhausted(exc, switched_to=switched_to)
-        elif error_presentation.is_insufficient_credits(error_text):
-            await admin_alerts.notify_insufficient_credits(exc)
-
     async def _check_resources_available(self) -> bool:
         """Проверить доступность ресурсов для обработки"""
         if not self.oom_protection:

@@ -88,16 +88,16 @@ async def test_quota_incident_does_not_silence_brief_mismatch(sent):
     assert any("decisions" in text for text in texts)
 
 
-def _worker():
-    """Воркер очереди без запуска: нужен только его разбор причины сбоя."""
-    from src.services.task_queue_manager import TaskQueueManager
+async def _react(exc):
+    """Реакция бота на сбой LLM — общая для воркера очереди и возобновления."""
+    from src.services import provider_failure
 
-    return TaskQueueManager.__new__(TaskQueueManager)
+    await provider_failure.report_llm_failure(exc)
 
 
 async def test_worker_routes_quota_failure_to_quota_alert(sent):
     """Упавшая по квоте задача поднимает квотный алерт, а не кредитный."""
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     body = str(sent.await_args_list[0].args[2])
     assert "квот" in body.lower()
@@ -109,7 +109,7 @@ async def test_worker_keeps_credits_failure_on_the_credits_alert(sent):
     """Кредиты не переехали в квотную ветку: 402 остаётся кредитами."""
     from src.exceptions.processing import LLMInsufficientCreditsError
 
-    await _worker()._notify_admins_provider_exhausted(
+    await _react(
         LLMInsufficientCreditsError(
             "Error code: 402 - requires more credits", provider="openai", model="gpt-5"
         )
@@ -121,7 +121,7 @@ async def test_worker_keeps_credits_failure_on_the_credits_alert(sent):
 
 async def test_worker_stays_silent_on_unrelated_failures(sent):
     """Сбой не про ресурс провайдера — админам писать не о чем."""
-    await _worker()._notify_admins_provider_exhausted(RuntimeError("connection reset"))
+    await _react(RuntimeError("connection reset"))
 
     assert sent.await_count == 0
 
@@ -157,7 +157,7 @@ async def test_quota_wall_returns_active_preset_to_the_reserve(sent, presets):
     await presets.set_active_model_key("qwen_plus", admin_id=42)
     await presets.set_fallback_model_key("openrouter", admin_id=42)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     assert await presets.get_active_model_key() == "openrouter"
     body = str(sent.await_args_list[0].args[2])
@@ -173,7 +173,7 @@ async def test_the_switch_is_journalled_without_a_human_author(sent, presets, te
     await presets.set_active_model_key("qwen_plus", admin_id=42)
     await presets.set_fallback_model_key("openrouter", admin_id=42)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     async with aiosqlite.connect(test_db.db_path) as db:
         cursor = await db.execute(
@@ -187,7 +187,7 @@ async def test_without_a_reserve_nothing_switches_but_the_alert_arrives(sent, pr
     """Резерв не задан — тихо переехать на случайного провайдера хуже, чем постоять."""
     await presets.set_active_model_key("qwen_plus", admin_id=42)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     assert await presets.get_active_model_key() == "qwen_plus"
     body = str(sent.await_args_list[0].args[2])
@@ -199,7 +199,7 @@ async def test_reserve_equal_to_the_exhausted_preset_switches_nothing(sent, pres
     await presets.set_active_model_key("qwen_plus", admin_id=42)
     await presets.set_fallback_model_key("qwen_plus", admin_id=42)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     assert await presets.get_active_model_key() == "qwen_plus"
     body = str(sent.await_args_list[0].args[2])
@@ -217,7 +217,7 @@ async def test_stale_reserve_does_not_switch_and_the_alert_still_arrives(
     await presets.set_fallback_model_key("openrouter", admin_id=42)
     await ModelPresetRepository(test_db).update_field("openrouter", "is_enabled", 0)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     assert await presets.get_active_model_key() == "qwen_plus"
     assert sent.await_count == 2  # сбой автовозврата не съел уведомление
@@ -233,7 +233,7 @@ async def test_storage_failure_during_switch_does_not_eat_the_alert(
 
     monkeypatch.setattr(presets, "get_fallback_model_key", unavailable)
 
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
 
     assert sent.await_count == 2
     assert "квот" in str(sent.await_args_list[0].args[2]).lower()
@@ -246,7 +246,7 @@ async def test_credits_exhaustion_leaves_the_active_preset_alone(sent, presets):
     await presets.set_active_model_key("qwen_plus", admin_id=42)
     await presets.set_fallback_model_key("openrouter", admin_id=42)
 
-    await _worker()._notify_admins_provider_exhausted(
+    await _react(
         LLMInsufficientCreditsError(
             "Error code: 402 - requires more credits", provider="openai", model="gpt-5"
         )
@@ -270,7 +270,7 @@ async def test_reserve_reaches_the_next_run_not_the_one_that_hit_the_wall(sent, 
     await presets.set_fallback_model_key("openrouter", admin_id=42)
 
     run_that_hit_the_wall = await resolve_active_preset(presets, model_preset_repo)
-    await _worker()._notify_admins_provider_exhausted(_quota_exc())
+    await _react(_quota_exc())
     next_run = await resolve_active_preset(presets, model_preset_repo)
 
     assert run_that_hit_the_wall["model"] == "qwen3.7-plus"

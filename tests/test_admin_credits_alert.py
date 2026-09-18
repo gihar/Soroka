@@ -17,10 +17,11 @@ sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
 
-def _mgr():
-    from src.services.task_queue_manager import TaskQueueManager
+async def _react(exc):
+    """Реакция бота на сбой LLM — общая для воркера очереди и возобновления."""
+    from src.services import provider_failure
 
-    return TaskQueueManager.__new__(TaskQueueManager)
+    await provider_failure.report_llm_failure(exc)
 
 
 def _credits_exc():
@@ -46,8 +47,7 @@ def _capture(monkeypatch, admins):
 def test_alert_sent_to_every_admin(monkeypatch):
     sent = _capture(monkeypatch, [111, 222])
 
-    mgr = _mgr()
-    asyncio.run(mgr._notify_admins_provider_exhausted(_credits_exc()))
+    asyncio.run(_react(_credits_exc()))
 
     assert sent.await_count == 2
     recipients = {call.args[1] for call in sent.await_args_list}
@@ -60,9 +60,8 @@ def test_repeated_alerts_are_throttled(monkeypatch):
     sent = _capture(monkeypatch, [111])
 
     async def two_incidents():
-        mgr = _mgr()
-        await mgr._notify_admins_provider_exhausted(_credits_exc())
-        await mgr._notify_admins_provider_exhausted(_credits_exc())
+        await _react(_credits_exc())
+        await _react(_credits_exc())
 
     asyncio.run(two_incidents())
 
@@ -72,7 +71,6 @@ def test_repeated_alerts_are_throttled(monkeypatch):
 def test_no_admins_configured_is_noop(monkeypatch):
     sent = _capture(monkeypatch, [])
 
-    mgr = _mgr()
-    asyncio.run(mgr._notify_admins_provider_exhausted(_credits_exc()))  # must not raise
+    asyncio.run(_react(_credits_exc()))  # must not raise
 
     assert sent.await_count == 0

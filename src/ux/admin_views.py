@@ -352,9 +352,19 @@ def model_check_verdict(preset_name: str, verdict: "SchemaProbeVerdict") -> str:
 
 
 def model_check_failed(preset_name: str, model: str, base_url: Optional[str],
-                       reason: str, *, key_refused: bool) -> str:
-    """Зонд не дошёл до модели: это не вердикт о схеме (единый источник)."""
-    if key_refused:
+                       reason: str, *, key_refused: bool,
+                       access_not_purchased: bool = False) -> str:
+    """Зонд не дошёл до модели: это не вердикт о схеме (единый источник).
+
+    Три причины, а не две: неоплаченный доступ приходит тем же семейством кодов,
+    что отвергнутый ключ, и раньше сливался с ним — админа звали менять исправный
+    секрет, и разбирательство уходило не туда с первого шага (ADR-0010).
+    """
+    if access_not_purchased:
+        headline = "❌ Доступ к модели не оплачен"
+        step = ("Ключ рабочий — дело в подписке у провайдера. Продлите её "
+                "или выберите другой пресет в /models.")
+    elif key_refused:
         headline = "❌ Ключ не принят провайдером"
         step = "Задайте пресету рабочий ключ через /add_model и повторите /check_model."
     else:

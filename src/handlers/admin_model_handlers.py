@@ -21,6 +21,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
+from src.llm.protocol_generator import is_access_not_purchased_error
 from src.services.admin_alerts import clip_provider_error
 from src.utils.admin_utils import is_admin
 from src.utils.telegram_safe import safe_answer, safe_edit_text
@@ -30,7 +31,11 @@ from src.ux.html_text import esc
 
 # Провайдер отказал в доступе: ключ не принят. Отличается от «не ответил» —
 # и то и другое не вердикт зонда о схеме, но чинится по-разному (issue #116).
-_KEY_REFUSED_MARKERS = ("error code: 401", "error code: 403", "invalid api key",
+#
+# 403 отсюда убран: им же отвечают на неоплаченный доступ к модели, и зонд слал
+# администратора менять исправный секрет — первый же шаг разбирательства уходил
+# не туда (ADR-0010). Неоплаченный доступ опознаётся отдельно, ниже.
+_KEY_REFUSED_MARKERS = ("error code: 401", "invalid api key",
                         "incorrect api key", "unauthorized")
 
 _NO_RIGHTS = "❌ Недостаточно прав"
@@ -49,8 +54,15 @@ _ADD_MODEL_BAD_FORMAT = (
 
 
 def _is_key_refused_error(exc: Exception) -> bool:
-    """Провайдер отверг ключ (401/403), а не просто не ответил."""
-    if getattr(exc, "status_code", None) in (401, 403):
+    """Провайдер отверг ключ (401), а не просто не ответил.
+
+    Неоплаченный доступ сюда не относится, хотя приходит тем же семейством
+    кодов: ключ там рабочий, и лечится это продлением подписки или сменой
+    пресета, а не ротацией секрета.
+    """
+    if is_access_not_purchased_error(exc):
+        return False
+    if getattr(exc, "status_code", None) == 401:
         return True
     text = str(exc).lower()
     return any(marker in text for marker in _KEY_REFUSED_MARKERS)
@@ -176,6 +188,7 @@ async def _probe_report(preset) -> str:
         return admin_views.model_check_failed(
             preset["name"], preset.get("model"), preset.get("base_url"),
             _probe_failure_reason(e), key_refused=_is_key_refused_error(e),
+            access_not_purchased=is_access_not_purchased_error(e),
         )
 
 
