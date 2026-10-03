@@ -19,7 +19,11 @@ def setup_logging():
                "<level>{level: <8}</level> | "
                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
                "<level>{message}</level>",
-        colorize=True
+        colorize=True,
+        # diagnose печатает значения переменных в трейсбэках — имена
+        # пользователей и фрагменты расшифровок попадали в journald
+        backtrace=False,
+        diagnose=False,
     )
     
     # Добавляем обработчик для файла
@@ -29,7 +33,9 @@ def setup_logging():
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
         rotation="10 MB",
         retention="1 week",
-        compression="zip"
+        compression="zip",
+        backtrace=False,
+        diagnose=False,
     )
 
 
