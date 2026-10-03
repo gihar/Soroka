@@ -5,7 +5,6 @@ Enhanced Telegram Bot - Точка входа в приложение
 
 import asyncio
 import shutil
-import ssl
 
 from loguru import logger
 
@@ -13,23 +12,6 @@ from loguru import logger
 from src.bot import main_enhanced as main
 from src.config import settings
 from src.utils.logging_utils import setup_logging
-
-try:
-    import urllib3
-except ImportError:
-    urllib3 = None
-
-# Глобальное отключение SSL verification, если настроено
-if not settings.ssl_verify:
-    if urllib3:
-        try:
-            # Отключаем SSL verification для urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except Exception:
-            pass  # Игнорируем ошибки отключения предупреждений
-    
-    # Отключаем SSL verification глобально
-    ssl._create_default_https_context = ssl._create_unverified_context
 
 
 def check_ffmpeg():
@@ -59,6 +41,12 @@ if __name__ == "__main__":
     # Проверяем наличие API ключа OpenAI
     if not settings.openai_api_key:
         logger.warning("OPENAI_API_KEY не установлен")
+
+    if not settings.ssl_verify:
+        logger.warning(
+            "SSL_VERIFY=false: сертификаты внешних API не проверяются — "
+            "ключи и записи встреч уязвимы для перехвата. Только для отладки"
+        )
     
     # Проверяем наличие ffmpeg
     if not check_ffmpeg():

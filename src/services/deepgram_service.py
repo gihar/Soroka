@@ -147,10 +147,10 @@ class DeepgramService:
             except Exception as e:
                 # Проверяем, является ли это SSL ошибкой
                 if "SSL" in str(e) or "certificate" in str(e).lower():
-                    logger.warning("Обнаружена SSL ошибка. Попробуйте установить SSL_VERIFY=false в настройках")
+                    logger.warning("Обнаружена SSL ошибка: сертификат API не прошёл проверку — проверьте сеть и прокси")
                     raise DeepgramAPIError(
-                        f"SSL ошибка при подключении к Deepgram API. "
-                        f"Установите SSL_VERIFY=false в настройках для отключения проверки сертификатов: {e}",
+                        f"SSL ошибка при подключении к Deepgram API: "
+                        f"сертификат не прошёл проверку (сеть или прокси подменяют соединение): {e}",
                         file_path, str(e)
                     )
                 raise

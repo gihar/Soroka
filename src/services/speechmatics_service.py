@@ -4,6 +4,7 @@
 
 import asyncio
 import os
+import ssl
 from pathlib import Path
 from typing import Any, Dict
 
@@ -15,9 +16,6 @@ from src.models.diarization import Diarization, Segment
 from src.models.processing import TranscriptionResult
 
 try:
-    import ssl
-
-    import urllib3
     from httpx import HTTPStatusError
     from speechmatics.batch_client import BatchClient
     from speechmatics.models import ConnectionSettings
@@ -25,20 +23,6 @@ try:
 except ImportError:
     SPEECHMATICS_AVAILABLE = False
     logger.warning("Speechmatics SDK недоступен")
-
-# Отключаем предупреждения SSL если SSL_VERIFY=false
-if not settings.ssl_verify:
-    try:
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        # Создаем глобальный SSL контекст без верификации
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        # Устанавливаем как контекст по умолчанию
-        ssl._create_default_https_context = lambda: ssl_context
-        logger.info("Глобальный SSL контекст настроен без верификации")
-    except Exception as e:
-        logger.warning(f"Не удалось настроить глобальный SSL контекст: {e}")
 
 
 class SpeechmaticsService:
@@ -62,35 +46,16 @@ class SpeechmaticsService:
                     "auth_token": settings.speechmatics_api_key,
                 }
                 
-                # Настраиваем SSL верификацию через переменные окружения
+                # Свой контекст только для клиента Speechmatics: SDK передаёт
+                # его в httpx как verify, остальной процесс не затрагивается
                 if not settings.ssl_verify:
-                    import os
-                    # Отключаем SSL верификацию для httpx (который использует Speechmatics SDK)
-                    os.environ["PYTHONHTTPSVERIFY"] = "0"
-                    os.environ["CURL_CA_BUNDLE"] = ""
-                    # Дополнительные настройки для отключения SSL верификации
-                    os.environ["REQUESTS_CA_BUNDLE"] = ""
-                    os.environ["SSL_VERIFY"] = "false"
-                    
-                    # Monkey patch для httpx чтобы отключить SSL верификацию
-                    try:
-                        import httpx
-                        # Сохраняем оригинальный метод
-                        if not hasattr(httpx.Client, '_original_init'):
-                            httpx.Client._original_init = httpx.Client.__init__
-                            
-                            def patched_init(self, *args, **kwargs):
-                                kwargs['verify'] = False
-                                return httpx.Client._original_init(self, *args, **kwargs)
-                            
-                            httpx.Client.__init__ = patched_init
-                            logger.info("SSL верификация отключена через monkey patch для httpx")
-                    except Exception as e:
-                        logger.warning(f"Не удалось отключить SSL верификацию через monkey patch: {e}")
-                    
-                    logger.info("Speechmatics клиент инициализирован с отключенной SSL верификацией")
+                    unverified = ssl.create_default_context()
+                    unverified.check_hostname = False
+                    unverified.verify_mode = ssl.CERT_NONE
+                    connection_kwargs["ssl_context"] = unverified
+                    logger.warning("Speechmatics клиент инициализирован без проверки сертификатов (SSL_VERIFY=false)")
                 else:
-                    logger.info("Speechmatics клиент инициализирован с включенной SSL верификацией")
+                    logger.info("Speechmatics клиент инициализирован с проверкой сертификатов")
                 
                 # Создаем настройки подключения
                 self.settings = ConnectionSettings(**connection_kwargs)
@@ -199,10 +164,10 @@ class SpeechmaticsService:
             
             # Проверяем, является ли это SSL ошибкой
             if "SSL" in str(e) or "certificate" in str(e).lower():
-                logger.warning("Обнаружена SSL ошибка. Попробуйте установить SSL_VERIFY=false в настройках")
+                logger.warning("Обнаружена SSL ошибка: сертификат API не прошёл проверку — проверьте сеть и прокси")
                 raise SpeechmaticsAPIError(
-                    f"SSL ошибка при подключении к Speechmatics API. "
-                    f"Установите SSL_VERIFY=false в настройках для отключения проверки сертификатов: {e}",
+                    f"SSL ошибка при подключении к Speechmatics API: "
+                    f"сертификат не прошёл проверку (сеть или прокси подменяют соединение): {e}",
                     file_path, str(e)
                 )
             

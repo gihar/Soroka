@@ -91,7 +91,10 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", description="Уровень логирования")
     
     # SSL настройки
-    ssl_verify: bool = Field(False, description="Проверка SSL сертификатов")
+    ssl_verify: bool = Field(
+        True,
+        description="Проверка TLS-сертификатов внешних API. false — только для отладки за прокси с подменой сертификатов",
+    )
     
     # Транскрипция
     transcription_mode: str = Field("local", description="Режим транскрипции: local | cloud | hybrid (синоним cloud) | speechmatics | deepgram | leopard; при сбое или недоступности бэкенда — откат на локальный Whisper")
