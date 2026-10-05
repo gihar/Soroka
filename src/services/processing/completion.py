@@ -11,7 +11,6 @@
 тестируемым через собственный интерфейс, без обхода конструктора сервиса.
 """
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Optional
@@ -53,8 +52,10 @@ class CompletionDeps:
     ``llm_gen``   — генерация LLM и имя активной модели
                     (optimized_llm_generation, resolve_model_display_name).
     ``formatter`` — сборка текста протокола (format_protocol).
-    ``history``   — запись истории и очистка временного файла
-                    (save_processing_history, cleanup_temp_file).
+    ``history``   — запись истории (save_processing_history).
+
+    Временный файл записи хвост не трогает: его судьбу решает «Подготовка
+    записи» по исходу прогона (record_preparation).
     """
 
     llm_gen: Any
@@ -81,7 +82,6 @@ async def complete_processing(
     cache_key: Optional[str] = None,
     task_id: Optional[Any] = None,
     metrics: Any = None,
-    temp_file_path: Optional[str] = None,
     progress_tracker: Any = None,
 ) -> CompletionOutcome:
     """Довести обработку от генерации до доставки и учёта — единый хвост.
@@ -96,8 +96,7 @@ async def complete_processing(
     """
     result = await _assemble_result(
         request, transcription_result, template,
-        deps=deps, meeting_type=meeting_type,
-        metrics=metrics, temp_file_path=temp_file_path,
+        deps=deps, meeting_type=meeting_type, metrics=metrics,
     )
 
     # Кеш после успешной генерации, независимо от доставки. Best-effort: сбой
@@ -194,7 +193,6 @@ async def _assemble_result(
     deps: CompletionDeps,
     meeting_type: Optional[str],
     metrics: Any,
-    temp_file_path: Optional[str],
 ) -> ProcessingResult:
     """Генерация LLM → форматирование → замена спикеров → сборка результата.
 
@@ -269,10 +267,6 @@ async def _assemble_result(
         protocol_text = normalize_list_markers(protocol_text)
         # Пустые Jinja-ветки шапки оставляют лишние пустые строки (живой 365).
         protocol_text = squeeze_blank_lines(protocol_text)
-
-    # Очистка временного файла в фоне (только для внешних файлов).
-    if request.is_external_file and temp_file_path:
-        asyncio.create_task(deps.history.cleanup_temp_file(temp_file_path))
 
     llm_model_display_name = await deps.llm_gen.resolve_model_display_name()
 

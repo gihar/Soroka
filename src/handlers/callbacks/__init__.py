@@ -18,7 +18,10 @@ def setup_callback_handlers(user_service, template_service, processing_service) 
     router.include_router(setup_template_mgmt_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_settings_callbacks(user_service, template_service, processing_service))
     router.include_router(setup_processing_callbacks(user_service, template_service, processing_service))
-    router.include_router(setup_speaker_mapping_callbacks(user_service, template_service, processing_service))
+    # Кнопки карточки закрывают паузу на карточке, а не зовут сервис обработки.
+    router.include_router(setup_speaker_mapping_callbacks(
+        user_service, template_service, processing_service.mapping_pause
+    ))
     router.include_router(setup_protocol_actions_callbacks(user_service, template_service))
     # Правка шапки включена ПОСЛЕ карточки, поэтому приоритет разводится не
     # порядком, а состоянием: ловец имени спикера отступает, когда открыт любой
