@@ -5,6 +5,10 @@
 Тесты гоняют конвейер целиком и смотрят на одно — существует ли файл после
 прогона: кеш-хит, протокол, пауза на карточке и её закрытие, сбой.
 
+Правило: скачанный прогоном Telegram-файл удаляется всегда, когда прогон с ним
+закончил; внешняя запись — после доставки протокола (из кеша или собранного),
+а при сбое остаётся: её держит состояние диалога.
+
 Внешний мир — фейки: распознавание речи, Telegram (адрес файла, скачивание,
 чат), пользователи, шаблоны, генерация.
 """
@@ -292,14 +296,15 @@ async def test_telegram_cache_hit_deletes_the_download(world):
     assert not world.telegram_file().exists()
 
 
-async def test_external_cache_hit_keeps_the_file(world):
-    """ТЕКУЩЕЕ поведение: внешний файл после доставки из кеша остаётся."""
+async def test_external_cache_hit_deletes_the_file(world):
+    """Протокол доставлен из кеша — запись прогону больше не нужна, как и после
+    генерации. Раньше файл оставался до очистки по возрасту."""
     path = world.external_file()
     world.cache(_cached_result())
 
     await world.run(_external_request(path))
 
-    assert path.exists()
+    assert not path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -316,12 +321,13 @@ async def test_external_file_is_deleted_after_the_protocol(world):
     assert not path.exists()
 
 
-async def test_telegram_download_survives_the_protocol(world):
-    """ТЕКУЩЕЕ поведение: скачанный Telegram-файл после протокола остаётся."""
+async def test_telegram_download_is_deleted_after_the_protocol(world):
+    """Скачанный прогоном файл после протокола удаляется: раньше он лежал во
+    временном каталоге до очистки по возрасту или до рестарта бота."""
     await world.run(_telegram_request())
 
     assert world.chat.delivered
-    assert world.telegram_file().exists()
+    assert not world.telegram_file().exists()
 
 
 # ---------------------------------------------------------------------------
@@ -363,14 +369,14 @@ async def test_external_file_is_deleted_when_the_pause_closes(world):
     assert not path.exists()
 
 
-async def test_telegram_download_survives_the_closed_pause(world):
-    """ТЕКУЩЕЕ поведение: Telegram-файл не удаляется и после закрытия паузы."""
+async def test_telegram_download_is_deleted_when_the_pause_closes(world):
     world.transcription = _with_speakers()
     await world.run(_telegram_request())
+    assert world.telegram_file().exists()  # на паузе файл нужен фрагментам
 
     await world.close_pause()
 
-    assert world.telegram_file().exists()
+    assert not world.telegram_file().exists()
 
 
 async def test_failed_close_keeps_the_external_file(world):
@@ -385,8 +391,8 @@ async def test_failed_close_keeps_the_external_file(world):
     assert path.exists()
 
 
-async def test_failed_close_keeps_the_telegram_download(world):
-    """ТЕКУЩЕЕ поведение: сбой после паузы Telegram-файл не удаляет."""
+async def test_failed_close_deletes_the_telegram_download(world):
+    """Telegram-запись перезапускается по file_id — скачанная копия не нужна."""
     world.transcription = _with_speakers()
     await world.run(_telegram_request())
     world.generation_error = RuntimeError("LLM упал")
@@ -394,7 +400,7 @@ async def test_failed_close_keeps_the_telegram_download(world):
     with pytest.raises(ProcessingError):
         await world.close_pause()
 
-    assert world.telegram_file().exists()
+    assert not world.telegram_file().exists()
 
 
 # ---------------------------------------------------------------------------
@@ -432,14 +438,13 @@ async def test_failure_after_the_cache_miss_keeps_the_external_file(world):
     assert path.exists()
 
 
-async def test_failure_after_the_cache_miss_keeps_the_telegram_download(world):
-    """ТЕКУЩЕЕ поведение: сбой после промаха кеша Telegram-файл не удаляет."""
+async def test_failure_after_the_cache_miss_deletes_the_telegram_download(world):
     world.transcription_error = RuntimeError("распознавание упало")
 
     with pytest.raises(RuntimeError):
         await world.run(_telegram_request())
 
-    assert world.telegram_file().exists()
+    assert not world.telegram_file().exists()
 
 
 # ---------------------------------------------------------------------------

@@ -36,13 +36,18 @@ class RecordFate(Enum):
 
 
 # Удалять ли файл записи: (скачан прогоном?, исход прогона) → да/нет.
-# Telegram-файл прогон скачивает сам; внешняя запись скачана при приёме ссылки
-# и живёт в состоянии диалога. Единственное место, где решается удаление.
+# Единственное место, где решается удаление.
+#
+# Telegram-файл прогон скачивает сам и при любом исходе может скачать заново
+# по file_id — копия удаляется, как только прогон с ней закончил. Внешняя
+# запись скачана при приёме ссылки и живёт в состоянии диалога: после
+# доставки протокола (из кеша или собранного) она отработала, а после сбоя
+# остаётся для повторного запуска — её подберёт очистка по возрасту.
 _DELETE_AFTER = {
     (True, RecordFate.DELIVERED_FROM_CACHE): True,
-    (True, RecordFate.PROTOCOL_ASSEMBLED): False,
-    (True, RecordFate.FAILED): False,
-    (False, RecordFate.DELIVERED_FROM_CACHE): False,
+    (True, RecordFate.PROTOCOL_ASSEMBLED): True,
+    (True, RecordFate.FAILED): True,
+    (False, RecordFate.DELIVERED_FROM_CACHE): True,
     (False, RecordFate.PROTOCOL_ASSEMBLED): True,
     (False, RecordFate.FAILED): False,
 }
