@@ -59,8 +59,8 @@ def _resume_session() -> MappingSession:
     )
 
 
-def _resume_pause():
-    """Пауза на карточке с успешной генерацией (зависимости хвоста — фейки)."""
+def _resume_pause(generation_error=None):
+    """Пауза на карточке (зависимости хвоста — фейки); генерацию можно уронить."""
     from src.services.mapping_session import MappingSessionStore
     from src.services.processing.completion import CompletionDeps
     from src.services.processing.mapping_pause import MappingPause
@@ -68,7 +68,10 @@ def _resume_pause():
     return MappingPause(
         deps=CompletionDeps(
             llm_gen=SimpleNamespace(
-                optimized_llm_generation=AsyncMock(return_value={"meeting_title": "Планёрка"}),
+                optimized_llm_generation=AsyncMock(
+                    return_value={"meeting_title": "Планёрка"},
+                    side_effect=generation_error,
+                ),
                 resolve_model_display_name=AsyncMock(return_value="GPT"),
             ),
             formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол"),
@@ -216,6 +219,53 @@ async def test_resume_does_not_leave_autoupdate_running(monkeypatch):
     finally:
         # Тест остаётся гигиеничным и когда он красный: висящая задача снимается.
         # _auto_update глотает CancelledError сам, поэтому await не обязан бросать.
+        if task_after is not None and not task_after.done():
+            task_after.cancel()
+            try:
+                await task_after
+            except asyncio.CancelledError:
+                pass
+
+
+async def test_failed_resume_does_not_leave_autoupdate_running(monkeypatch):
+    """Сбой генерации после паузы тоже гасит трекер продолжения.
+
+    Хвост гасит трекер только после сборки результата; генерация, упавшая
+    раньше, оставляла «Анализ…» крутиться до гарда в 1800с — под сообщением о
+    сбое. Воркер на сбое гасит свой трекер ошибкой; закрытие паузы — так же.
+    """
+    import src.services.processing.completion as completion
+    import src.ux.progress_tracker as pt_mod
+    from src.exceptions.processing import ProcessingError
+    from src.services import provider_failure
+    from src.services.processing.mapping_pause import CloseReason
+
+    tracker = _real_tracker()
+    channel = SimpleNamespace(
+        start_tracker=AsyncMock(return_value=tracker),
+        deliver=AsyncMock(return_value=True),
+        report_failure=AsyncMock(),
+    )
+    monkeypatch.setattr(completion.queue_repo, "update_queue_task_status", AsyncMock())
+    monkeypatch.setattr(provider_failure, "report_llm_failure", AsyncMock())
+    monkeypatch.setattr(
+        pt_mod.telegram_rate_limiter.flood_control,
+        "is_blocked",
+        AsyncMock(return_value=(False, 0)),
+    )
+    pause = _resume_pause(generation_error=RuntimeError("LLM упал"))
+
+    task_after = None
+    try:
+        with pytest.raises(ProcessingError):
+            await pause.close(_resume_session(), CloseReason.CONFIRMED, channel=channel)
+        await asyncio.sleep(0)
+
+        task_after = tracker.update_task
+        assert task_after is None or task_after.done(), (
+            "цикл автообновления трекера продолжения жив после сбоя"
+        )
+    finally:
         if task_after is not None and not task_after.done():
             task_after.cancel()
             try:

@@ -206,10 +206,12 @@ async def test_resume_402_end_to_end_survives_logging(monkeypatch):
         ),
         store=MappingSessionStore(),
     )
+    tracker = SimpleNamespace(
+        start_stage=AsyncMock(), complete_all=AsyncMock(), error=AsyncMock(),
+        current_stage="analysis",
+    )
     channel = SimpleNamespace(
-        start_tracker=AsyncMock(return_value=SimpleNamespace(
-            start_stage=AsyncMock(), complete_all=AsyncMock(),
-        )),
+        start_tracker=AsyncMock(return_value=tracker),
         report_failure=AsyncMock(),
         say=AsyncMock(),
     )
@@ -230,7 +232,8 @@ async def test_resume_402_end_to_end_survives_logging(monkeypatch):
     with pytest.raises(ProcessingError):
         await pause.close(session, CloseReason.CONFIRMED, channel=channel)
 
-    channel.report_failure.assert_awaited_once()
+    # Пользователь узнал о сбое — на трекере продолжения, как в воркере.
+    tracker.error.assert_awaited_once()
 
 
 def test_credits_detection_has_single_source_of_truth():

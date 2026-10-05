@@ -30,7 +30,7 @@ from src.models.processing import ProcessingResult
 from src.services.mapping_session import MappingSession, MappingSessionStore
 
 from .completion import CompletionDeps, complete_processing
-from .failure_policy import fail_processing
+from .failure_policy import fail_processing, on_tracker
 from .pause_channel import PauseChannel
 
 # Запас до ленивого вытеснения в хранилище: таймер обязан успеть раньше, иначе
@@ -283,6 +283,7 @@ class MappingPause:
             await self._say(channel, notice)
 
         user_id = session.request.user_id
+        tracker = None
         try:
             logger.info(
                 f"Продолжение обработки для пользователя {user_id} "
@@ -329,8 +330,15 @@ class MappingPause:
             return outcome.result
 
         except Exception as e:
+            # Трекер продолжения уже завёлся — сбой гасит его, как в воркере
+            # (иначе «Анализ…» крутился бы до гарда под сообщением о сбое).
+            # Не завёлся — говорим о сбое отдельным сообщением в чат.
+            notify_user = (
+                on_tracker(tracker, default_stage="analysis")
+                if tracker else channel.report_failure
+            )
             await fail_processing(
-                e, task_id=session.task_id, notify_user=channel.report_failure
+                e, task_id=session.task_id, notify_user=notify_user
             )
             if isinstance(e, ProcessingError):
                 raise

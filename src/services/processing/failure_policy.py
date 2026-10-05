@@ -25,6 +25,23 @@ from src.services import provider_failure
 NotifyUser = Callable[[Exception], Awaitable[None]]
 
 
+def on_tracker(progress_tracker: Any, *, default_stage: str) -> NotifyUser:
+    """Канал «сбой на трекере прогресса»: трекер гаснет сообщением о сбое.
+
+    Так сообщает о сбое воркер, и так же — закрытие паузы, у которого есть
+    свой трекер продолжения: иначе трекер крутил бы этап до гарда в 1800с
+    прямо под сообщением о сбое. Трекер сам подбирает текст по причине сбоя
+    (``error_presentation``): сюда идёт сырой текст — он нужен для выбора шага
+    и уходит в лог, не пользователю.
+    """
+
+    async def notify(error: Exception) -> None:
+        stage = getattr(progress_tracker, "current_stage", None) or default_stage
+        await progress_tracker.error(stage, str(error), str(error))
+
+    return notify
+
+
 async def fail_processing(
     error: Exception,
     *,

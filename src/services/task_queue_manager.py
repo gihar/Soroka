@@ -285,7 +285,7 @@ class TaskQueueManager:
     async def _process_task(self, task: QueuedTask):
         """Обработать задачу"""
         from src.config import settings as cfg
-        from src.services.processing.failure_policy import fail_processing
+        from src.services.processing.failure_policy import fail_processing, on_tracker
         from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
 
@@ -338,19 +338,20 @@ class TaskQueueManager:
         except Exception as e:
             logger.error(f"Ошибка обработки задачи {task.task_id}: {e}")
 
-            async def show_on_tracker(error: Exception) -> None:
-                # Канал воркера к пользователю — трекер прогресса. Трекер сам
-                # подбирает текст по причине сбоя (error_presentation): сюда
-                # идёт сырой текст — он нужен для выбора шага и уходит в лог.
-                if progress_tracker is None:
-                    return
-                current_stage = progress_tracker.current_stage or "preparation"
-                await progress_tracker.error(current_stage, str(error), str(error))
+            async def nobody(error: Exception) -> None:
+                logger.warning("Сбой до создания трекера: показать его негде")
 
             # Политика сбоя одна на воркер и на закрытие паузы (ADR-0011):
             # статус задачи, пользователь, администратор (provider_failure).
+            # Канал воркера к пользователю — трекер прогресса; текст по причине
+            # сбоя трекер берёт из error_presentation сам.
             await fail_processing(
-                e, task_id=str(task.task_id), notify_user=show_on_tracker
+                e,
+                task_id=str(task.task_id),
+                notify_user=(
+                    on_tracker(progress_tracker, default_stage="preparation")
+                    if progress_tracker else nobody
+                ),
             )
 
             # НЕ пробрасываем исключение - обрабатываем локально

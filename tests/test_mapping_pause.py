@@ -92,6 +92,7 @@ class FakeChat:
         self.previews_result = {"SPEAKER_1"}
         self.previews_raise = False
         self.deliver_ok = True
+        self.tracker_raise = False
 
     async def silence_tracker(self):
         self.events.append("silence")
@@ -113,7 +114,17 @@ class FakeChat:
         self.said.append(text)
 
     async def start_tracker(self):
+        if self.tracker_raise:
+            raise RuntimeError("трекер не создался")
+        chat = self
+
+        async def tracker_error(stage, message, raw=""):
+            # Сбой показан на трекере продолжения — это и есть «пользователь узнал».
+            chat.events.append("failure")
+            chat.failures.append(raw)
+
         tracker = _resume_tracker()
+        tracker.error = AsyncMock(side_effect=tracker_error)
         self.resume_trackers.append(tracker)
         return tracker
 
@@ -638,6 +649,40 @@ async def test_failure_after_the_pause_reaches_user_admin_and_queue(
     assert len(admin) == 1 and "451" in admin[0]
     assert ("task-1", "failed") in queue
     assert chat.delivered == []
+
+
+async def test_failure_after_the_pause_is_shown_on_the_resume_tracker(
+    pause, chat, generation,
+):
+    """Как в воркере: трекер продолжения гаснет сообщением о сбое, а не крутит
+    «Анализ…» до гарда; отдельного сообщения о том же сбое нет."""
+    from src.exceptions.processing import ProcessingError
+
+    generation.llm_gen.optimized_llm_generation.side_effect = RuntimeError(RAW_UNKNOWN)
+
+    with pytest.raises(ProcessingError):
+        await pause.close(_session(), "confirmed")
+
+    tracker = chat.resume_trackers[0]
+    stage, _, raw = tracker.error.await_args.args
+    assert stage == "analysis"
+    assert raw == RAW_UNKNOWN
+    assert chat.failures == [RAW_UNKNOWN]
+
+
+async def test_failure_without_a_resume_tracker_is_said_in_the_chat(
+    pause, chat, queue, admin,
+):
+    from src.exceptions.processing import ProcessingError
+
+    chat.tracker_raise = True
+
+    with pytest.raises(ProcessingError):
+        await pause.close(_session(), "confirmed")
+
+    assert len(chat.failures) == 1
+    assert isinstance(chat.failures[0], Exception)
+    assert ("task-1", "failed") in queue
 
 
 async def test_broken_admin_alert_does_not_swallow_the_failure(
