@@ -30,7 +30,6 @@ sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
 import src.handlers.callbacks.processing_callbacks as pc  # noqa: E402
-import src.handlers.message_handlers as mh  # noqa: E402
 import src.services.task_queue_manager as tqm_mod  # noqa: E402
 import src.ux.queue_tracker as qt_mod  # noqa: E402
 
@@ -98,7 +97,8 @@ class _FakeQueueManager:
 class _FakeTrackerFactory:
     @staticmethod
     async def create_tracker(**kwargs):
-        # message_id=None → блок обновления БД в _process_file пропускается.
+        # message_id=None → запуск не пишет message_id в БД; is_active=False →
+        # монитор позиции выходит сразу.
         return SimpleNamespace(message_id=None, is_active=False)
 
 
@@ -115,7 +115,6 @@ def _patch_processing(monkeypatch):
     fake_qm = _FakeQueueManager()
     monkeypatch.setattr(tqm_mod, "task_queue_manager", fake_qm)
     monkeypatch.setattr(qt_mod, "QueueTrackerFactory", _FakeTrackerFactory)
-    monkeypatch.setattr(mh, "_monitor_queue_position", AsyncMock())
     monkeypatch.setattr(pc, "safe_edit_text", AsyncMock())
     return fake_qm
 

@@ -1,18 +1,19 @@
-"""Характеризация запуска обработки до выделения модуля «Запуск обработки».
+"""Характеризация запуска обработки из диалога (край хендлеров).
 
-Фиксирует поведение всех точек, которые сегодня ставят принятую запись в
-очередь обработки через FSM-словарь aiogram:
+Снята с ``_process_file`` до выделения модуля «Запуск обработки» и
+переведена на ``start_processing_from_dialog`` после переключения. Фиксирует:
 
-- ``_process_file`` — валидация словаря, сборка ``ProcessingRequest``,
-  постановка в очередь, трекер позиции, ``message_id`` в БД, монитор позиции,
-  очистка состояния; все ветки ошибок с их текстами;
+- чтение FSM-словаря, сборку ``ProcessingRequest``, постановку в очередь,
+  трекер позиции, ``message_id`` в БД, монитор позиции, очистку состояния;
+  все ветки ошибок с их текстами (байт-в-байт);
 - ``quick_process_file_callback`` — «Быстрая обработка»: шаблон по умолчанию
   или умный выбор, сохранённые участники;
 - семь хендлеров выбора шаблона — каждый кладёт свой выбор и запускает
   обработку.
 
-Тексты ошибок сверяются байт-в-байт: после переключения на новый модуль они
-обязаны остаться прежними.
+Осознанные изменения при переключении (раньше было иначе, см. историю):
+``llm_provider`` в состоянии больше не нужен — его ставит запуск;
+«умный выбор» — это ``template_id=0`` без флага ``use_smart_selection``.
 """
 
 import asyncio
@@ -33,10 +34,6 @@ from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 USER_ID = 111
 CHAT_ID = 222
 
-SETTINGS_LOST = (
-    "❌ Настройки обработки не сохранились.\n"
-    "Отправьте запись заново — и снова выберите способ обработки."
-)
 TEMPLATE_NOT_CHOSEN = (
     "❌ Шаблон не выбран.\n"
     "Отправьте запись заново и выберите шаблон."
@@ -193,15 +190,15 @@ def _edited_texts(edits):
     return [c.args[1] for c in edits.await_args_list]
 
 
-async def _run_process_file(state, callback=None):
+async def _run_launch(state, callback=None):
     callback = callback or _make_callback()
-    await pc._process_file(callback, state, MagicMock())
+    await pc.start_processing_from_dialog(callback, state)
     await _settle()
     return callback
 
 
 # ---------------------------------------------------------------------------
-# _process_file: успешная постановка
+# Запуск из диалога: успешная постановка
 # ---------------------------------------------------------------------------
 
 
@@ -211,13 +208,13 @@ async def test_telegram_record_with_template_builds_full_request(env):
     participants = [{"name": "Иван Иванов", "role": "РП"}]
     await state.update_data(
         file_id="TG_FILE", file_name="rec.mp3",
-        template_id=7, use_smart_selection=False, llm_provider="openai",
+        template_id=7,
         participants_list=participants,
         meeting_topic="Бюджет", meeting_date="5 октября 2026", meeting_time="10:00",
         protocol_info={"meeting_agenda": "1. Итоги", "project_list": "Альфа"},
     )
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     assert len(e.queue.add_task_calls) == 1
     call = e.queue.add_task_calls[0]
@@ -243,10 +240,10 @@ async def test_external_record_goes_by_path_and_url_without_file_id(env):
     await state.update_data(
         file_id="STALE", file_path="temp/drive.mp3", file_name="drive.mp3",
         file_url="https://drive.google.com/file/d/abc/view", is_external_file=True,
-        template_id=3, llm_provider="openai",
+        template_id=3,
     )
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     r = e.queue.add_task_calls[0].request
     assert r.is_external_file is True
@@ -261,10 +258,10 @@ async def test_telegram_record_ignores_stale_external_path(env):
     state = _fresh_state()
     await state.update_data(
         file_id="TG", file_path="temp/old.mp3", file_name="rec.mp3",
-        template_id=3, llm_provider="openai",
+        template_id=3,
     )
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     r = e.queue.add_task_calls[0].request
     assert (r.file_id, r.file_path, r.is_external_file) == ("TG", None, False)
@@ -275,10 +272,10 @@ async def test_smart_selection_queues_template_zero(env):
     state = _fresh_state()
     await state.update_data(
         file_id="TG", file_name="rec.mp3",
-        template_id=0, use_smart_selection=True, llm_provider="openai",
+        template_id=0,
     )
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     assert e.queue.add_task_calls[0].request.template_id == 0
 
@@ -286,9 +283,9 @@ async def test_smart_selection_queues_template_zero(env):
 async def test_meeting_details_absent_stay_none(env):
     e = env()
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     r = e.queue.add_task_calls[0].request
     assert r.participants_list is None
@@ -299,10 +296,10 @@ async def test_meeting_details_absent_stay_none(env):
 async def test_successful_launch_dismisses_choice_shows_position_and_clears_state(env):
     e = env(positions=(2,), size=5)
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
     callback = _make_callback()
 
-    await _run_process_file(state, callback)
+    await _run_launch(state, callback)
 
     callback.message.delete.assert_awaited_once()
     assert e.factory.calls == [dict(
@@ -316,9 +313,9 @@ async def test_successful_launch_dismisses_choice_shows_position_and_clears_stat
 async def test_unknown_position_shown_as_zero(env):
     e = env(positions=(), size=1)
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     assert e.factory.calls[0]["initial_position"] == 0
 
@@ -326,11 +323,11 @@ async def test_unknown_position_shown_as_zero(env):
 async def test_failed_dismiss_does_not_stop_launch(env):
     e = env()
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
     callback = _make_callback()
     callback.message.delete = AsyncMock(side_effect=RuntimeError("message gone"))
 
-    await _run_process_file(state, callback)
+    await _run_launch(state, callback)
 
     assert len(e.queue.add_task_calls) == 1
     assert len(e.factory.calls) == 1
@@ -340,9 +337,9 @@ async def test_failed_dismiss_does_not_stop_launch(env):
 async def test_tracker_message_id_is_saved_to_queue_task(env):
     e = env(tracker_message_id=555)
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     assert e.repo.calls == [("TASK-1", 555)]
 
@@ -350,9 +347,9 @@ async def test_tracker_message_id_is_saved_to_queue_task(env):
 async def test_tracker_without_message_skips_db_update(env):
     e = env(tracker_message_id=None)
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     assert e.repo.calls == []
 
@@ -361,9 +358,9 @@ async def test_monitor_follows_position_until_task_leaves_queue(env):
     # Постановка видит 3, монитор — 2 и 1, затем задача уходит в работу.
     e = env(positions=(3, 2, 1), size=4)
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
     await _settle()
 
     tracker = e.factory.trackers[0]
@@ -372,7 +369,7 @@ async def test_monitor_follows_position_until_task_leaves_queue(env):
 
 
 # ---------------------------------------------------------------------------
-# _process_file: ветки ошибок
+# Запуск из диалога: ветки ошибок
 # ---------------------------------------------------------------------------
 
 
@@ -382,46 +379,34 @@ async def _assert_rejected(e, state, expected_text):
     assert await state.get_data() == {}
 
 
-async def test_missing_llm_provider_rejected(env):
+async def test_llm_provider_is_not_needed_in_state(env):
     e = env()
     state = _fresh_state()
     await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
-    await _assert_rejected(e, state, SETTINGS_LOST)
+    assert e.queue.add_task_calls[0].request.llm_provider == "openai"
 
 
 async def test_missing_template_rejected(env):
     e = env()
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3")
 
-    await _run_process_file(state)
-
-    await _assert_rejected(e, state, TEMPLATE_NOT_CHOSEN)
-
-
-async def test_template_zero_without_smart_flag_rejected(env):
-    e = env()
-    state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=0, llm_provider="openai")
-
-    await _run_process_file(state)
+    await _run_launch(state)
 
     await _assert_rejected(e, state, TEMPLATE_NOT_CHOSEN)
 
 
-async def test_smart_flag_without_template_id_fails_launch(env):
+async def test_smart_flag_without_template_id_is_not_a_choice(env):
     e = env()
     state = _fresh_state()
-    await state.update_data(
-        file_id="TG", file_name="rec.mp3", use_smart_selection=True, llm_provider="openai",
-    )
+    await state.update_data(file_id="TG", file_name="rec.mp3", use_smart_selection=True)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
-    await _assert_rejected(e, state, LAUNCH_FAILED)
+    await _assert_rejected(e, state, TEMPLATE_NOT_CHOSEN)
 
 
 @pytest.mark.parametrize("record", [
@@ -432,9 +417,9 @@ async def test_smart_flag_without_template_id_fails_launch(env):
 async def test_lost_telegram_record_rejected(env, record):
     e = env()
     state = _fresh_state()
-    await state.update_data(**record, template_id=2, llm_provider="openai")
+    await state.update_data(**record, template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     await _assert_rejected(e, state, RECORD_LOST_FILE)
 
@@ -447,29 +432,18 @@ async def test_lost_telegram_record_rejected(env, record):
 async def test_lost_external_record_rejected(env, record):
     e = env()
     state = _fresh_state()
-    await state.update_data(**record, is_external_file=True, template_id=2, llm_provider="openai")
+    await state.update_data(**record, is_external_file=True, template_id=2)
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     await _assert_rejected(e, state, RECORD_LOST_LINK)
 
 
-async def test_validation_order_settings_then_template_then_record(env):
-    e = env()
-    state = _fresh_state()
-    await state.update_data(template_id=None)
-
-    await _run_process_file(state)
-
-    await _assert_rejected(e, state, SETTINGS_LOST)
-
-
 async def test_template_checked_before_record(env):
     e = env()
-    state = _fresh_state()
-    await state.update_data(llm_provider="openai")
+    state = _fresh_state()  # ни шаблона, ни записи
 
-    await _run_process_file(state)
+    await _run_launch(state)
 
     await _assert_rejected(e, state, TEMPLATE_NOT_CHOSEN)
 
@@ -477,10 +451,10 @@ async def test_template_checked_before_record(env):
 async def test_queue_failure_reports_launch_failed(env):
     e = env(fail=RuntimeError("queue down"))
     state = _fresh_state()
-    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2, llm_provider="openai")
+    await state.update_data(file_id="TG", file_name="rec.mp3", template_id=2)
     callback = _make_callback()
 
-    await _run_process_file(state, callback)
+    await _run_launch(state, callback)
 
     assert _edited_texts(e.edits) == [LAUNCH_FAILED]
     assert await state.get_data() == {}
