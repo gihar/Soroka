@@ -105,16 +105,16 @@ class _FakeMessage:
         self.replies.append(text)
 
 
-async def _noop(**kwargs):
+async def _noop(*args, **kwargs):
     return None
 
 
-def _mapping_router(processing_service=None):
-    processing_service = processing_service or SimpleNamespace(
-        continue_processing_after_mapping_confirmation=_noop
+def _mapping_router(mapping_pause=None):
+    mapping_pause = mapping_pause or SimpleNamespace(
+        close=_noop
     )
     return cb.setup_speaker_mapping_callbacks(
-        SimpleNamespace(), SimpleNamespace(), processing_service
+        SimpleNamespace(), SimpleNamespace(), mapping_pause
     )
 
 

@@ -4,9 +4,10 @@
 свой публичный интерфейс (сам модуль детально протестирован в
 tests/test_completion_module.py):
 
-(а) основной путь (process_file): владеет проверкой кеша, делегированием
-    _process_file_optimized и паузой на карточке; кеш/история/доставка/статус
-    уехали в единый хвост. Кеш-хит доставляется тем же хвостом.
+(а) основной путь (process_file): владеет проверкой кеша и делегированием
+    _process_file_optimized; кеш/история/доставка/статус уехали в единый хвост.
+    Кеш-хит доставляется тем же хвостом. Пауза на карточке — отдельный модуль
+    (tests/test_mapping_pause.py).
 (б) возобновление: кеширует безусловно после успешной генерации и проставляет
     history_id ДО доставки (кнопки под протоколом) — изменения по ADR-0003.
 (в) перегенерация: полная сборка результата и страховка замены спикеров —
@@ -34,6 +35,7 @@ from src.models.processing import (  # noqa: E402
     TranscriptionResult,
 )
 from src.services.mapping_session import MappingSession  # noqa: E402
+from src.services.processing.run_outcome import RunOutcome  # noqa: E402
 
 
 def _canned_result() -> ProcessingResult:
@@ -90,9 +92,10 @@ async def test_cache_hit_delivers_and_records_history(tmp_path, monkeypatch):
     import src.services.processing.completion as completion
     import src.services.processing.processing_service as pss
     import src.services.result_sender as rs
+    from src.performance.memory_management import memory_optimizer
 
-    service = pss.ProcessingService.__new__(pss.ProcessingService)
-    service._ensure_monitoring_started = AsyncMock()
+    monkeypatch.setattr(memory_optimizer, "is_optimizing", True)
+    service = pss.ProcessingService()
     service.llm_gen = SimpleNamespace(optimized_llm_generation=AsyncMock())
     service.formatter = SimpleNamespace()
     service.history = SimpleNamespace(
@@ -124,11 +127,12 @@ async def test_cache_hit_delivers_and_records_history(tmp_path, monkeypatch):
         bot=SimpleNamespace(), chat_id=1, complete_all=AsyncMock()
     )
 
-    result = await service.process_file(
+    outcome = await service.process_file(
         _external_request(tmp_path), progress_tracker=progress_tracker, task_id="T1"
     )
 
-    assert result is cached
+    assert outcome.paused is False
+    assert outcome.result is cached
     # Свежая история проставлена ДО доставки (её id виден доставке → кнопки).
     # Инвариант: кеш-хит пишет НОВУЮ строку истории на каждой переотправке.
     service.history.save_processing_history.assert_awaited_once()
@@ -147,7 +151,7 @@ async def test_fresh_miss_delegates_to_optimized(tmp_path, monkeypatch):
 
     service = pss.ProcessingService.__new__(pss.ProcessingService)
     service._ensure_monitoring_started = AsyncMock()
-    canned = _canned_result()
+    canned = RunOutcome.ready(_canned_result())
     service._process_file_optimized = AsyncMock(return_value=canned)
     service.history = SimpleNamespace(
         calculate_file_hash=AsyncMock(return_value="deadbeef"),
@@ -161,28 +165,6 @@ async def test_fresh_miss_delegates_to_optimized(tmp_path, monkeypatch):
 
     service._process_file_optimized.assert_awaited_once()
     assert result is canned
-
-
-@pytest.mark.asyncio
-async def test_pause_sentinel_returns_none(tmp_path, monkeypatch):
-    """Пауза на карточке сопоставления: _process_file_optimized → None, и
-    process_file возвращает None (гейт карточки — снаружи хвоста, ADR-0003)."""
-    import src.services.processing.processing_service as pss
-
-    service = pss.ProcessingService.__new__(pss.ProcessingService)
-    service._ensure_monitoring_started = AsyncMock()
-    service._process_file_optimized = AsyncMock(return_value=None)
-    service.history = SimpleNamespace(
-        calculate_file_hash=AsyncMock(return_value="deadbeef"),
-        generate_result_cache_key=lambda request, file_hash: "cache-key",
-    )
-    _patch_process_file_env(monkeypatch, pss, cached=None)
-
-    result = await service.process_file(
-        _external_request(tmp_path), progress_tracker=None, task_id="T1"
-    )
-
-    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -207,17 +189,41 @@ def _make_resume_session(*, cache_key, task_id) -> MappingSession:
     )
 
 
-def _stub_resume_deps(service) -> None:
-    """Зависимости генерации/учёта для возобновления через единый хвост."""
-    service.llm_gen = SimpleNamespace(
-        optimized_llm_generation=AsyncMock(return_value={"meeting_title": "Планёрка"}),
-        resolve_model_display_name=AsyncMock(return_value="GPT"),
+def _resume_pause(history_id=99):
+    """Пауза на карточке с фейковыми зависимостями хвоста."""
+    from src.services.mapping_session import MappingSessionStore
+    from src.services.processing.completion import CompletionDeps
+    from src.services.processing.mapping_pause import MappingPause
+
+    return MappingPause(
+        deps=CompletionDeps(
+            llm_gen=SimpleNamespace(
+                optimized_llm_generation=AsyncMock(return_value={"meeting_title": "Планёрка"}),
+                resolve_model_display_name=AsyncMock(return_value="GPT"),
+            ),
+            formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол"),
+            history=SimpleNamespace(
+                save_processing_history=AsyncMock(return_value=history_id),
+                cleanup_temp_file=AsyncMock(),
+            ),
+        ),
+        store=MappingSessionStore(),
     )
-    service.formatter = SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол")
-    service.history = SimpleNamespace(
-        save_processing_history=AsyncMock(return_value=99),
-        cleanup_temp_file=AsyncMock(),
-    )
+
+
+class _Chat:
+    """Канал паузы: трекер-заглушка и доставка с заданным исходом."""
+
+    def __init__(self, delivered=True):
+        self.delivered = delivered
+        self.seen = []
+
+    async def start_tracker(self):
+        return SimpleNamespace(start_stage=AsyncMock(), complete_all=AsyncMock())
+
+    async def deliver(self, request, result, tracker):
+        self.seen.append(result.history_id)
+        return self.delivered
 
 
 @pytest.mark.asyncio
@@ -226,31 +232,18 @@ async def test_resume_caches_unconditionally_after_generation(monkeypatch):
     генерации НЕЗАВИСИМО от доставки — раньше кешировало ТОЛЬКО при доставке.
     Повторная загрузка того же файла попадёт в кеш и переотправится."""
     import src.services.processing.completion as completion
-    import src.services.processing.processing_service as pss
-    import src.services.result_sender as rs
-    import src.ux.progress_tracker as pt_mod
+    from src.services.processing.mapping_pause import CloseReason
 
     async def run(delivered: bool):
-        service = pss.ProcessingService.__new__(pss.ProcessingService)
-        _stub_resume_deps(service)
-
         cache = SimpleNamespace(set=AsyncMock())
         monkeypatch.setattr(completion, "performance_cache", cache)
         monkeypatch.setattr(
             completion.queue_repo, "update_queue_task_status", AsyncMock()
         )
-        monkeypatch.setattr(
-            pt_mod.ProgressFactory,
-            "create_file_processing_tracker",
-            AsyncMock(return_value=SimpleNamespace(start_stage=AsyncMock())),
-        )
-        monkeypatch.setattr(
-            rs, "send_result_to_user", AsyncMock(return_value=delivered)
-        )
 
-        await service.continue_processing_after_mapping_confirmation(
-            session=_make_resume_session(cache_key="ck", task_id="t1"),
-            confirmed_mapping={}, bot=SimpleNamespace(), chat_id=1,
+        await _resume_pause().close(
+            _make_resume_session(cache_key="ck", task_id="t1"),
+            CloseReason.CONFIRMED, channel=_Chat(delivered),
         )
         return cache
 
@@ -265,13 +258,7 @@ async def test_resume_sets_history_id_before_delivery(monkeypatch):
     результат — возобновлённый протокол теперь несёт кнопки действий. Раньше
     история писалась ПОСЛЕ доставки, её id отбрасывался, и кнопок не было."""
     import src.services.processing.completion as completion
-    import src.services.processing.processing_service as pss
-    import src.services.result_sender as rs
-    import src.ux.progress_tracker as pt_mod
-
-    service = pss.ProcessingService.__new__(pss.ProcessingService)
-    _stub_resume_deps(service)
-    service.history.save_processing_history = AsyncMock(return_value=555)
+    from src.services.processing.mapping_pause import CloseReason
 
     monkeypatch.setattr(
         completion, "performance_cache", SimpleNamespace(set=AsyncMock())
@@ -279,27 +266,15 @@ async def test_resume_sets_history_id_before_delivery(monkeypatch):
     monkeypatch.setattr(
         completion.queue_repo, "update_queue_task_status", AsyncMock()
     )
-    monkeypatch.setattr(
-        pt_mod.ProgressFactory,
-        "create_file_processing_tracker",
-        AsyncMock(return_value=SimpleNamespace(start_stage=AsyncMock())),
-    )
+    chat = _Chat()
 
-    seen = {}
-
-    async def fake_send(bot, chat_id, user_id, request, result, progress_tracker=None):
-        seen["history_id"] = result.history_id
-        return True
-
-    monkeypatch.setattr(rs, "send_result_to_user", fake_send)
-
-    await service.continue_processing_after_mapping_confirmation(
-        session=_make_resume_session(cache_key="ck", task_id="t1"),
-        confirmed_mapping={}, bot=SimpleNamespace(), chat_id=1,
+    await _resume_pause(history_id=555).close(
+        _make_resume_session(cache_key="ck", task_id="t1"),
+        CloseReason.CONFIRMED, channel=chat,
     )
 
     # Доставка увидела history_id — значит история записана ДО неё.
-    assert seen["history_id"] == 555
+    assert chat.seen == [555]
 
 
 # ---------------------------------------------------------------------------

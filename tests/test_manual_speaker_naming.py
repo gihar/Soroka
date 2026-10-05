@@ -26,6 +26,7 @@ from src.services.mapping_session import (  # noqa: E402
     mapping_sessions,
 )
 from src.services.participants_service import participants_service  # noqa: E402
+from src.services.processing.mapping_pause import CloseReason  # noqa: E402
 from src.ux.speaker_mapping_ui import create_mapping_keyboard  # noqa: E402
 
 
@@ -82,6 +83,18 @@ class _FakeState:
     async def clear(self):
         self._state = None
         self._data = {}
+
+
+class _PauseSpy:
+    """Пауза на карточке: записывает, с каким поводом её закрыли кнопки."""
+
+    def __init__(self, record):
+        self.record = record
+
+    async def close(self, session, reason, *, channel):
+        self.record.append(
+            {"session": session, "reason": reason, "chat_id": channel.chat_id}
+        )
 
 
 class _FakeCallback:
@@ -467,15 +480,9 @@ async def test_registered_sm_skip_peeks_and_shows_subview(monkeypatch):
     monkeypatch.setattr(cb, "edit_card", fake_edit_card)
 
     continued = []
-
-    async def fake_continue(**kwargs):
-        continued.append(kwargs)
-
-    processing_service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=fake_continue
-    )
+    mapping_pause = _PauseSpy(continued)
     router = cb.setup_speaker_mapping_callbacks(
-        SimpleNamespace(), SimpleNamespace(), processing_service
+        SimpleNamespace(), SimpleNamespace(), mapping_pause
     )
     handler = _registered_handler(router, SmSkip)
 
@@ -502,15 +509,9 @@ async def test_registered_sm_skip_confirm_takes_and_continues(monkeypatch):
     monkeypatch.setattr(cb, "safe_edit_text", fake_edit_text)
 
     continued = []
-
-    async def fake_continue(**kwargs):
-        continued.append(kwargs)
-
-    processing_service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=fake_continue
-    )
+    mapping_pause = _PauseSpy(continued)
     router = cb.setup_speaker_mapping_callbacks(
-        SimpleNamespace(), SimpleNamespace(), processing_service
+        SimpleNamespace(), SimpleNamespace(), mapping_pause
     )
     handler = _registered_handler(router, SmSkipConfirm)
 
@@ -519,7 +520,7 @@ async def test_registered_sm_skip_confirm_takes_and_continues(monkeypatch):
 
     await handler(callback, SmSkipConfirm(user_id=42), _FakeState())
 
-    assert continued[-1]["confirmed_mapping"] == {}
+    assert continued[-1]["reason"] is CloseReason.SKIPPED
     assert mapping_sessions.peek(42) is None  # take изъял
 
 
@@ -535,22 +536,16 @@ async def test_finish_skip_continues_with_empty_mapping(monkeypatch):
     monkeypatch.setattr(cb, "safe_edit_text", fake_edit_text)
 
     continued = []
-
-    async def fake_continue(**kwargs):
-        continued.append(kwargs)
-
-    processing_service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=fake_continue
-    )
+    mapping_pause = _PauseSpy(continued)
 
     session = _make_session(participants=None, speaker_mapping={})
     callback = _FakeCallback("sm_skipok:42", user_id=42, message=_FakeMessage(42))
     state = _FakeState()
     await state.set_state("some-state")
 
-    await cb._finish_skip(callback, state, session, processing_service)
+    await cb._finish_skip(callback, state, session, mapping_pause)
 
-    assert continued[-1]["confirmed_mapping"] == {}
+    assert continued[-1]["reason"] is CloseReason.SKIPPED
     assert continued[-1]["session"] is session
     assert await state.get_state() is None
 
@@ -570,20 +565,14 @@ async def test_skip_or_confirm_shows_subview_and_keeps_session(monkeypatch):
     monkeypatch.setattr(cb, "edit_card", fake_edit_card)
 
     continued = []
-
-    async def fake_continue(**kwargs):
-        continued.append(kwargs)
-
-    processing_service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=fake_continue
-    )
+    mapping_pause = _PauseSpy(continued)
 
     session = _make_session(participants=None, speaker_mapping={})
     mapping_sessions.save(42, session)
 
     callback = _FakeCallback("sm_skip:42", user_id=42, message=_FakeMessage(42))
 
-    await cb._skip_or_confirm(callback, _FakeState(), 42, session, processing_service)
+    await cb._skip_or_confirm(callback, _FakeState(), 42, session, mapping_pause)
 
     content, keyboard = shown[-1]
     assert "Участник" in content.to_plain()
@@ -608,13 +597,7 @@ async def test_skip_or_confirm_continues_without_friction(monkeypatch):
     monkeypatch.setattr(cb, "edit_card", fake_edit_card)
 
     continued = []
-
-    async def fake_continue(**kwargs):
-        continued.append(kwargs)
-
-    processing_service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=fake_continue
-    )
+    mapping_pause = _PauseSpy(continued)
 
     session = _make_session(
         participants=None, speaker_mapping={"SPEAKER_1": "Иван"}
@@ -623,65 +606,10 @@ async def test_skip_or_confirm_continues_without_friction(monkeypatch):
 
     callback = _FakeCallback("sm_skip:42", user_id=42, message=_FakeMessage(42))
 
-    await cb._skip_or_confirm(callback, _FakeState(), 42, session, processing_service)
+    await cb._skip_or_confirm(callback, _FakeState(), 42, session, mapping_pause)
 
-    assert continued[-1]["confirmed_mapping"] == {}
+    assert continued[-1]["reason"] is CloseReason.SKIPPED
     assert continued[-1]["session"] is session
     assert mapping_sessions.peek(42) is None  # take изъял
 
 
-@pytest.mark.asyncio
-async def test_confirmation_pause_defaults_participants_and_stores_card(monkeypatch):
-    """Без списка участников карточка всё равно показывается (participants=[]),
-    пауза происходит, ссылка на карточку кладётся в сессию для правки на месте."""
-    import types
-
-    import src.utils.telegram_safe as ts
-    import src.ux.speaker_audio_preview as preview
-    import src.ux.speaker_mapping_ui as ui
-    from src.services.processing.processing_service import ProcessingService
-
-    captured = {}
-    sentinel_card = _FakeMessage(42)
-
-    async def fake_show(**kwargs):
-        captured["participants"] = kwargs.get("participants")
-        return sentinel_card
-
-    async def fake_previews(**kwargs):
-        return set()
-
-    async def fake_edit(message, text, **kwargs):
-        return True
-
-    monkeypatch.setattr(ui, "show_mapping_confirmation", fake_show)
-    monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_previews)
-    monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
-
-    service = ProcessingService.__new__(ProcessingService)
-
-    request = ProcessingRequest(
-        user_id=42, file_name="a.mp3", llm_provider="openai",
-        participants_list=None,
-    )
-    transcription = TranscriptionResult(
-        transcription="текст", diarization=_diarization_two_speakers(),
-        compression_info=None,
-    )
-    metrics = ProcessingMetrics(
-        file_name="a.mp3", user_id=42, start_time=datetime.now()
-    )
-    progress_tracker = types.SimpleNamespace(
-        update_task=None, message=_FakeMessage(42),
-        bot=SimpleNamespace(), chat_id=42,
-    )
-
-    result = await service._handle_speaker_mapping_confirmation(
-        request, transcription, {}, None, None, metrics, progress_tracker,
-    )
-
-    assert result is None  # обработка приостановлена
-    assert captured["participants"] == []
-    session = mapping_sessions.peek(42)
-    assert session is not None
-    assert session.confirmation_message is sentinel_card

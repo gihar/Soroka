@@ -76,7 +76,7 @@ def _session(
 
 
 class FakeChat:
-    """Запись того, что ушло пользователю в чат."""
+    """Чат пользователя — канал паузы: записывает всё, что ушло пользователю."""
 
     def __init__(self):
         self.chat_id = 42
@@ -93,136 +93,98 @@ class FakeChat:
         self.previews_raise = False
         self.deliver_ok = True
 
+    async def silence_tracker(self):
+        self.events.append("silence")
+
+    async def send_previews(self, **kwargs):
+        self.events.append("previews")
+        self.previews.append(kwargs)
+        if self.previews_raise:
+            raise RuntimeError("фрагменты не нарезались")
+        return set(self.previews_result)
+
+    async def show_card(self, **kwargs):
+        self.events.append("card")
+        self.cards.append(kwargs)
+        return self.card_message
+
+    async def say(self, text):
+        self.events.append("say")
+        self.said.append(text)
+
+    async def start_tracker(self):
+        tracker = _resume_tracker()
+        self.resume_trackers.append(tracker)
+        return tracker
+
+    async def deliver(self, request, result, tracker):
+        self.events.append("deliver")
+        self.delivered.append(result)
+        return self.deliver_ok
+
+    async def report_failure(self, error):
+        self.events.append("failure")
+        self.failures.append(error)
+
 
 def _resume_tracker():
-    return SimpleNamespace(
-        start_stage=AsyncMock(), complete_all=AsyncMock(),
-        bot=SimpleNamespace(), chat_id=42,
-    )
+    return SimpleNamespace(start_stage=AsyncMock(), complete_all=AsyncMock())
 
 
-class LegacyDriver:
-    """Старый интерфейс: ProcessingService + mapping_timeout + патчи модулей."""
+class PauseDriver:
+    """Модуль паузы с фейковым чатом; таймеры не стартуют сами — их зовёт тест."""
 
-    def __init__(self, monkeypatch, chat, store, deps):
-        import src.services.mapping_session as ms
-        import src.services.mapping_timeout as mt
-        import src.services.processing.processing_service as pss
-        import src.services.result_sender as rs
-        import src.utils.telegram_safe as ts
-        import src.ux.progress_tracker as pt_mod
-        import src.ux.speaker_audio_preview as preview
-        import src.ux.speaker_mapping_ui as ui
-        from src.services.processing.processing_service import ProcessingService
-
+    def __init__(self, chat, store, deps):
         self.chat = chat
         self.store = store
+        self.deps = deps
         self.scheduled = []
-        self.tracker_message = SimpleNamespace(name="трекер")
-
-        monkeypatch.setattr(ms, "mapping_sessions", store)
-
-        async def fake_edit(message, text, **kwargs):
-            if message is self.tracker_message:
-                chat.events.append("silence")
-            return True
-
-        monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
-
-        async def fake_previews(**kwargs):
-            chat.events.append("previews")
-            chat.previews.append(kwargs)
-            if chat.previews_raise:
-                raise RuntimeError("фрагменты не нарезались")
-            return set(chat.previews_result)
-
-        monkeypatch.setattr(preview, "send_speaker_audio_previews", fake_previews)
-
-        async def fake_show(**kwargs):
-            chat.events.append("card")
-            chat.cards.append(kwargs)
-            return chat.card_message
-
-        monkeypatch.setattr(ui, "show_mapping_confirmation", fake_show)
-
-        async def fake_failure_notice(bot=None, chat_id=None, text=None, **kwargs):
-            chat.events.append("failure")
-            chat.failures.append(text)
-
-        monkeypatch.setattr(pss, "safe_send_message", fake_failure_notice)
-
-        async def fake_tracker(bot=None, chat_id=None, *args, **kwargs):
-            tracker = _resume_tracker()
-            chat.resume_trackers.append(tracker)
-            return tracker
-
-        monkeypatch.setattr(
-            pt_mod.ProgressFactory, "create_file_processing_tracker", fake_tracker
-        )
-
-        async def fake_deliver(**kwargs):
-            chat.events.append("deliver")
-            chat.delivered.append(kwargs["result"])
-            return chat.deliver_ok
-
-        monkeypatch.setattr(rs, "send_result_to_user", fake_deliver)
-
-        async def bot_send(chat_id=None, text=None, **kwargs):
-            chat.events.append("say")
-            chat.said.append(text)
-
-        self.bot = SimpleNamespace(send_message=bot_send)
-
-        proxy = SimpleNamespace(
-            CancelledError=asyncio.CancelledError,
-            gather=asyncio.gather,
-            create_task=self.scheduled.append,
-        )
-        monkeypatch.setattr(pss, "asyncio", proxy)
         self.delay = 0
-        monkeypatch.setattr(mt, "auto_deliver_delay_seconds", lambda store: self.delay)
 
-        self.service = ProcessingService()
-        self.service.llm_gen = deps.llm_gen
-        self.service.formatter = deps.formatter
-        self.service.history = deps.history
+    def _pause(self):
+        from src.services.processing.completion import CompletionDeps
+        from src.services.processing.mapping_pause import MappingPause
 
-    def _tracker(self):
-        return SimpleNamespace(
-            update_task=None, message=self.tracker_message,
-            bot=self.bot, chat_id=self.chat.chat_id,
+        return MappingPause(
+            deps=CompletionDeps(
+                llm_gen=self.deps.llm_gen,
+                formatter=self.deps.formatter,
+                history=self.deps.history,
+            ),
+            store=self.store,
+            delay_seconds=self.delay,
+            schedule=self.scheduled.append,
         )
 
     async def open(self, session, *, with_tracker=True) -> bool:
         """Открыть паузу. True — обработка приостановлена на карточке."""
-        result = await self.service._handle_speaker_mapping_confirmation(
-            session.request, session.transcription_result,
-            session.speaker_mapping, session.meeting_type,
-            session.temp_file_path, session.metrics,
-            self._tracker() if with_tracker else None,
-            cache_key=session.cache_key, task_id=session.task_id,
-            template=session.template,
+        return await self._pause().open(
+            session, channel=self.chat if with_tracker else None
         )
-        return result is None
 
     async def close(self, session, reason: str):
-        mapping = {} if reason == "skipped" else session.speaker_mapping
-        return await self.service.continue_processing_after_mapping_confirmation(
-            session=session, confirmed_mapping=mapping,
-            bot=self.bot, chat_id=self.chat.chat_id,
+        from src.services.processing.mapping_pause import CloseReason
+
+        return await self._pause().close(
+            session, CloseReason(reason), channel=self.chat
         )
 
     async def run_pipeline(self, request, *, transcription, monkeypatch) -> bool:
         """Прогнать конвейер записи. True — прогон встал на паузу."""
         import src.services.processing.processing_service as pss
+        from src.services.processing.processing_service import ProcessingService
 
+        service = ProcessingService(
+            mapping_pause=self._pause(), channel_for=lambda tracker: self.chat,
+        )
+        service.llm_gen = self.deps.llm_gen
+        service.formatter = self.deps.formatter
+        service.history = self.deps.history
         _quiet_pipeline(monkeypatch, pss)
-        _fake_pipeline_world(self.service, transcription)
-        tracker = self._tracker()
-        tracker.start_stage = AsyncMock()
-        tracker.complete_all = AsyncMock()
-        result = await self.service.process_file(request, tracker, task_id="task-9")
-        return result is None
+        _fake_pipeline_world(service, transcription)
+        tracker = SimpleNamespace(start_stage=AsyncMock(), complete_all=AsyncMock())
+        outcome = await service.process_file(request, tracker, task_id="task-9")
+        return outcome.paused
 
     async def fire_timers(self):
         while self.scheduled:
@@ -339,22 +301,8 @@ def admin(monkeypatch):
 
 
 @pytest.fixture
-def pause(monkeypatch, chat, store, generation, queue, admin):
-    import src.utils.telegram_safe as ts
-
-    driver = LegacyDriver(monkeypatch, chat, store, generation)
-
-    # Уведомление «карточка не ушла» — обычное сообщение в чат пользователя.
-    routed = ts.safe_send_message
-
-    async def say_or_route(bot=None, chat_id=None, text=None, *args, **kwargs):
-        if bot is _ADMIN_BOT:
-            return await routed(bot, chat_id, text, *args, **kwargs)
-        chat.events.append("say")
-        chat.said.append(text)
-        return SimpleNamespace(message_id=1)
-
-    monkeypatch.setattr(ts, "safe_send_message", say_or_route)
+def pause(chat, store, generation, queue, admin):
+    driver = PauseDriver(chat, store, generation)
     yield driver
     for timer in driver.timers():  # невыстреленные таймеры не текут в другие тесты
         timer.close()
@@ -611,7 +559,7 @@ async def test_timer_failure_still_reaches_the_user_and_the_admin(
 
 
 def test_timer_fires_before_the_store_forgets_the_session():
-    from src.services.mapping_timeout import auto_deliver_delay_seconds
+    from src.services.processing.mapping_pause import auto_deliver_delay_seconds
 
     assert auto_deliver_delay_seconds(MappingSessionStore(ttl_seconds=3600)) < 3600
 
@@ -722,36 +670,13 @@ async def test_processing_error_passes_through_unchanged(pause, generation):
     assert caught.value is original
 
 
-# ---------------------------------------------------------------------------
-# Трекер основного прогона замолкает на паузе
-# ---------------------------------------------------------------------------
+async def test_timer_delivers_even_after_the_ttl_passed(chat, generation, queue, admin):
+    """Срок хранения вышел, но таймер всё равно доводит запись: в сессии
+    готовая расшифровка, и протокол обязан доехать (критика v10)."""
+    driver = PauseDriver(chat, MappingSessionStore(ttl_seconds=0), generation)
+    await driver.open(_session())
+    await asyncio.sleep(0.01)  # TTL позади
 
+    await driver.fire_timers()
 
-async def test_pause_stops_tracker_autoupdates_and_rewrites_its_message(
-    pause, monkeypatch,
-):
-    import src.utils.telegram_safe as ts
-
-    edits = []
-
-    async def fake_edit(message, text, **kwargs):
-        edits.append((message, text))
-        return True
-
-    monkeypatch.setattr(ts, "safe_edit_text", fake_edit)
-
-    async def forever():
-        await asyncio.sleep(3600)
-
-    update_task = asyncio.ensure_future(forever())
-    tracker = pause._tracker()
-    tracker.update_task = update_task
-    pause._tracker = lambda: tracker
-
-    await pause.open(_session())
-    await asyncio.sleep(0)
-
-    assert tracker.update_task is None
-    assert update_task.cancelled()
-    assert edits[0][0] is pause.tracker_message
-    assert "Транскрипция завершена" in edits[0][1]
+    assert len(chat.delivered) == 1

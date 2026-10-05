@@ -18,13 +18,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
-from src.services import ProcessingService, TemplateService, UserService
+from src.services import TemplateService, UserService
 from src.services.error_presentation import resume_failure_message
 from src.services.mapping_session import MappingSession, mapping_sessions
 from src.services.participants_service import (
     is_valid_manual_name,
     participants_service,
 )
+from src.services.processing.mapping_pause import CloseReason, MappingPause
+from src.services.processing.pause_channel import TelegramPauseChannel
 from src.utils.telegram_safe import safe_edit_text
 from src.utils.url_detection import contains_url
 from src.ux.card_sender import edit_card
@@ -76,6 +78,11 @@ def _stale_card_text(user_id: int) -> str:
     return _SESSION_GONE_TEXT
 
 
+def _chat_of(callback: CallbackQuery) -> TelegramPauseChannel:
+    """Канал паузы — чат, в котором нажата кнопка карточки."""
+    return TelegramPauseChannel(callback.bot, callback.message.chat.id)
+
+
 def _skip_needs_confirmation(session: MappingSession) -> bool:
     """Стоит ли перед пропуском переспросить.
 
@@ -93,24 +100,20 @@ async def _finish_skip(
     callback: CallbackQuery,
     state: FSMContext,
     session: MappingSession,
-    processing_service: ProcessingService,
+    mapping_pause: MappingPause,
 ) -> None:
     """Финал пустого пропуска: правка сообщения, очистка FSM, генерация без имён.
 
     Общий хвост прямого пропуска без трения и подтверждённого пропуска
     (``sm_skipok``). Сессия уже изъята вызывающим (take) — под-вид с ней закрыт,
-    ``editing_speaker`` неактуален; здесь только продолжаем обработку с пустым
-    сопоставлением.
+    ``editing_speaker`` неактуален; здесь только закрываем паузу пропуском.
     """
     await safe_edit_text(
         callback.message, _SKIP_CONTINUED_TEXT, parse_mode="HTML"
     )
     await state.clear()
-    await processing_service.continue_processing_after_mapping_confirmation(
-        session=session,
-        confirmed_mapping={},
-        bot=callback.bot,
-        chat_id=callback.message.chat.id,
+    await mapping_pause.close(
+        session, CloseReason.SKIPPED, channel=_chat_of(callback)
     )
 
 
@@ -119,7 +122,7 @@ async def _skip_or_confirm(
     state: FSMContext,
     user_id: int,
     session: MappingSession,
-    processing_service: ProcessingService,
+    mapping_pause: MappingPause,
 ) -> None:
     """Тело ``sm_skip``: развилка пропуска.
 
@@ -140,7 +143,7 @@ async def _skip_or_confirm(
     taken = mapping_sessions.take(user_id)
     if taken is None:
         return
-    await _finish_skip(callback, state, taken, processing_service)
+    await _finish_skip(callback, state, taken, mapping_pause)
 
 
 def card_handler(
@@ -426,8 +429,16 @@ async def _capturing_speaker_name(message: Message, state: FSMContext = None) ->
     return session is not None
 
 
-def setup_speaker_mapping_callbacks(user_service: UserService, template_service: TemplateService, processing_service: ProcessingService) -> Router:
-    """Настройка обработчиков callback запросов для сопоставления спикеров"""
+def setup_speaker_mapping_callbacks(
+    user_service: UserService,
+    template_service: TemplateService,
+    mapping_pause: MappingPause,
+) -> Router:
+    """Настройка обработчиков callback запросов для сопоставления спикеров.
+
+    Кнопки «Подтвердить» и «Пропустить» закрывают паузу на карточке
+    (``mapping_pause``) — сервис обработки они не трогают.
+    """
     router = Router()
 
     # Прямой ввод имени спикера (ADR-0006): message-хендлер приёма имени, пока
@@ -516,12 +527,9 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         # Очищаем состояние FSM
         await state.clear()
 
-        # Продолжаем обработку — сессия передаётся владением
-        await processing_service.continue_processing_after_mapping_confirmation(
-            session=session,
-            confirmed_mapping=session.speaker_mapping,
-            bot=callback.bot,
-            chat_id=callback.message.chat.id
+        # Закрываем паузу подтверждением — сессия передаётся владением
+        await mapping_pause.close(
+            session, CloseReason.CONFIRMED, channel=_chat_of(callback)
         )
 
     @router.callback_query(SmSkip.filter())
@@ -538,7 +546,7 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         Тост не обещаем: под-вид подтверждения не должен выглядеть как «продолжаю».
         """
         await _skip_or_confirm(
-            callback, state, user_id, session, processing_service
+            callback, state, user_id, session, mapping_pause
         )
 
     @router.callback_query(SmSkipConfirm.filter())
@@ -556,6 +564,6 @@ def setup_speaker_mapping_callbacks(user_service: UserService, template_service:
         Каркас атомарно изъял сессию (take): повторный тап получит None и не
         запустит второе возобновление.
         """
-        await _finish_skip(callback, state, session, processing_service)
+        await _finish_skip(callback, state, session, mapping_pause)
 
     return router

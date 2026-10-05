@@ -12,8 +12,9 @@ stdlib logging; loguru её не знает, но ЛЮБОЙ kwarg включа�
 текст ошибки с сырым payload ``{'error': {...}}``, и ``str.format`` читает это как
 placeholder с именем ``'error'`` → KeyError.
 
-KeyError вылетал ИЗ вызова логгера, обрывая ``_handle_resume_failure`` до
-``_mark_queue_task`` и до уведомления пользователя: задача навсегда оставалась в
+KeyError вылетал ИЗ вызова логгера, обрывая обработчик сбоя возобновления (ныне
+единая политика сбоя ``failure_policy.fail_processing``) до статуса задачи и до
+уведомления пользователя: задача навсегда оставалась в
 статусе ``processing``, а человек получал общую отписку обёртки.
 
 Тот же ``exc_info=True`` объясняет, почему за 14 дней в проде не появилось ни
@@ -73,36 +74,33 @@ def test_logging_error_text_with_braces_does_not_raise():
 # Путь возобновления: сообщение пользователю и статус задачи
 # ---------------------------------------------------------------------------
 
-def _service():
-    import src.services.processing.processing_service as pss
-
-    return pss.ProcessingService.__new__(pss.ProcessingService)
-
-
 async def _run_resume_failure(monkeypatch, error: Exception):
-    """Прогнать _handle_resume_failure, вернув (тексты пользователю, статус задачи)."""
-    import src.services.processing.processing_service as pss
+    """Прогнать политику сбоя с каналом паузы: (тексты пользователю, статус задачи)."""
+    from src.database import queue_repo
+    from src.services import provider_failure
+    from src.services.processing.failure_policy import fail_processing
+    from src.services.processing.pause_channel import TelegramPauseChannel
+
+    marked = {}
+
+    async def fake_mark(task_id, status, *args, error_message=None, **kwargs):
+        marked["status"] = status
+
+    monkeypatch.setattr(queue_repo, "update_queue_task_status", fake_mark)
+    monkeypatch.setattr(provider_failure, "report_llm_failure", AsyncMock())
+
+    import src.utils.telegram_safe as ts
 
     sent = []
 
     async def fake_send(bot=None, chat_id=None, text=None, **kw):
         sent.append(text)
-        return SimpleNamespace(message_id=1)
 
-    monkeypatch.setattr(pss, "safe_send_message", fake_send)
-
-    marked = {}
-
-    async def fake_mark(self, task_id, status, error_message=None):
-        marked["status"] = status
-
-    monkeypatch.setattr(pss.ProcessingService, "_mark_queue_task", fake_mark)
-
-    service = _service()
-    with pytest.raises(Exception):  # обработчик всегда пробрасывает наружу
-        await service._handle_resume_failure(
-            error, user_id=1, chat_id=1, bot=SimpleNamespace(), task_id="t1"
-        )
+    monkeypatch.setattr(ts, "safe_send_message", fake_send)
+    await fail_processing(
+        error, task_id="t1",
+        notify_user=TelegramPauseChannel(bot=SimpleNamespace(), chat_id=1).report_failure,
+    )
     return sent, marked
 
 
@@ -178,44 +176,45 @@ async def test_resume_other_errors_keep_their_hint(monkeypatch):
 
 
 async def test_resume_402_end_to_end_survives_logging(monkeypatch):
-    """Полный путь возобновления при 402: наружу ProcessingError, не KeyError.
+    """Полный путь закрытия паузы при 402: наружу ProcessingError, не KeyError.
 
     Именно здесь KeyError вылетал из логгера и обрывал обработчик.
     """
-    import src.services.processing.completion as completion
-    import src.services.processing.processing_service as pss
-    import src.ux.progress_tracker as pt_mod
+    from src.database import queue_repo
     from src.exceptions.processing import LLMInsufficientCreditsError, ProcessingError
     from src.models.processing import ProcessingRequest, TranscriptionResult
-    from src.services.mapping_session import MappingSession
+    from src.services import provider_failure
+    from src.services.mapping_session import MappingSession, MappingSessionStore
+    from src.services.processing.completion import CompletionDeps
+    from src.services.processing.mapping_pause import CloseReason, MappingPause
 
-    service = _service()
-    service.llm_gen = SimpleNamespace(
-        optimized_llm_generation=AsyncMock(
-            side_effect=LLMInsufficientCreditsError(
-                RAW_402, provider="openai", model="gpt-5"
-            )
+    pause = MappingPause(
+        deps=CompletionDeps(
+            llm_gen=SimpleNamespace(
+                optimized_llm_generation=AsyncMock(
+                    side_effect=LLMInsufficientCreditsError(
+                        RAW_402, provider="openai", model="gpt-5"
+                    )
+                ),
+                resolve_model_display_name=AsyncMock(return_value="GPT"),
+            ),
+            formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# П"),
+            history=SimpleNamespace(
+                save_processing_history=AsyncMock(return_value=1),
+                cleanup_temp_file=AsyncMock(),
+            ),
         ),
-        resolve_model_display_name=AsyncMock(return_value="GPT"),
+        store=MappingSessionStore(),
     )
-    service.formatter = SimpleNamespace(format_protocol=lambda *a, **k: "# П")
-    service.history = SimpleNamespace(
-        save_processing_history=AsyncMock(return_value=1),
-        cleanup_temp_file=AsyncMock(),
-    )
-
-    monkeypatch.setattr(
-        pt_mod.ProgressFactory, "create_file_processing_tracker",
-        AsyncMock(return_value=SimpleNamespace(
+    channel = SimpleNamespace(
+        start_tracker=AsyncMock(return_value=SimpleNamespace(
             start_stage=AsyncMock(), complete_all=AsyncMock(),
-            bot=SimpleNamespace(), chat_id=1,
         )),
+        report_failure=AsyncMock(),
+        say=AsyncMock(),
     )
-    monkeypatch.setattr(completion.queue_repo, "update_queue_task_status", AsyncMock())
-    monkeypatch.setattr(pss, "safe_send_message", AsyncMock())
-    monkeypatch.setattr(
-        pss.ProcessingService, "_mark_queue_task", AsyncMock()
-    )
+    monkeypatch.setattr(queue_repo, "update_queue_task_status", AsyncMock())
+    monkeypatch.setattr(provider_failure, "report_llm_failure", AsyncMock())
 
     session = MappingSession(
         request=ProcessingRequest(
@@ -229,10 +228,9 @@ async def test_resume_402_end_to_end_survives_logging(monkeypatch):
     )
 
     with pytest.raises(ProcessingError):
-        await service.continue_processing_after_mapping_confirmation(
-            session=session, confirmed_mapping={},
-            bot=SimpleNamespace(), chat_id=1,
-        )
+        await pause.close(session, CloseReason.CONFIRMED, channel=channel)
+
+    channel.report_failure.assert_awaited_once()
 
 
 def test_credits_detection_has_single_source_of_truth():

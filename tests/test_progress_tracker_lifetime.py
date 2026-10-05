@@ -6,7 +6,8 @@
        Принудительное завершение.
 
 Разбор первого случая: обработка успешно завершилась в 05:52:43
-(``continue_processing_after_mapping_confirmation:624``), а гард добил трекер в
+(тогда ``continue_processing_after_mapping_confirmation``, ныне закрытие паузы
+``MappingPause.close``), а гард добил трекер в
 06:20:31 — через 27 мин 48 с. Всё это время ``_auto_update`` продолжал
 редактировать сообщение прогресса под уже доставленным протоколом.
 
@@ -58,15 +59,25 @@ def _resume_session() -> MappingSession:
     )
 
 
-def _stub_resume_deps(service) -> None:
-    service.llm_gen = SimpleNamespace(
-        optimized_llm_generation=AsyncMock(return_value={"meeting_title": "Планёрка"}),
-        resolve_model_display_name=AsyncMock(return_value="GPT"),
-    )
-    service.formatter = SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол")
-    service.history = SimpleNamespace(
-        save_processing_history=AsyncMock(return_value=99),
-        cleanup_temp_file=AsyncMock(),
+def _resume_pause():
+    """Пауза на карточке с успешной генерацией (зависимости хвоста — фейки)."""
+    from src.services.mapping_session import MappingSessionStore
+    from src.services.processing.completion import CompletionDeps
+    from src.services.processing.mapping_pause import MappingPause
+
+    return MappingPause(
+        deps=CompletionDeps(
+            llm_gen=SimpleNamespace(
+                optimized_llm_generation=AsyncMock(return_value={"meeting_title": "Планёрка"}),
+                resolve_model_display_name=AsyncMock(return_value="GPT"),
+            ),
+            formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол"),
+            history=SimpleNamespace(
+                save_processing_history=AsyncMock(return_value=99),
+                cleanup_temp_file=AsyncMock(),
+            ),
+        ),
+        store=MappingSessionStore(),
     )
 
 
@@ -162,29 +173,23 @@ async def test_tail_closes_tracker_even_when_delivery_fails(monkeypatch):
 
 
 async def test_resume_does_not_leave_autoupdate_running(monkeypatch):
-    """Ядро регрессии: после успешного возобновления цикл трекера не жив.
+    """Ядро регрессии: после успешного закрытия паузы цикл трекера не жив.
 
     Красный до фикса — ровно та утечка, которую гард добивал через 28 минут.
     """
     import src.services.processing.completion as completion
-    import src.services.processing.processing_service as pss
-    import src.services.result_sender as rs
     import src.ux.progress_tracker as pt_mod
-
-    service = pss.ProcessingService.__new__(pss.ProcessingService)
-    _stub_resume_deps(service)
+    from src.services.processing.mapping_pause import CloseReason
 
     tracker = _real_tracker()
-    monkeypatch.setattr(
-        pt_mod.ProgressFactory,
-        "create_file_processing_tracker",
-        AsyncMock(return_value=tracker),
+    channel = SimpleNamespace(
+        start_tracker=AsyncMock(return_value=tracker),
+        deliver=AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
         completion, "performance_cache", SimpleNamespace(set=AsyncMock())
     )
     monkeypatch.setattr(completion.queue_repo, "update_queue_task_status", AsyncMock())
-    monkeypatch.setattr(rs, "send_result_to_user", AsyncMock(return_value=True))
     # Автообновление не должно уходить в сеть, если цикл всё же жив.
     monkeypatch.setattr(
         pt_mod.telegram_rate_limiter.flood_control,
@@ -194,9 +199,8 @@ async def test_resume_does_not_leave_autoupdate_running(monkeypatch):
 
     task_after = None
     try:
-        await service.continue_processing_after_mapping_confirmation(
-            session=_resume_session(), confirmed_mapping={},
-            bot=SimpleNamespace(), chat_id=1,
+        await _resume_pause().close(
+            _resume_session(), CloseReason.CONFIRMED, channel=channel
         )
         await asyncio.sleep(0)  # даём отменённой задаче шанс дойти до финала
 

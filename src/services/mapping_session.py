@@ -55,7 +55,7 @@ class MappingSessionStore:
 
     Карточка при этом по-прежнему одна: ``peek``/``take`` работают с активной
     (последней сохранённой) сессией пользователя — предыдущую при новой паузе
-    доводит до протокола ``mapping_timeout.finish_superseded_session``.
+    доводит до протокола пауза на карточке (``processing.mapping_pause``).
     """
 
     def __init__(self, ttl_seconds: int = 3600):

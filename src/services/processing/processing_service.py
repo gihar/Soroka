@@ -10,36 +10,36 @@ This is the orchestrator that delegates to:
 import asyncio
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from loguru import logger
 
 from src.config import settings
-from src.database import history_repo, queue_repo
+from src.database import history_repo
 from src.exceptions.processing import ProcessingError
-from src.models.processing import ProcessingRequest, ProcessingResult
+from src.models.processing import ProcessingRequest
 from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
 from src.performance.cache_system import performance_cache
 from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
 from src.reliability.middleware import monitoring_middleware
-from src.services import provider_failure
 from src.services.base_processing_service import BaseProcessingService
-from src.services.error_presentation import resume_failure_message
 from src.services.mapping_session import MappingSession
 from src.services.smart_template_selector import smart_selector
 
 # Новые сервисы для улучшения качества
 from src.services.transcription_preprocessor import get_preprocessor
 from src.utils.request_diagnostics import log_meeting_inputs
-from src.utils.telegram_safe import safe_send_message
 
 from .completion import CompletionDeps, complete_processing, deliver_cached
 from .llm_generation import LLMGenerationService
+from .mapping_pause import MappingPause
+from .pause_channel import PauseChannel, TelegramPauseChannel
 from .processing_history import ProcessingHistoryService
 
 # Extracted modules
 from .protocol_formatter import ProtocolFormatter
+from .run_outcome import RunOutcome
 
 
 def _should_show_mapping_card(diarization: Any) -> bool:
@@ -55,7 +55,19 @@ def _should_show_mapping_card(diarization: Any) -> bool:
 class ProcessingService(BaseProcessingService):
     """Сервис обработки с оптимизацией производительности"""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        mapping_pause: Optional[MappingPause] = None,
+        channel_for: Optional[Callable[[Any], PauseChannel]] = None,
+    ):
+        """
+        Args:
+            mapping_pause: пауза на карточке сопоставления; по умолчанию —
+                на общем хранилище сессий с зависимостями этого сервиса.
+            channel_for: канал к пользователю по трекеру прогона; по умолчанию
+                — Telegram-чат трекера.
+        """
         super().__init__()
 
         # Мониторинг будет запущен при первом использовании
@@ -69,6 +81,9 @@ class ProcessingService(BaseProcessingService):
         )
         self.history = ProcessingHistoryService(user_service=self.user_service)
 
+        self.mapping_pause = mapping_pause or MappingPause(deps=self._completion_deps())
+        self._channel_for = channel_for or TelegramPauseChannel.from_tracker
+
     # ------------------------------------------------------------------
     # Единый хвост «Завершение обработки» (ADR-0003)
     # ------------------------------------------------------------------
@@ -81,6 +96,12 @@ class ProcessingService(BaseProcessingService):
             history=self.history,
         )
 
+    def _channel(self, progress_tracker) -> Optional[PauseChannel]:
+        """Канал к пользователю: чат трекера прогона. Без трекера — некуда."""
+        if progress_tracker is None:
+            return None
+        return self._channel_for(progress_tracker)
+
     def _delivery_for(self, request, progress_tracker):
         """Колбэк доставки готового результата пользователю.
 
@@ -88,20 +109,13 @@ class ProcessingService(BaseProcessingService):
         Без трекера доставлять некуда → False (в проде трекер всегда есть:
         обработку запускает воркер очереди).
         """
+        channel = self._channel(progress_tracker)
+
         async def deliver(result) -> bool:
-            if progress_tracker is None:
+            if channel is None:
                 logger.warning("Доставка невозможна: нет progress_tracker")
                 return False
-            from src.services.result_sender import send_result_to_user
-
-            return await send_result_to_user(
-                bot=progress_tracker.bot,
-                chat_id=progress_tracker.chat_id,
-                user_id=request.user_id,
-                request=request,
-                result=result,
-                progress_tracker=progress_tracker,
-            )
+            return await channel.deliver(request, result, progress_tracker)
 
         return deliver
 
@@ -112,12 +126,14 @@ class ProcessingService(BaseProcessingService):
     @performance_timer("file_processing")
     async def process_file(
         self, request: ProcessingRequest, progress_tracker=None, task_id=None
-    ) -> ProcessingResult:
-        """Оптимизированная обработка файла.
+    ) -> RunOutcome:
+        """Прогнать запись через конвейер и вернуть исход прогона.
 
-        ``task_id`` (опционально) — id задачи очереди; пробрасывается в состояние
-        паузы на подтверждение сопоставления, чтобы путь возобновления мог
-        корректно закрыть исходную задачу очереди.
+        Исход — готов (протокол собран, доставлен и учтён единым хвостом) или
+        приостановлен на карточке сопоставления (дальше обработку ведёт пауза).
+
+        ``task_id`` (опционально) — id задачи очереди; пробрасывается в сессию
+        паузы, чтобы закрытие паузы проставило исходной задаче финальный статус.
         """
         # Запускаем мониторинг при первом использовании
         await self._ensure_monitoring_started()
@@ -191,7 +207,7 @@ class ProcessingService(BaseProcessingService):
                     task_id=task_id,
                     progress_tracker=progress_tracker,
                 )
-                return outcome.result
+                return RunOutcome.ready(outcome.result)
 
             logger.info(
                 f"Кеш не найден для {request.file_name} (file_hash: {file_hash}), "
@@ -201,18 +217,18 @@ class ProcessingService(BaseProcessingService):
 
             # Шаг 5: обработка + единый хвост «Завершение обработки» (кеш, история,
             # доставка, статус задачи) — внутри _process_file_optimized.
-            result = await self._process_file_optimized(
+            outcome = await self._process_file_optimized(
                 request, processing_metrics, progress_tracker, temp_file_path,
                 cache_key=cache_key, task_id=task_id,
             )
 
-            if result is None:
+            if outcome.paused:
                 logger.info("Обработка приостановлена - ожидаю подтверждения от пользователя")
-                return None
+                return outcome
 
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
-            return result
+            return outcome
 
         except Exception as e:
             logger.error(f"Ошибка в оптимизированной обработке {request.file_name}: {e}")
@@ -243,7 +259,7 @@ class ProcessingService(BaseProcessingService):
         temp_file_path: str = None,
         cache_key: str = None,
         task_id=None,
-    ) -> ProcessingResult:
+    ) -> RunOutcome:
         """Внутренняя оптимизированная обработка
 
         Args:
@@ -359,17 +375,25 @@ class ProcessingService(BaseProcessingService):
             speaker_mapping, request_meeting_type = mapping_result
             if _should_show_mapping_card(transcription_result.diarization):
                 if await self._mapping_confirmation_enabled(request.user_id):
-                    # task_id передаём ДО показа кнопок подтверждения, чтобы он
-                    # был в сохранённом состоянии к моменту, когда пользователь
-                    # сможет нажать «Подтвердить» (иначе — гонка с attach).
-                    pause_result = await self._handle_speaker_mapping_confirmation(
-                        request, transcription_result, speaker_mapping,
-                        request_meeting_type, temp_file_path, processing_metrics,
-                        progress_tracker, cache_key=cache_key, task_id=task_id,
+                    # task_id кладём в сессию ДО показа кнопок подтверждения,
+                    # чтобы он был в ней к моменту, когда пользователь сможет
+                    # нажать «Подтвердить» (иначе — гонка с attach). Сессия
+                    # живыми объектами: без сериализации, дрейфовать нечему.
+                    session = MappingSession(
+                        request=request,
+                        transcription_result=transcription_result,
+                        speaker_mapping=speaker_mapping,
+                        meeting_type=request_meeting_type,
+                        temp_file_path=temp_file_path,
+                        cache_key=cache_key,
+                        task_id=task_id,
+                        metrics=processing_metrics,
                         template=template,
                     )
-                    if pause_result is None:
-                        return None
+                    if await self.mapping_pause.open(
+                        session, channel=self._channel(progress_tracker)
+                    ):
+                        return RunOutcome.paused_on_card()
                 request.speaker_mapping = speaker_mapping or None
             else:
                 request.speaker_mapping = None
@@ -392,7 +416,7 @@ class ProcessingService(BaseProcessingService):
                 temp_file_path=temp_file_path,
                 progress_tracker=progress_tracker,
             )
-            return outcome.result
+            return RunOutcome.ready(outcome.result)
 
     async def _mapping_confirmation_enabled(self, telegram_user_id: int) -> bool:
         """Спрашивать ли имена спикеров у этого пользователя.
@@ -411,347 +435,6 @@ class ProcessingService(BaseProcessingService):
         return should_confirm_mapping(
             user, global_default=settings.enable_speaker_mapping_confirmation
         )
-
-    async def _handle_speaker_mapping_confirmation(
-        self, request, transcription_result, speaker_mapping,
-        meeting_type, temp_file_path, processing_metrics, progress_tracker,
-        cache_key=None, task_id=None, template=None,
-    ):
-        """Handle speaker mapping confirmation UI.
-
-        Returns a sentinel (None) when the processing should be paused,
-        or a truthy value when processing should continue without pause.
-
-        The full processing state is saved as a typed ``MappingSession`` so the
-        resume path (``continue_processing_after_mapping_confirmation``) receives
-        live objects — no serialization round-trip, nothing to drift.
-        """
-        logger.info(
-            "UI подтверждения сопоставления включен - "
-            "сохраняю сессию и показываю интерфейс"
-        )
-
-        from src.services.mapping_session import MappingSession, mapping_sessions
-
-        if progress_tracker:
-            from src.ux.speaker_mapping_ui import show_mapping_confirmation
-
-            # Останавливаем автообновления progress_tracker
-            if progress_tracker.update_task:
-                task = progress_tracker.update_task
-                progress_tracker.update_task = None
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                logger.debug(
-                    "Автообновления progress_tracker остановлены "
-                    "перед показом UI подтверждения"
-                )
-
-            # Обновляем сообщение progress_tracker
-            try:
-                from src.utils.telegram_safe import safe_edit_text
-                await safe_edit_text(
-                    progress_tracker.message,
-                    "**Транскрипция завершена**\n\n"
-                    "Проверьте сопоставление спикеров с участниками в сообщении ниже.",
-                    parse_mode="Markdown",
-                )
-                logger.debug("Сообщение progress_tracker обновлено на информационное")
-            except Exception as e:
-                logger.warning(
-                    f"Не удалось обновить сообщение progress_tracker: {e}"
-                )
-
-            # Получаем список несопоставленных спикеров (порядок — по появлению)
-            all_speakers = transcription_result.diarization.speakers
-            mapped_speakers = set(speaker_mapping.keys())
-            unmapped_speakers = [s for s in all_speakers if s not in mapped_speakers]
-
-            speakers_text = transcription_result.diarization.speakers_text
-
-            # Фрагменты записи уходят ДО карточки: по факту доставки решаем,
-            # кому в карточке нужна текстовая цитата (цитата спикера показывается
-            # один раз). Карточка — последнее сообщение, кнопки внизу чата.
-            # Ошибка превью не мешает паузе: карточка выйдет со всеми цитатами.
-            speakers_with_audio = set()
-            try:
-                from src.ux.speaker_audio_preview import send_speaker_audio_previews
-                speakers_with_audio = await send_speaker_audio_previews(
-                    bot=progress_tracker.bot,
-                    chat_id=progress_tracker.chat_id,
-                    user_id=request.user_id,
-                    speakers=all_speakers,
-                    diarization=transcription_result.diarization,
-                    temp_file_path=temp_file_path,
-                    speakers_text=speakers_text,
-                )
-            except Exception as preview_error:
-                logger.warning(
-                    f"Не удалось отправить фрагменты записи спикеров: {preview_error}"
-                )
-
-            session = MappingSession(
-                request=request,
-                transcription_result=transcription_result,
-                speaker_mapping=speaker_mapping,
-                meeting_type=meeting_type,
-                temp_file_path=temp_file_path,
-                cache_key=cache_key,
-                task_id=task_id,
-                metrics=processing_metrics,
-                template=template,
-                speakers_with_audio=speakers_with_audio,
-            )
-            # Пользователь мог прислать новую запись, не закрыв карточку
-            # предыдущей. Раньше её сессия здесь молча затиралась вместе с
-            # готовой расшифровкой (критика v11) — теперь предыдущая запись
-            # доводится до протокола, прежде чем слот займёт новая.
-            from src.services.mapping_timeout import finish_superseded_session
-
-            await finish_superseded_session(
-                self,
-                mapping_sessions,
-                user_id=request.user_id,
-                bot=progress_tracker.bot,
-                chat_id=progress_tracker.chat_id,
-            )
-
-            session_key = mapping_sessions.save(request.user_id, session)
-
-            confirmation_message = await show_mapping_confirmation(
-                bot=progress_tracker.bot,
-                chat_id=progress_tracker.chat_id,
-                user_id=request.user_id,
-                speaker_mapping=speaker_mapping,
-                # Список может быть не передан: карточка всё равно показывается
-                # (ADR-0002), participants=[] — иначе клавиатура упадёт на None.
-                participants=request.participants_list or [],
-                diarization=transcription_result.diarization,
-                unmapped_speakers=unmapped_speakers if unmapped_speakers else None,
-                speakers_text=speakers_text,
-                speakers_with_audio=speakers_with_audio,
-                record_name=request.file_name,
-            )
-
-            if confirmation_message is None:
-                # UI не был отправлен - продолжаем обработку без паузы
-                logger.warning(
-                    f"Не удалось отправить UI подтверждения сопоставления "
-                    f"для пользователя {request.user_id}. "
-                    "Продолжаю обработку без паузы на подтверждение."
-                )
-
-                try:
-                    from src.utils.telegram_safe import safe_send_message as _safe_send
-                    await _safe_send(
-                        bot=progress_tracker.bot,
-                        chat_id=progress_tracker.chat_id,
-                        text=(
-                            "Не удалось отправить интерфейс подтверждения сопоставления.\n\n"
-                            "Продолжаю генерацию протокола с автоматическим "
-                            "сопоставлением спикеров."
-                        ),
-                        parse_mode=None,
-                    )
-                except Exception as notify_error:
-                    logger.error(
-                        f"Не удалось отправить уведомление об ошибке UI: {notify_error}"
-                    )
-
-                mapping_sessions.discard(request.user_id, session_key)
-                request.speaker_mapping = speaker_mapping
-                return True  # continue processing
-            else:
-                # Ссылку на карточку кладём в сессию: ручной ввод имени
-                # перерисовывает её на месте (сообщение с именем — отдельное).
-                session.confirmation_message = confirmation_message
-                logger.info(
-                    "Обработка приостановлена - ожидаю подтверждения от пользователя"
-                )
-
-                # Пауза больше не бессрочна: если карточку не закроют, протокол
-                # доедет сам с «Участник N». Раньше сессия молча истекала, и
-                # готовая расшифровка — самая дорогая часть конвейера — пропадала.
-                # Таймер безопасен при штатном исходе: take атомарен, изъятая
-                # пользователем сессия вернёт таймеру None.
-                from src.services.mapping_timeout import (
-                    auto_deliver_delay_seconds,
-                    deliver_on_timeout,
-                )
-
-                asyncio.create_task(deliver_on_timeout(
-                    self,
-                    mapping_sessions,
-                    user_id=request.user_id,
-                    session_key=session_key,
-                    bot=progress_tracker.bot,
-                    chat_id=progress_tracker.chat_id,
-                    delay_seconds=auto_deliver_delay_seconds(mapping_sessions),
-                ))
-                return None  # pause processing
-
-        logger.warning(
-            "UI подтверждения включен, но progress_tracker отсутствует "
-            "- продолжаю без паузы"
-        )
-        return True
-
-    async def continue_processing_after_mapping_confirmation(
-        self,
-        session: MappingSession,
-        confirmed_mapping: Dict[str, str],
-        bot: Any,
-        chat_id: int,
-    ) -> ProcessingResult:
-        """
-        Продолжить обработку после подтверждения сопоставления спикеров
-
-        Args:
-            session: Сессия сопоставления, атомарно изъятая коллбэком (take)
-            confirmed_mapping: Подтвержденное сопоставление спикеров
-            bot: Экземпляр бота для отправки сообщений
-            chat_id: ID чата
-
-        Returns:
-            ProcessingResult с готовым протоколом
-        """
-        from src.services.result_sender import send_result_to_user
-        from src.ux.progress_tracker import ProgressFactory
-
-        user_id = session.request.user_id
-        task_id = session.task_id
-        try:
-            logger.info(
-                f"Продолжение обработки для пользователя {user_id} "
-                "после подтверждения сопоставления"
-            )
-
-            request = session.request
-            request.speaker_mapping = confirmed_mapping
-            transcription_result = session.transcription_result
-
-            logger.info(f"Сессия восстановлена: тип встречи = {session.meeting_type}")
-
-            progress_tracker = await ProgressFactory.create_file_processing_tracker(
-                bot=bot,
-                chat_id=chat_id,
-            )
-
-            # Шаблон выбран в основном пути ДО паузы — берём его из сессии, не
-            # выбирая заново (выбор шаблона один раз, ADR-0003).
-            template = session.template
-            request.template_id = template.id
-
-            if progress_tracker:
-                await progress_tracker.start_stage("analysis")
-            logger.info(f"Начинаем генерацию протокола для пользователя {user_id}")
-
-            async def deliver(result) -> bool:
-                return await send_result_to_user(
-                    bot=bot,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    request=request,
-                    result=result,
-                    progress_tracker=progress_tracker,
-                )
-
-            # Единый хвост «Завершение обработки»: генерация → страховка спикеров →
-            # кеш (безусловный, ADR-0003) → история (всегда, до доставки —
-            # history_id даёт кнопки под протоколом) → доставка → статус задачи.
-            outcome = await complete_processing(
-                request=request,
-                transcription_result=transcription_result,
-                template=template,
-                meeting_type=session.meeting_type,
-                deps=self._completion_deps(),
-                delivery=deliver,
-                cache_key=session.cache_key,
-                task_id=task_id,
-                metrics=session.metrics,
-                temp_file_path=session.temp_file_path,
-                # Трекер возобновления создан здесь и больше нигде не гасится:
-                # finally воркера сюда не доходит (задача снята с паузы вне
-                # воркера), а result_sender трогает трекер лишь в except.
-                progress_tracker=progress_tracker,
-            )
-
-            if outcome.delivered:
-                logger.info(f"Обработка успешно завершена для пользователя {user_id}")
-            else:
-                logger.warning(
-                    f"Протокол сгенерирован, но не доставлен пользователю {user_id}"
-                )
-
-            return outcome.result
-
-        except Exception as e:
-            await self._handle_resume_failure(e, user_id, chat_id, bot, task_id)
-
-    async def _mark_queue_task(self, task_id, status: str, error_message: str = None) -> None:
-        """Best-effort обновление статуса задачи очереди в БД.
-
-        Задача, поставленная на паузу ради подтверждения сопоставления спикеров,
-        возобновляется вне воркера — поэтому её финальный статус проставляется
-        здесь. Без этого строка очереди навсегда осталась бы в ``processing``.
-        """
-        if not task_id:
-            return
-        try:
-            await queue_repo.update_queue_task_status(
-                str(task_id), status, error_message=error_message
-            )
-        except Exception as e:
-            logger.warning(f"Не удалось обновить статус задачи {task_id}: {e}")
-
-    async def _handle_resume_failure(
-        self, error: Exception, user_id: int, chat_id: int, bot: Any, task_id
-    ) -> None:
-        """Единый обработчик ошибок возобновления обработки.
-
-        Логирует traceback, помечает задачу очереди как FAILED, уведомляет
-        пользователя и пробрасывает ``ProcessingError`` вызывающему колбэку.
-        Сессия сопоставления к этому моменту уже изъята (take) — восстанавливать
-        или чистить нечего.
-        """
-        error_type = type(error).__name__
-        # opt(exception=True), а не exc_info=True: последнее — идиома stdlib
-        # logging, loguru её не печатает, зато ЛЮБОЙ kwarg включает у него
-        # message.format() — и текст ошибки с фигурными скобками (например сырой
-        # payload 402 с ключом 'error') ронял сам обработчик ошибок.
-        logger.opt(exception=True).error(
-            f"Ошибка возобновления обработки для пользователя {user_id} "
-            f"({error_type}): {error}"
-        )
-
-        await self._mark_queue_task(task_id, "failed", error_message=str(error))
-
-        try:
-            await safe_send_message(
-                bot=bot,
-                chat_id=chat_id,
-                # Сырой str(error) сюда не идёт: у провайдера в payload бывают
-                # user_id и параметры запроса, а человеку они ничего не объясняют.
-                text=resume_failure_message(str(error)),
-            )
-        except Exception as notify_error:
-            logger.error(f"Не удалось уведомить пользователя об ошибке: {notify_error}")
-
-        # Сбой после паузы — такой же сбой, как в воркере, и администратору он
-        # адресован ровно так же. Своей ветки уведомления здесь нет: решение
-        # «когда писать» одно на оба пути (provider_failure). Пока его тут не
-        # было, четырнадцать отказов из пятнадцати не доходили ни до кого.
-        try:
-            await provider_failure.report_llm_failure(error)
-        except Exception as admin_error:
-            logger.error(f"Не удалось уведомить админов о сбое провайдера: {admin_error}")
-
-        if isinstance(error, ProcessingError):
-            raise error
-        raise ProcessingError(str(error), "unknown", "resume_error") from error
 
     # ------------------------------------------------------------------
     # Speaker mapping (extracted for parallel execution)

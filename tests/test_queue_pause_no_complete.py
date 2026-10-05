@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.services.processing.run_outcome import RunOutcome
+
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
@@ -37,7 +39,7 @@ async def test_paused_task_does_not_complete_tracker(monkeypatch):
 
     class FakeService:
         async def process_file(self, request, progress_tracker, task_id=None):
-            return None  # пауза для подтверждения сопоставления
+            return RunOutcome.paused_on_card()  # пауза на карточке сопоставления
 
     monkeypatch.setattr(ps_mod, "ProcessingService", FakeService)
 
@@ -81,7 +83,7 @@ async def test_completed_task_still_completes_tracker(monkeypatch):
         async def process_file(self, request, progress_tracker, task_id=None):
             # Обычный результат (не пауза). Доставку и статус задачи проставляет
             # единый хвост ВНУТРИ process_file (ADR-0003) — воркер их не трогает.
-            return SimpleNamespace()
+            return RunOutcome.ready(SimpleNamespace())
 
     monkeypatch.setattr(ps_mod, "ProcessingService", FakeService)
 
@@ -119,6 +121,20 @@ def admin_texts(monkeypatch):
     monkeypatch.setattr(admin_alerts, "_get_alert_bot", lambda: object())
     monkeypatch.setattr(settings, "admins", [111])
     return texts
+
+
+@pytest.fixture
+def queue_statuses(monkeypatch):
+    """Статусы задач очереди, проставленные обработкой."""
+    from src.database import queue_repo
+
+    statuses = []
+
+    async def fake_update(task_id, status, *args, error_message=None, **kwargs):
+        statuses.append((task_id, status))
+
+    monkeypatch.setattr(queue_repo, "update_queue_task_status", fake_update)
+    return statuses
 
 
 async def _run_failing_task(monkeypatch, error):
@@ -175,3 +191,14 @@ async def test_worker_failure_reaches_the_admin(monkeypatch, admin_texts):
     await _run_failing_task(monkeypatch, RuntimeError(RAW_UNKNOWN))
 
     assert len(admin_texts) == 1 and "451" in admin_texts[0]
+
+
+@pytest.mark.asyncio
+async def test_worker_failure_marks_the_queue_task_failed(
+    monkeypatch, admin_texts, queue_statuses,
+):
+    """Строка очереди не остаётся в ``processing`` навсегда: политика сбоя одна
+    на воркер и на возобновление после паузы — и статус в ней тоже."""
+    await _run_failing_task(monkeypatch, RuntimeError(RAW_UNKNOWN))
+
+    assert queue_statuses == [("t3", "failed")]

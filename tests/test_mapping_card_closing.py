@@ -65,17 +65,18 @@ class _Callback:
 
 
 class _ClosingSpy:
-    """Старый адресат кнопок: сервис обработки с продолжением после паузы."""
+    """Пауза на карточке: записывает, с каким поводом её закрыли."""
 
     def __init__(self, error=None):
         self.closes = []
         self.error = error
 
-    async def continue_processing_after_mapping_confirmation(
-        self, *, session, confirmed_mapping, bot, chat_id
-    ):
+    async def close(self, session, reason, *, channel):
+
         self.closes.append(SimpleNamespace(
-            session=session, named=bool(confirmed_mapping), chat_id=chat_id,
+            session=session,
+            reason=reason,
+            chat_id=channel.chat_id,
         ))
         if self.error:
             raise self.error
@@ -134,7 +135,7 @@ async def test_double_tap_on_confirm_closes_once(store, card):
 
     assert len(spy.closes) == 1
     assert spy.closes[0].session is session
-    assert spy.closes[0].named is True
+    assert spy.closes[0].reason.value == "confirmed"
     assert spy.closes[0].chat_id == 4242
     assert "уже доставлен" in card[-1]
 
@@ -151,7 +152,7 @@ async def test_double_tap_on_skip_closes_once(store, card):
     await skip(_Callback(), SmSkip(user_id=42), _State())
 
     assert len(spy.closes) == 1
-    assert spy.closes[0].named is False
+    assert spy.closes[0].reason.value == "skipped"
 
 
 async def test_confirmed_skip_of_an_empty_run_closes_once(store, card):
@@ -165,7 +166,7 @@ async def test_confirmed_skip_of_an_empty_run_closes_once(store, card):
     await skip_ok(_Callback(), SmSkipConfirm(user_id=42), _State())
 
     assert len(spy.closes) == 1
-    assert spy.closes[0].named is False
+    assert spy.closes[0].reason.value == "skipped"
 
 
 async def test_failed_resume_rewrites_the_card_from_the_classifier(store, card):
