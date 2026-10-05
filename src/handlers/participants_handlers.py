@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from loguru import logger
 
 from src.handlers.participants_states import ParticipantsInput
+from src.services.meeting_agenda import split_agenda_and_projects
 from src.services.participants_service import participants_service
 from src.services.user_service import UserService
 from src.utils.date_format import format_russian_date
@@ -91,6 +92,14 @@ async def show_participants_menu(
                     )])
             except Exception:
                 pass
+
+        # Повестка и проекты — контекст генерации, которого нет в приглашении
+        # целиком. Без этой кнопки ввести их было негде (вход убрали при
+        # упрощении настройки), и в запрос они уходили пустыми.
+        keyboard_buttons.append([InlineKeyboardButton(
+            text="Повестка и проекты",
+            callback_data="add_meeting_agenda"
+        )])
 
         # Skip
         keyboard_buttons.append([InlineKeyboardButton(
@@ -178,6 +187,63 @@ def setup_participants_handlers() -> Router:
                 _FORM_OPEN_FAILED
             )
     
+    @router.callback_query(F.data == "add_meeting_agenda")
+    async def prompt_agenda_input(callback: CallbackQuery, state: FSMContext):
+        """Запрос повестки и проектов — одним сообщением."""
+        try:
+            await callback.answer()
+            await state.set_state(ParticipantsInput.waiting_for_agenda)
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="input_new_participants")]
+            ])
+
+            await safe_answer(callback.message,
+                "<b>Повестка и проекты</b>\n\n"
+                "Пришлите повестку встречи одним сообщением — темы и вопросы, "
+                "которые собирались обсудить.\n\n"
+                "Если на встрече упоминались проекты, добавьте их последней "
+                "строкой:\n"
+                "<code>Проекты: Сорока, Детский мир</code>\n\n"
+                "С ними протокол точнее разложит обсуждение по пунктам и не "
+                "исказит названия.",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка при запросе повестки: {e}")
+            await callback.message.answer(
+                _FORM_OPEN_FAILED
+            )
+
+    @router.message(ParticipantsInput.waiting_for_agenda, F.content_type == "text")
+    async def handle_agenda_text(message: Message, state: FSMContext):
+        """Сохранить повестку и проекты и вернуться к экрану «Участники встречи»."""
+        try:
+            agenda, projects = split_agenda_and_projects(message.text or "")
+            if not agenda and not projects:
+                await safe_answer(message,
+                    "❌ Сообщение пустое.\n"
+                    "Пришлите повестку текстом или нажмите «Назад».",
+                    parse_mode="HTML"
+                )
+                return
+
+            # Ключи — рядом с темой и датой встречи: их читает запуск обработки.
+            await state.update_data(meeting_agenda=agenda, project_list=projects)
+
+            saved = [name for name, value in (("повестка", agenda), ("проекты", projects)) if value]
+            await safe_answer(message,
+                f"Сохранено: {', '.join(saved)}.",
+                parse_mode="HTML"
+            )
+            await show_participants_menu(message, user_service, state=state)
+
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении повестки: {e}")
+            await message.answer(_CONTINUE_FAILED)
+
     @router.callback_query(F.data == "use_saved_participants")
     async def use_saved_participants(callback: CallbackQuery, state: FSMContext):
         """Использование сохраненного списка участников"""

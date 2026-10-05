@@ -211,7 +211,7 @@ async def test_telegram_record_with_template_builds_full_request(env):
         template_id=7,
         participants_list=participants,
         meeting_topic="Бюджет", meeting_date="5 октября 2026", meeting_time="10:00",
-        protocol_info={"meeting_agenda": "1. Итоги", "project_list": "Альфа"},
+        meeting_agenda="1. Итоги", project_list="Альфа",
     )
 
     await _run_launch(state)

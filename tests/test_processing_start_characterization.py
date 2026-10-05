@@ -288,7 +288,7 @@ async def test_configure_with_saved_list_shows_saved_button(monkeypatch):
     assert "use_saved_participants" in data
     # Кнопки «Добавить участников» больше нет: экран сам открывает шаг ввода
     # и принимает текст (критика v11).
-    assert data == {"use_saved_participants", "skip_participants"}
+    assert data == {"use_saved_participants", "add_meeting_agenda", "skip_participants"}
 
 
 @pytest.mark.asyncio
@@ -312,4 +312,4 @@ async def test_configure_without_saved_list_hides_saved_button(monkeypatch):
     keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
     data = _callback_data_set(keyboard)
     assert "use_saved_participants" not in data
-    assert data == {"skip_participants"}
+    assert data == {"add_meeting_agenda", "skip_participants"}

@@ -63,7 +63,6 @@ def launch_input_from_state(data: Mapping[str, Any]) -> tuple[Record, Processing
     else:
         record = TelegramRecord(file_id=data.get('file_id'), file_name=data.get('file_name'))
 
-    protocol_info = data.get('protocol_info') or {}
     choice = ProcessingChoice(
         template=template,
         participants=data.get('participants_list'),
@@ -71,8 +70,8 @@ def launch_input_from_state(data: Mapping[str, Any]) -> tuple[Record, Processing
             topic=data.get('meeting_topic'),
             date=data.get('meeting_date'),
             time=data.get('meeting_time'),
-            agenda=protocol_info.get('meeting_agenda'),
-            projects=protocol_info.get('project_list'),
+            agenda=data.get('meeting_agenda'),
+            projects=data.get('project_list'),
         ),
     )
     return record, choice
