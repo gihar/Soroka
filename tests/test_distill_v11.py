@@ -123,7 +123,8 @@ def test_record_lost_messages_have_one_home():
     for module in ("processing_callbacks.py",):
         source = _source("handlers", "callbacks", module)
         assert _literal_count(source, "❌ Запись потерялась.\\nОтправьте файл ещё раз.") == 0
-    assert "RECORD_LOST_FILE" in _source("handlers", "message_handlers.py")
+    # Тексты потерянной записи показывает «Запуск обработки» на краю хендлеров.
+    assert "RECORD_LOST_FILE" in _source("handlers", "callbacks", "processing_callbacks.py")
 
 
 def test_shared_texts_are_not_reimported_by_accident():

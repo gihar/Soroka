@@ -2,7 +2,6 @@
 Обработчики сообщений с файлами
 """
 
-import asyncio
 import os
 from typing import Optional
 
@@ -17,10 +16,8 @@ from src.exceptions.template import TemplateNotFoundError
 from src.handlers.record_state import register_new_record
 from src.services import FileService, ProcessingService, TemplateService
 from src.services.url_service import URLService
-from src.utils.request_diagnostics import log_meeting_inputs
 from src.utils.telegram_safe import safe_answer, safe_edit_text
 from src.utils.url_detection import contains_url, extract_url
-from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 from src.ux.quick_actions import ADMIN_MENU_BUTTON, QuickActionsUI
 
 
@@ -161,158 +158,6 @@ def setup_message_handlers(file_service: FileService, template_service: Template
             )
     
     return router
-
-
-async def _start_file_processing(message: Message, state: FSMContext, processing_service):
-    """Начать обработку файла"""
-    from src.models.processing import ProcessingRequest
-    from src.models.task_queue import TaskPriority
-    from src.services.task_queue_manager import task_queue_manager
-    from src.ux.queue_tracker import QueueTrackerFactory
-    
-    try:
-        # Получаем данные из состояния
-        data = await state.get_data()
-        
-        protocol_info = (data.get('protocol_info') or {})
-        log_meeting_inputs(
-            "очередь (message)",
-            participants_list=data.get('participants_list'),
-            meeting_topic=data.get('meeting_topic'),
-            meeting_date=data.get('meeting_date'),
-            meeting_time=data.get('meeting_time'),
-            meeting_agenda=protocol_info.get('meeting_agenda'),
-            project_list=protocol_info.get('project_list'),
-        )
-        
-        # Проверяем наличие модели (template_id может быть None для умного выбора)
-        if not data.get('llm_provider'):
-            await message.answer(
-                "❌ Настройки обработки не сохранились.\n"
-                "Отправьте запись заново — и снова выберите способ обработки."
-            )
-            await state.clear()
-            return
-
-        # Проверяем template_id только если не используется умный выбор
-        if (not data.get('use_smart_selection') and
-            not data.get('template_id')):
-            await message.answer(
-                "❌ Шаблон не выбран.\n"
-                "Отправьте запись заново и выберите шаблон."
-            )
-            await state.clear()
-            return
-
-        # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
-        is_external_file = data.get('is_external_file', False)
-        if is_external_file:
-            if not data.get('file_path') or not data.get('file_name'):
-                await message.answer(
-                    RECORD_LOST_LINK
-                )
-                await state.clear()
-                return
-        else:
-            if not data.get('file_id') or not data.get('file_name'):
-                await message.answer(
-                    RECORD_LOST_FILE
-                )
-                await state.clear()
-                return
-        
-        # Создаем запрос на обработку
-        request = ProcessingRequest(
-            file_id=data.get('file_id') if not is_external_file else None,
-            file_path=data.get('file_path') if is_external_file else None,
-            file_name=data['file_name'],
-            file_url=data.get('file_url'),  # Оригинальный URL для внешних файлов
-            template_id=data['template_id'],
-            llm_provider=data['llm_provider'],
-            user_id=message.from_user.id,
-            language="ru",
-            is_external_file=is_external_file,
-            participants_list=data.get('participants_list'),  # список участников
-            meeting_topic=data.get('meeting_topic'),  # тема встречи
-            meeting_date=data.get('meeting_date'),  # дата встречи
-            meeting_time=data.get('meeting_time'),  # время встречи
-            meeting_agenda=protocol_info.get('meeting_agenda'),  # повестка встречи
-            project_list=protocol_info.get('project_list')  # список проектов
-        )
-        
-        # Добавляем задачу в очередь
-        queued_task = await task_queue_manager.add_task(
-            request=request,
-            chat_id=message.chat.id,
-            priority=TaskPriority.NORMAL
-        )
-        
-        # Получаем позицию в очереди
-        position = await task_queue_manager.get_queue_position(str(queued_task.task_id))
-        total_in_queue = await task_queue_manager.get_queue_size()
-        
-        # Создаем трекер позиции в очереди
-        queue_tracker = await QueueTrackerFactory.create_tracker(
-            bot=message.bot,
-            chat_id=message.chat.id,
-            task_id=str(queued_task.task_id),
-            initial_position=position if position is not None else 0,
-            total_in_queue=total_in_queue
-        )
-        
-        # Сохраняем message_id в задаче
-        if queue_tracker.message_id:
-            queued_task.message_id = queue_tracker.message_id
-            from src.database import queue_repo
-            await queue_repo.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
-        
-        # Запускаем фоновое обновление позиции в очереди
-        asyncio.create_task(_monitor_queue_position(
-            queue_tracker, queued_task.task_id, task_queue_manager
-        ))
-        
-        # Очищаем состояние
-        await state.clear()
-        
-        logger.info(f"Задача {queued_task.task_id} успешно добавлена в очередь")
-            
-    except Exception as e:
-        logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await message.answer(
-            "❌ Не получилось запустить обработку.\n"
-            "Отправьте запись заново."
-        )
-        await state.clear()
-
-
-async def _monitor_queue_position(queue_tracker, task_id, queue_manager):
-    """Мониторинг изменения позиции задачи в очереди"""
-    from src.config import settings
-    
-    try:
-        while queue_tracker.is_active:
-            # Получаем текущую позицию
-            position = await queue_manager.get_queue_position(str(task_id))
-            
-            # Если задачи больше нет в очереди (началась обработка или завершена)
-            if position is None:
-                # Удаляем сообщение про очередь
-                await queue_tracker.delete_message()
-                break
-            
-            # Получаем общий размер очереди
-            total = await queue_manager.get_queue_size()
-            
-            # Обновляем отображение только если позиция изменилась
-            await queue_tracker.update_position(position, total)
-            
-            # Ждем перед следующей проверкой
-            await asyncio.sleep(settings.queue_update_interval)
-    
-    except asyncio.CancelledError:
-        logger.debug(f"Мониторинг позиции задачи {task_id} отменен")
-    except Exception as e:
-        logger.error(f"Ошибка в мониторинге позиции задачи {task_id}: {e}")
 
 
 def _extract_file_info(message: Message) -> tuple:
