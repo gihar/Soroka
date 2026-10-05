@@ -8,7 +8,6 @@ This is the orchestrator that delegates to:
 """
 
 import asyncio
-import os
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -18,7 +17,7 @@ from src.config import settings
 from src.database import history_repo
 from src.exceptions.processing import ProcessingError
 from src.models.processing import ProcessingRequest
-from src.performance.async_optimization import OptimizedHTTPClient, optimized_file_processing, task_pool, thread_manager
+from src.performance.async_optimization import OptimizedHTTPClient, task_pool, thread_manager
 from src.performance.cache_system import performance_cache
 from src.performance.memory_management import memory_optimizer
 from src.performance.metrics import PerformanceTimer, metrics_collector, performance_timer
@@ -39,6 +38,8 @@ from .processing_history import ProcessingHistoryService
 
 # Extracted modules
 from .protocol_formatter import ProtocolFormatter
+from .record_preparation import PreparedRecord, RecordFate, prepare_record
+from .record_preparation import file_hash as record_file_hash
 from .run_outcome import RunOutcome
 
 
@@ -156,37 +157,17 @@ class ProcessingService(BaseProcessingService):
                 success=success,
             )
 
-        temp_file_path = None
-        cache_check_only = False
+        record = None
 
         try:
-            # Шаг 1: Получаем путь к файлу
-            if request.is_external_file:
-                temp_file_path = request.file_path
-                if not os.path.exists(temp_file_path):
-                    raise ProcessingError(
-                        f"Файл не найден: {temp_file_path}",
-                        request.file_name,
-                        "file_preparation",
-                    )
-            else:
-                temp_file_path = await self._download_telegram_file(request)
-                cache_check_only = True
+            # Подготовка записи: файл на диске, хеш, ключ и ответ кеша. Сбой
+            # самой подготовки убирает за собой скачанный ею файл.
+            record = await prepare_record(request, file_service=self.file_service)
 
-            # Шаг 2: Вычисляем хеш файла
-            file_hash = await self.history.calculate_file_hash(temp_file_path)
-            logger.debug(f"Вычислен хеш файла: {file_hash}")
-
-            # Шаг 3: Генерируем ключ кеша с хешем
-            cache_key = self.history.generate_result_cache_key(request, file_hash)
-
-            # Шаг 4: Проверяем кэш полного результата
-            cached_result = await performance_cache.get(cache_key)
-
-            if cached_result:
+            if record.cached_result:
                 logger.info(
                     f"Найден кэшированный результат для {request.file_name} "
-                    f"(file_hash: {file_hash})"
+                    f"(file_hash: {record.file_hash})"
                 )
                 processing_metrics.end_time = processing_metrics.start_time
                 metrics_collector.finish_processing_metrics(processing_metrics)
@@ -194,13 +175,12 @@ class ProcessingService(BaseProcessingService):
                 if progress_tracker:
                     await progress_tracker.complete_all()
 
-                if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
-                    await self.history.cleanup_temp_file(temp_file_path)
+                await record.release(RecordFate.DELIVERED_FROM_CACHE)
 
                 # Кеш-хит доставляется и учитывается тем же хвостом: свежая запись
                 # истории (её id даёт кнопки), доставка, статус задачи (ADR-0003).
                 outcome = await deliver_cached(
-                    cached_result,
+                    record.cached_result,
                     request=request,
                     deps=self._completion_deps(),
                     delivery=self._delivery_for(request, progress_tracker),
@@ -210,22 +190,23 @@ class ProcessingService(BaseProcessingService):
                 return RunOutcome.ready(outcome.result)
 
             logger.info(
-                f"Кеш не найден для {request.file_name} (file_hash: {file_hash}), "
-                "начинаем обработку"
+                f"Кеш не найден для {request.file_name} "
+                f"(file_hash: {record.file_hash}), начинаем обработку"
             )
-            cache_check_only = False
 
-            # Шаг 5: обработка + единый хвост «Завершение обработки» (кеш, история,
-            # доставка, статус задачи) — внутри _process_file_optimized.
-            outcome = await self._process_file_optimized(
-                request, processing_metrics, progress_tracker, temp_file_path,
-                cache_key=cache_key, task_id=task_id,
+            # Прогон: транскрипция → сопоставление → пауза на карточке или
+            # единый хвост «Завершение обработки» (кеш, история, доставка, статус).
+            outcome = await self._run_record(
+                request, record, processing_metrics, progress_tracker, task_id=task_id,
             )
 
             if outcome.paused:
+                # Запись теперь держит пауза: файл нужен фрагментам, его судьбу
+                # решит закрытие паузы.
                 logger.info("Обработка приостановлена - ожидаю подтверждения от пользователя")
                 return outcome
 
+            await record.release(RecordFate.PROTOCOL_ASSEMBLED)
             metrics_collector.finish_processing_metrics(processing_metrics)
             record_monitoring(True)
             return outcome
@@ -234,8 +215,8 @@ class ProcessingService(BaseProcessingService):
             logger.error(f"Ошибка в оптимизированной обработке {request.file_name}: {e}")
             metrics_collector.finish_processing_metrics(processing_metrics, e)
             record_monitoring(False)
-            if cache_check_only and temp_file_path and os.path.exists(temp_file_path):
-                await self.history.cleanup_temp_file(temp_file_path)
+            if record is not None:
+                await record.release(RecordFate.FAILED)
             raise
 
     def _log_request_diagnostics(self, request: ProcessingRequest) -> None:
@@ -251,172 +232,122 @@ class ProcessingService(BaseProcessingService):
             speaker_mapping=request.speaker_mapping,
         )
 
-    async def _process_file_optimized(
+    async def _run_record(
         self,
         request: ProcessingRequest,
+        record: PreparedRecord,
         processing_metrics,
         progress_tracker=None,
-        temp_file_path: str = None,
-        cache_key: str = None,
         task_id=None,
     ) -> RunOutcome:
-        """Внутренняя оптимизированная обработка
-
-        Args:
-            request: Запрос на обработку
-            processing_metrics: Метрики производительности
-            progress_tracker: Трекер прогресса
-            temp_file_path: Путь к уже скачанному файлу (если None, файл будет скачан)
-        """
+        """Прогон подготовленной записи до протокола или паузы на карточке."""
 
         # Логирование данных из ProcessingRequest для диагностики
         self._log_request_diagnostics(request)
 
-        async with optimized_file_processing() as resources:
-            http_client = resources["http_client"]
+        temp_file_path = record.path
+        cache_key = record.cache_key
 
-            # Этап 1: Загрузка данных пользователя
-            with PerformanceTimer("data_loading", metrics_collector):
-                user = await self.user_service.get_user_by_telegram_id(request.user_id)
+        # Этап 1: Загрузка данных пользователя
+        with PerformanceTimer("data_loading", metrics_collector):
+            user = await self.user_service.get_user_by_telegram_id(request.user_id)
 
-                if not user:
-                    raise ProcessingError(
-                        f"Пользователь {request.user_id} не найден",
-                        request.file_name, "validation",
-                    )
-
-            processing_metrics.validation_duration = 0.5
-
-            # Этап 1: Подготовка файла
-            if progress_tracker:
-                await progress_tracker.start_stage("preparation")
-
-            with PerformanceTimer("file_download", metrics_collector):
-                if temp_file_path is None:
-                    if request.is_external_file:
-                        temp_file_path = request.file_path
-
-                        if os.path.exists(temp_file_path):
-                            file_size = os.path.getsize(temp_file_path)
-                            processing_metrics.file_size_bytes = file_size
-                            processing_metrics.download_duration = 0.1
-                        else:
-                            raise ProcessingError(
-                                f"Файл не найден: {temp_file_path}",
-                                request.file_name, "file_preparation",
-                            )
-                    else:
-                        file_url = await self.file_service.get_telegram_file_url(request.file_id)
-                        temp_file_path = f"temp/{request.file_name}"
-
-                        download_result = await http_client.download_file(
-                            file_url, temp_file_path
-                        )
-
-                        if not download_result["success"]:
-                            error_msg = download_result.get('error', 'Неизвестная ошибка скачивания')
-                            raise ProcessingError(
-                                f"Ошибка скачивания: {error_msg}",
-                                request.file_name, "download",
-                            )
-
-                        processing_metrics.download_duration = download_result["duration"]
-                        processing_metrics.file_size_bytes = download_result["bytes_downloaded"]
-                else:
-                    if os.path.exists(temp_file_path):
-                        file_size = os.path.getsize(temp_file_path)
-                        processing_metrics.file_size_bytes = file_size
-                        processing_metrics.download_duration = 0.0
-                        logger.debug(
-                            f"Используем уже скачанный файл: {temp_file_path} ({file_size} байт)"
-                        )
-                    else:
-                        raise ProcessingError(
-                            f"Файл не найден: {temp_file_path}",
-                            request.file_name, "file_preparation",
-                        )
-
-                processing_metrics.file_format = os.path.splitext(request.file_name)[1]
-
-            # Этап 2: Транскрипция
-            if progress_tracker:
-                await progress_tracker.start_stage("transcription")
-
-            transcription_result = await self._optimized_transcription(
-                temp_file_path, request, processing_metrics, progress_tracker
-            )
-
-            # Этап 2.3 + 2.5: Параллельное выполнение speaker mapping и выбора шаблона
-            logger.info(
-                f"Проверка условий для speaker mapping: "
-                f"participants_list={request.participants_list is not None} "
-                f"({len(request.participants_list) if request.participants_list else 0} чел.), "
-                f"diarization={transcription_result.diarization is not None}"
-            )
-
-            mapping_result, template = await asyncio.gather(
-                self._run_speaker_mapping(request, transcription_result),
-                self._suggest_template_if_needed(request, transcription_result, progress_tracker),
-            )
-
-            # Фиксируем шаблон СРАЗУ, до возможной паузы на подтверждение —
-            # тогда template_id попадёт в сохранённое состояние и путь
-            # возобновления переиспользует тот же шаблон, а не выберет заново.
-            if not template:
+            if not user:
                 raise ProcessingError(
-                    "Не удалось выбрать шаблон",
-                    request.file_name, "template_selection",
+                    f"Пользователь {request.user_id} не найден",
+                    request.file_name, "validation",
                 )
-            request.template_id = template.id
 
-            # Обработка результатов speaker mapping. Карточка показывается при
-            # диаризации с ≥ 1 спикером (ADR-0002) — даже с пустым авто-маппингом
-            # и без списка участников (там имена вводятся вручную).
-            speaker_mapping, request_meeting_type = mapping_result
-            if _should_show_mapping_card(transcription_result.diarization):
-                if await self._mapping_confirmation_enabled(request.user_id):
-                    # task_id кладём в сессию ДО показа кнопок подтверждения,
-                    # чтобы он был в ней к моменту, когда пользователь сможет
-                    # нажать «Подтвердить» (иначе — гонка с attach). Сессия
-                    # живыми объектами: без сериализации, дрейфовать нечему.
-                    session = MappingSession(
-                        request=request,
-                        transcription_result=transcription_result,
-                        speaker_mapping=speaker_mapping,
-                        meeting_type=request_meeting_type,
-                        temp_file_path=temp_file_path,
-                        cache_key=cache_key,
-                        task_id=task_id,
-                        metrics=processing_metrics,
-                        template=template,
-                    )
-                    if await self.mapping_pause.open(
-                        session, channel=self._channel(progress_tracker)
-                    ):
-                        return RunOutcome.paused_on_card()
-                request.speaker_mapping = speaker_mapping or None
-            else:
-                request.speaker_mapping = None
+        processing_metrics.validation_duration = 0.5
 
-            # Этап 3: анализ, генерация, сборка и единый хвост «Завершение
-            # обработки» (страховка спикеров → кеш → история → доставка → статус).
-            if progress_tracker:
-                await progress_tracker.start_stage("analysis")
+        # Этап 1: Подготовка файла — запись уже на диске (prepare_record)
+        if progress_tracker:
+            await progress_tracker.start_stage("preparation")
 
-            outcome = await complete_processing(
-                request=request,
-                transcription_result=transcription_result,
-                template=template,
-                meeting_type=request_meeting_type,
-                deps=self._completion_deps(),
-                delivery=self._delivery_for(request, progress_tracker),
-                cache_key=cache_key,
-                task_id=task_id,
-                metrics=processing_metrics,
-                temp_file_path=temp_file_path,
-                progress_tracker=progress_tracker,
+        processing_metrics.file_size_bytes = record.size_bytes
+        processing_metrics.download_duration = 0.0
+        processing_metrics.file_format = record.file_format
+
+        # Этап 2: Транскрипция
+        if progress_tracker:
+            await progress_tracker.start_stage("transcription")
+
+        transcription_result = await self._optimized_transcription(
+            temp_file_path, request, processing_metrics, progress_tracker,
+            file_hash=record.file_hash,
+        )
+
+        # Этап 2.3 + 2.5: Параллельное выполнение speaker mapping и выбора шаблона
+        logger.info(
+            f"Проверка условий для speaker mapping: "
+            f"participants_list={request.participants_list is not None} "
+            f"({len(request.participants_list) if request.participants_list else 0} чел.), "
+            f"diarization={transcription_result.diarization is not None}"
+        )
+
+        mapping_result, template = await asyncio.gather(
+            self._run_speaker_mapping(request, transcription_result),
+            self._suggest_template_if_needed(request, transcription_result, progress_tracker),
+        )
+
+        # Фиксируем шаблон СРАЗУ, до возможной паузы на подтверждение —
+        # тогда template_id попадёт в сохранённое состояние и путь
+        # возобновления переиспользует тот же шаблон, а не выберет заново.
+        if not template:
+            raise ProcessingError(
+                "Не удалось выбрать шаблон",
+                request.file_name, "template_selection",
             )
-            return RunOutcome.ready(outcome.result)
+        request.template_id = template.id
+
+        # Обработка результатов speaker mapping. Карточка показывается при
+        # диаризации с ≥ 1 спикером (ADR-0002) — даже с пустым авто-маппингом
+        # и без списка участников (там имена вводятся вручную).
+        speaker_mapping, request_meeting_type = mapping_result
+        if _should_show_mapping_card(transcription_result.diarization):
+            if await self._mapping_confirmation_enabled(request.user_id):
+                # task_id кладём в сессию ДО показа кнопок подтверждения,
+                # чтобы он был в ней к моменту, когда пользователь сможет
+                # нажать «Подтвердить» (иначе — гонка с attach). Сессия
+                # живыми объектами: без сериализации, дрейфовать нечему.
+                session = MappingSession(
+                    request=request,
+                    transcription_result=transcription_result,
+                    speaker_mapping=speaker_mapping,
+                    meeting_type=request_meeting_type,
+                    temp_file_path=temp_file_path,
+                    cache_key=cache_key,
+                    task_id=task_id,
+                    metrics=processing_metrics,
+                    template=template,
+                    record=record,
+                )
+                if await self.mapping_pause.open(
+                    session, channel=self._channel(progress_tracker)
+                ):
+                    return RunOutcome.paused_on_card()
+            request.speaker_mapping = speaker_mapping or None
+        else:
+            request.speaker_mapping = None
+
+        # Этап 3: анализ, генерация, сборка и единый хвост «Завершение
+        # обработки» (страховка спикеров → кеш → история → доставка → статус).
+        if progress_tracker:
+            await progress_tracker.start_stage("analysis")
+
+        outcome = await complete_processing(
+            request=request,
+            transcription_result=transcription_result,
+            template=template,
+            meeting_type=request_meeting_type,
+            deps=self._completion_deps(),
+            delivery=self._delivery_for(request, progress_tracker),
+            cache_key=cache_key,
+            task_id=task_id,
+            metrics=processing_metrics,
+            progress_tracker=progress_tracker,
+        )
+        return RunOutcome.ready(outcome.result)
 
     async def _mapping_confirmation_enabled(self, telegram_user_id: int) -> bool:
         """Спрашивать ли имена спикеров у этого пользователя.
@@ -566,11 +497,15 @@ class ProcessingService(BaseProcessingService):
 
     async def _optimized_transcription(
         self, file_path: str, request: ProcessingRequest,
-        processing_metrics, progress_tracker=None,
+        processing_metrics, progress_tracker=None, file_hash: Optional[str] = None,
     ) -> Any:
-        """Оптимизированная транскрипция с кэшированием и предобработкой"""
+        """Оптимизированная транскрипция с кэшированием и предобработкой.
 
-        file_hash = await self.history.calculate_file_hash(file_path)
+        ``file_hash`` — хеш записи, уже посчитанный подготовкой записи; без него
+        хеш считается здесь.
+        """
+        if file_hash is None:
+            file_hash = await record_file_hash(file_path)
         cache_key = f"transcription:{file_hash}:{request.language}"
 
         cached_transcription = await performance_cache.get(cache_key)
@@ -641,31 +576,6 @@ class ProcessingService(BaseProcessingService):
         return await self.transcription_service.transcribe_with_diarization(
             file_path, language
         )
-
-    # ------------------------------------------------------------------
-    # File download
-    # ------------------------------------------------------------------
-
-    async def _download_telegram_file(self, request: ProcessingRequest) -> str:
-        """Скачать Telegram файл и вернуть путь"""
-        file_url = await self.file_service.get_telegram_file_url(request.file_id)
-        temp_file_path = f"temp/{request.file_name}"
-
-        async with OptimizedHTTPClient() as http_client:
-            result = await http_client.download_file(file_url, temp_file_path)
-
-            if not result["success"]:
-                error_msg = result.get('error', 'Неизвестная ошибка скачивания')
-                raise ProcessingError(
-                    f"Ошибка скачивания: {error_msg}",
-                    request.file_name,
-                    "download",
-                )
-
-        logger.info(
-            f"Файл скачан: {temp_file_path} ({result['bytes_downloaded']} байт)"
-        )
-        return temp_file_path
 
     # ------------------------------------------------------------------
     # Performance / monitoring

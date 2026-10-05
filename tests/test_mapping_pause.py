@@ -207,15 +207,15 @@ class PauseDriver:
 
 def _quiet_pipeline(monkeypatch, pss):
     """Конвейер без фоновых мониторов и без процессного кеша."""
+    import src.services.processing.record_preparation as preparation
     from src.performance.memory_management import memory_optimizer
     from src.performance.metrics import metrics_collector
 
     monkeypatch.setattr(metrics_collector, "is_monitoring", True)
     monkeypatch.setattr(memory_optimizer, "is_optimizing", True)
-    monkeypatch.setattr(
-        pss, "performance_cache",
-        SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock()),
-    )
+    empty_cache = SimpleNamespace(get=AsyncMock(return_value=None), set=AsyncMock())
+    monkeypatch.setattr(pss, "performance_cache", empty_cache)
+    monkeypatch.setattr(preparation, "performance_cache", empty_cache)
 
 
 def _fake_pipeline_world(service, transcription):
@@ -264,9 +264,6 @@ def generation():
         formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол"),
         history=SimpleNamespace(
             save_processing_history=AsyncMock(return_value=99),
-            cleanup_temp_file=AsyncMock(),
-            calculate_file_hash=AsyncMock(return_value="hash"),
-            generate_result_cache_key=lambda request, file_hash: f"result:{file_hash}",
         ),
     )
 
@@ -439,7 +436,7 @@ async def test_pipeline_with_speakers_stops_at_the_card(
     assert paused is True
     assert chat.cards and chat.delivered == []
     assert store.peek(42).task_id == "task-9"
-    assert store.peek(42).cache_key == "result:hash"
+    assert store.peek(42).cache_key.startswith("full_result_v2:")
     assert queue == []  # статус задачи проставит закрытие паузы
 
 

@@ -32,6 +32,7 @@ from src.services.mapping_session import MappingSession, MappingSessionStore
 from .completion import CompletionDeps, complete_processing
 from .failure_policy import fail_processing, on_tracker
 from .pause_channel import PauseChannel
+from .record_preparation import RecordFate
 
 # Запас до ленивого вытеснения в хранилище: таймер обязан успеть раньше, иначе
 # первый же peek (а его делает ловец текста на каждом сообщении) выбросит
@@ -317,9 +318,9 @@ class MappingPause:
                 cache_key=session.cache_key,
                 task_id=session.task_id,
                 metrics=session.metrics,
-                temp_file_path=session.temp_file_path,
                 progress_tracker=tracker,
             )
+            await _release(session, RecordFate.PROTOCOL_ASSEMBLED)
 
             if outcome.delivered:
                 logger.info(f"Обработка успешно завершена для пользователя {user_id}")
@@ -340,6 +341,7 @@ class MappingPause:
             await fail_processing(
                 e, task_id=session.task_id, notify_user=notify_user
             )
+            await _release(session, RecordFate.FAILED)
             if isinstance(e, ProcessingError):
                 raise
             raise ProcessingError(str(e), "unknown", "resume_error") from e
@@ -350,6 +352,12 @@ class MappingPause:
             await channel.say(text)
         except Exception as e:
             logger.warning(f"Не удалось отправить пояснение пользователю: {e}")
+
+
+async def _release(session: MappingSession, fate: RecordFate) -> None:
+    """Сообщить подготовленной записи исход прогона — файл решит она."""
+    if session.record is not None:
+        await session.record.release(fate)
 
 
 def _names_for(session: MappingSession, reason: CloseReason) -> Dict[str, str]:

@@ -10,7 +10,6 @@
 """
 
 import asyncio
-import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -20,7 +19,6 @@ from src.exceptions.processing import ProcessingError
 from src.models.diarization import Diarization, Segment
 from src.models.processing import ProcessingRequest, ProcessingResult, TranscriptionResult
 from src.services.mapping_session import MappingSessionStore
-from src.services.processing.processing_history import ProcessingHistoryService
 
 AUDIO = b"telegram-audio"
 
@@ -152,12 +150,16 @@ class World:
     # --- внешний мир -------------------------------------------------------
 
     def cache(self, cached, broken=False):
-        self.monkeypatch.setattr(
-            self.pss, "performance_cache", _ResultCache(cached, broken)
-        )
+        import src.services.processing.record_preparation as preparation
+
+        cache = _ResultCache(cached, broken)
+        self.monkeypatch.setattr(preparation, "performance_cache", cache)
+        self.monkeypatch.setattr(self.pss, "performance_cache", cache)
 
     def downloads(self, ok):
-        self.monkeypatch.setattr(self.pss, "OptimizedHTTPClient", _Downloads(ok))
+        import src.services.processing.record_preparation as preparation
+
+        self.monkeypatch.setattr(preparation, "OptimizedHTTPClient", _Downloads(ok))
 
     def external_file(self, name="ссылка.mp3"):
         path = self.tmp_path / "temp" / name
@@ -175,10 +177,6 @@ class World:
                 raise self.generation_error
             return {"meeting_title": "Планёрка"}
 
-        async def cleanup(path):
-            if os.path.exists(path):
-                os.remove(path)
-
         return SimpleNamespace(
             llm_gen=SimpleNamespace(
                 optimized_llm_generation=generate,
@@ -187,9 +185,6 @@ class World:
             formatter=SimpleNamespace(format_protocol=lambda *a, **k: "# Протокол"),
             history=SimpleNamespace(
                 save_processing_history=AsyncMock(return_value=1),
-                cleanup_temp_file=cleanup,
-                calculate_file_hash=ProcessingHistoryService.calculate_file_hash,
-                generate_result_cache_key=ProcessingHistoryService.generate_result_cache_key,
             ),
         )
 

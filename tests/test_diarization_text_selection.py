@@ -183,9 +183,6 @@ async def _run_preprocessing(monkeypatch, result):
     import src.services.processing.processing_service as pss
 
     service = pss.ProcessingService.__new__(pss.ProcessingService)
-    service.history = types.SimpleNamespace(
-        calculate_file_hash=AsyncMock(return_value="hash")
-    )
     service._run_transcription_async = AsyncMock(return_value=result)
 
     class _Cache:
@@ -214,7 +211,9 @@ async def _run_preprocessing(monkeypatch, result):
     request = ProcessingRequest(
         file_name="a.mp3", llm_provider="openai", user_id=1, language="ru",
     )
-    out = await service._optimized_transcription("f.mp3", request, types.SimpleNamespace())
+    out = await service._optimized_transcription(
+        "f.mp3", request, types.SimpleNamespace(), file_hash="hash"
+    )
     return captured, out
 
 

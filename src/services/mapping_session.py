@@ -41,6 +41,9 @@ class MappingSession:
     # (#99): ставится при входе в под-вид (sm_change), снимается на «◀️ Назад»,
     # выборе участника, применении имени, подтверждении и пропуске.
     editing_speaker: Optional[str] = None
+    # Подготовленная запись (``record_preparation.PreparedRecord``): закрытие
+    # паузы сообщает ей исход прогона, а она решает судьбу временного файла.
+    record: Optional[Any] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
