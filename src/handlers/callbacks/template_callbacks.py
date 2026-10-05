@@ -345,7 +345,10 @@ def setup_template_callbacks(user_service: UserService, template_service: Templa
             # Получаем пользователя и его шаблон по умолчанию
             user = await user_service.get_user_by_telegram_id(callback.from_user.id)
 
-            if not user or not user.default_template_id:
+            # 0 — сохранённый умный выбор, а не «нет шаблона»: проверка на
+            # истинность отвечала «не установлен» на кнопку «Умный выбор (по
+            # умолчанию)», которую меню записи само и показывает.
+            if not user or user.default_template_id is None:
                 await safe_edit_text(callback.message,
                     "❌ <b>Ошибка</b>\n\n"
                     "У вас не установлен шаблон по умолчанию.",

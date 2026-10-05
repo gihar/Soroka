@@ -600,14 +600,29 @@ async def test_template_handler_queues_its_choice(env, name, data, user, expecte
     assert await run.state.get_data() == {}
 
 
-async def test_saved_default_smart_is_rejected_as_no_default(env):
-    # default_template_id == 0 (умный выбор по умолчанию) ложен и не доходит
-    # до ветки умного выбора: пользователь видит «не установлен».
+async def test_saved_default_smart_launches_smart_selection(env):
+    # Меню записи показывает «Протокол: Умный выбор (по умолчанию)», когда
+    # default_template_id == 0, — и эта кнопка обязана запускать умный выбор,
+    # а не отвечать «не установлен».
+    e = env()
+
+    run = await _run_template_handler(
+        "use_saved_default_callback", "use_saved_default",
+        user=SimpleNamespace(default_template_id=0),
+    )
+
+    assert len(e.queue.add_task_calls) == 1
+    assert e.queue.add_task_calls[0].request.template_id == 0
+    assert "Умный выбор" in _edited_texts(e.edits)[0]
+    assert await run.state.get_data() == {}
+
+
+async def test_saved_default_absent_is_reported(env):
     e = env()
 
     await _run_template_handler(
         "use_saved_default_callback", "use_saved_default",
-        user=SimpleNamespace(default_template_id=0),
+        user=SimpleNamespace(default_template_id=None),
     )
 
     assert e.queue.add_task_calls == []
