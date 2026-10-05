@@ -4,10 +4,11 @@
 встречи едут одним экземпляром, а представления для промпта вычисляются здесь, а
 не у каждого вызывающего.
 
-Тема, дата и время встречи сюда не входят намеренно: ни один промпт их не читает
-(характеризация до рефакторинга это подтвердила — ``meeting_metadata`` уходил в
-``build_analysis_prompt`` и игнорировался). Дата протокола достраивается
-детерминированным фолбэком после генерации из самого запроса.
+Тема, дата и время встречи едут в контекст промпта: правила полей ``date`` и
+``time`` велят модели брать их, когда на записи их не назвали. Раньше они
+терялись по дороге (``meeting_metadata`` уходил в ``build_analysis_prompt`` и
+игнорировался). Детерминированный фолбэк даты после генерации остаётся
+страховкой на случай, если модель поле всё же оставит пустым.
 """
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -21,6 +22,9 @@ class MeetingInputs:
     """Входные данные встречи для генерации протокола (неизменяемые)."""
 
     participants: Tuple[Mapping[str, str], ...] = ()
+    topic: Optional[str] = None
+    date: Optional[str] = None
+    time: Optional[str] = None
     agenda: Optional[str] = None
     projects: Optional[str] = None
     speaker_mapping: Optional[Mapping[str, str]] = None
@@ -39,6 +43,9 @@ class MeetingInputs:
                 MappingProxyType(dict(participant))
                 for participant in request.participants_list or ()
             ),
+            topic=request.meeting_topic,
+            date=request.meeting_date,
+            time=request.meeting_time,
             agenda=request.meeting_agenda,
             projects=request.project_list,
             speaker_mapping=MappingProxyType(dict(mapping)) if mapping is not None else None,

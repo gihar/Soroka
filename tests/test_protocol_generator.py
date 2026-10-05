@@ -105,6 +105,7 @@ async def test_generation_result_is_json_serializable_with_settled_mapping():
     gen = _fast_generator(client)
     request = SimpleNamespace(
         participants_list=None, meeting_agenda=None, project_list=None,
+        meeting_topic=None, meeting_date=None, meeting_time=None,
         speaker_mapping={"SPEAKER_0": "Анна"},
     )
 

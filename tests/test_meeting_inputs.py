@@ -18,10 +18,13 @@ def _request(**fields) -> ProcessingRequest:
 
 
 def test_built_from_request_carries_what_the_generator_reads():
-    """Из запроса берутся участники, повестка, проекты и сопоставление; тип — от вызывающего."""
+    """Из запроса берутся участники, тема, дата, время, повестка, проекты и сопоставление; тип — от вызывающего."""
     meeting = MeetingInputs.from_request(
         _request(
             participants_list=[{"name": "Анна Смирнова", "role": "Аналитик"}],
+            meeting_topic="Релиз 2.0",
+            meeting_date="5 октября 2026",
+            meeting_time="11:00",
             meeting_agenda="1. Релиз",
             project_list="Сорока",
             speaker_mapping={"SPEAKER_1": "Анна Смирнова"},
@@ -30,6 +33,7 @@ def test_built_from_request_carries_what_the_generator_reads():
     )
 
     assert [dict(p) for p in meeting.participants] == [{"name": "Анна Смирнова", "role": "Аналитик"}]
+    assert (meeting.topic, meeting.date, meeting.time) == ("Релиз 2.0", "5 октября 2026", "11:00")
     assert meeting.agenda == "1. Релиз"
     assert meeting.projects == "Сорока"
     assert dict(meeting.speaker_mapping) == {"SPEAKER_1": "Анна Смирнова"}

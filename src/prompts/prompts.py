@@ -232,7 +232,8 @@ def build_analysis_prompt(
     transcription: str,
     participants_list: Optional[str] = None,
     meeting_agenda: Optional[str] = None,
-    project_list: Optional[str] = None
+    project_list: Optional[str] = None,
+    meeting_topic: Optional[str] = None,
 ) -> str:
     """
     Создает промпт для первого запроса:
@@ -244,6 +245,7 @@ def build_analysis_prompt(
         participants_list: Список участников
         meeting_agenda: Повестка встречи
         project_list: Список проектов
+        meeting_topic: Тема встречи — подсказка для определения типа
 
     Returns:
         Промпт для LLM
@@ -282,8 +284,11 @@ def build_analysis_prompt(
 {participants_list or 'Не предоставлен'}"""
 
     # Add context section if provided
-    if meeting_agenda or project_list:
+    if meeting_topic or meeting_agenda or project_list:
         context_section = "\n\n## ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ВСТРЕЧИ\n\n"
+
+        if meeting_topic:
+            context_section += f"**Тема встречи:**\n{meeting_topic}\n\n"
 
         if meeting_agenda:
             context_section += f"**Повестка встречи:**\n{meeting_agenda}\n\n"
@@ -338,11 +343,17 @@ def build_generation_prompt(
     speaker_mapping: Optional[Dict[str, str]] = None,
     meeting_type: str = "general",
     meeting_agenda: Optional[str] = None,
-    project_list: Optional[str] = None
+    project_list: Optional[str] = None,
+    meeting_topic: Optional[str] = None,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None,
 ) -> str:
     """
     Создает промпт для второго запроса (извлечение данных протокола).
     XML-tagged structure: context -> speakers -> fields -> rules -> transcription.
+
+    Дата и время подписаны именами ``meeting_date``/``meeting_time``: по ним к
+    ним обращаются правила полей ``date`` и ``time`` в системном промпте.
     """
     variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
     type_instructions = _get_type_specific_instructions(meeting_type)
@@ -351,6 +362,12 @@ def build_generation_prompt(
 
     # Context (before transcription)
     context_parts = []
+    if meeting_topic:
+        context_parts.append(f"Тема встречи: {meeting_topic}")
+    if meeting_date:
+        context_parts.append(f"Дата встречи (meeting_date): {meeting_date}")
+    if meeting_time:
+        context_parts.append(f"Время встречи (meeting_time): {meeting_time}")
     if meeting_agenda:
         context_parts.append(f"Повестка встречи:\n{meeting_agenda}")
     if project_list:

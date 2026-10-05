@@ -182,17 +182,43 @@ def test_snapshot_covers_every_case():
     assert set(_snapshot()) == set(CASES)
 
 
-async def test_meeting_topic_date_and_time_never_reach_the_prompts(monkeypatch):
-    """Тема, дата и время встречи на промпты не влияют: ни анализ, ни генерация их не видят.
+def _context_block(user_prompt: str) -> str:
+    """Блок <context> промпта генерации (пусто, если блока нет)."""
+    if "<context>" not in user_prompt:
+        return ""
+    return user_prompt.split("<context>", 1)[1].split("</context>", 1)[0]
 
-    Находка характеризации, а не пожелание: ``build_analysis_prompt`` принимал
-    ``meeting_metadata`` и молча его игнорировал. Дата протокола берётся
-    детерминированным фолбэком после генерации, не из промпта.
+
+async def test_meeting_topic_date_and_time_reach_the_generation_prompt(monkeypatch):
+    """Тема, дата и время, которые ввёл пользователь, модель видит в контексте генерации.
+
+    Правила полей ``date``/``time`` велят модели брать ``meeting_date`` и
+    ``meeting_time``, если на записи их не назвали, — значит, они обязаны быть в
+    промпте. Раньше ``meeting_metadata`` молча терялся по дороге к промпту.
     """
-    bare = await capture("bare", monkeypatch)
-    with_details = await capture("meeting_details", monkeypatch)
+    captured = await capture("meeting_details", monkeypatch)
+    generation = captured["calls"][-1]
+    context = _context_block(generation["user"])
 
-    assert with_details["calls"] == bare["calls"]
+    assert "Релиз 2.0" in context
+    assert "meeting_date" in context and "05.10.2026" in context
+    assert "meeting_time" in context and "11:00" in context
+
+
+async def test_meeting_topic_reaches_the_analysis_prompt(monkeypatch):
+    """Тема встречи — подсказка для определения её типа: анализ её тоже видит."""
+    captured = await capture("meeting_details", monkeypatch)
+    analysis = captured["calls"][0]
+
+    assert analysis["schema"] == "MeetingAnalysisSchema"
+    assert "Релиз 2.0" in analysis["user"]
+
+
+async def test_without_meeting_details_the_prompts_carry_no_context(monkeypatch):
+    """Пустые тема, дата и время блока контекста не порождают — промпт как без них."""
+    captured = await capture("bare", monkeypatch)
+
+    assert _context_block(captured["calls"][-1]["user"]) == ""
 
 
 async def test_request_mapping_without_meeting_type_does_not_skip_analysis(monkeypatch):
