@@ -231,8 +231,6 @@ def _build_field_specific_rules(template_variables: Dict[str, str]) -> str:
 def build_analysis_prompt(
     transcription: str,
     participants_list: Optional[str] = None,
-    meeting_metadata: Optional[Dict[str, str]] = None,
-    # New context parameters
     meeting_agenda: Optional[str] = None,
     project_list: Optional[str] = None
 ) -> str:
@@ -244,7 +242,6 @@ def build_analysis_prompt(
     Args:
         transcription: Текст транскрипции с метками SPEAKER_N
         participants_list: Список участников
-        meeting_metadata: Метаданные встречи (дата, время, тема)
         meeting_agenda: Повестка встречи
         project_list: Список проектов
 

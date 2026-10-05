@@ -62,3 +62,8 @@ class MeetingInputs:
         if not self.participants:
             return "Не предоставлен"
         return participants_service.format_participants_for_llm(self.participants)
+
+
+# Встреча, о которой не известно ничего: участников, повестки, проектов,
+# сопоставления и типа нет. Объект неизменяем, поэтому один на всех.
+NO_MEETING_INPUTS = MeetingInputs()

@@ -179,24 +179,7 @@ class LLMGenerationService:
 
             # Консолидированная двухэтапная генерация — единственный путь;
             # надёжность (rate-limit → circuit-breaker → retry) внутри модуля
-            from src.llm import protocol_generator
-
-            # Подготавливаем список участников
-            participants_list = None
-            if request.participants_list:
-                participants_list = "\n".join([
-                    f"{p.get('name', '')} ({p.get('role', '')})".strip()
-                    for p in request.participants_list
-                    if p.get('name')
-                ])
-
-            # Формируем метаданные встречи
-            meeting_metadata = {
-                'meeting_topic': request.meeting_topic or '',
-                'meeting_date': request.meeting_date or '',
-                'meeting_time': request.meeting_time or '',
-                'participants': participants_list or '',
-            }
+            from src.llm import MeetingInputs, protocol_generator
 
             # Единый фолбэк: форматированная транскрипция из диаризации либо сырая
             transcription_text = transcription_result.best_transcript
@@ -210,16 +193,7 @@ class LLMGenerationService:
                 transcription=transcription_text,
                 template_variables=template_variables,
                 template_name=template_name,
-                participants_list=participants_list,
-                meeting_metadata=meeting_metadata,
-                speaker_mapping=request.speaker_mapping,
-                meeting_type=meeting_type,
-                meeting_topic=request.meeting_topic,
-                meeting_date=request.meeting_date,
-                meeting_time=request.meeting_time,
-                participants=request.participants_list,
-                meeting_agenda=request.meeting_agenda,
-                project_list=request.project_list,
+                meeting=MeetingInputs.from_request(request, meeting_type=meeting_type),
             )
 
             record_metric(processing_metrics, 'llm_duration', time.time() - start_time)

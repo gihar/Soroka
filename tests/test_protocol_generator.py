@@ -4,10 +4,12 @@
 (надёжность). Мок — на границе OpenAI-клиента (chat.completions.create).
 """
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from src.llm import MeetingInputs
 from src.reliability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from src.reliability.rate_limiter import RateLimitConfig, RateLimiter
 from src.reliability.retry import RetryConfig, RetryManager
@@ -87,14 +89,31 @@ async def test_stage1_skipped_when_type_and_mapping_provided():
         preset=None,
         transcription="т",
         template_variables={},
-        meeting_type="brainstorm",
-        speaker_mapping={"SPEAKER_0": "Анна"},
+        meeting=MeetingInputs(meeting_type="brainstorm", speaker_mapping={"SPEAKER_0": "Анна"}),
     )
 
     assert client.chat.completions.create.call_count == 1  # только генерация
     assert result["_meeting_type"] == "brainstorm"
     assert result["_speaker_mapping"] == {"SPEAKER_0": "Анна"}
     assert result["_analysis_confidence"] == 0.0  # анализ не выполнялся
+
+
+async def test_generation_result_is_json_serializable_with_settled_mapping():
+    """Итог с готовым сопоставлением уходит в историю JSON-ом — сериализуется как есть."""
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [_response(GENERATION_PAYLOAD)]
+    gen = _fast_generator(client)
+    request = SimpleNamespace(
+        participants_list=None, meeting_agenda=None, project_list=None,
+        speaker_mapping={"SPEAKER_0": "Анна"},
+    )
+
+    result = await gen.generate(
+        preset=None, transcription="т", template_variables={},
+        meeting=MeetingInputs.from_request(request, meeting_type="brainstorm"),
+    )
+
+    assert json.loads(json.dumps(result, ensure_ascii=False))["_speaker_mapping"] == {"SPEAKER_0": "Анна"}
 
 
 async def test_preset_models_used_for_both_stages():

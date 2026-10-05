@@ -93,6 +93,7 @@ def test_mapping_prompt_previews_long_text_unless_full_matching():
 
 async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch):
     """_generate_two_stage не выбирает текст сам — ведёт свой transcription в промпт."""
+    from src.llm import MeetingInputs
     from src.llm import protocol_generator as generator
 
     calls = []
@@ -107,8 +108,8 @@ async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch)
         preset=None,
         transcription="ГОТОВЫЙ_ТЕКСТ",
         template_variables={},
-        meeting_type="technical",
-        speaker_mapping={"SPEAKER_1": "Иван Иванов"},
+        template_name=None,
+        meeting=MeetingInputs(meeting_type="technical", speaker_mapping={"SPEAKER_1": "Иван Иванов"}),
     )
     from src.llm import ModelStep
 
