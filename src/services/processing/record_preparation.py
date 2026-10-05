@@ -14,6 +14,7 @@
 import hashlib
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -155,9 +156,14 @@ def result_cache_key(request: ProcessingRequest, file_hash: str) -> str:
 
 
 async def _download_telegram_file(request: ProcessingRequest, file_service: Any) -> str:
-    """Скачать Telegram-файл во временный каталог и вернуть путь."""
+    """Скачать Telegram-файл во временный каталог и вернуть путь.
+
+    Имя копии уникально на прогон: прогон удаляет свою копию, когда закончил с
+    ней, и два одновременных голосовых с одинаковым именем по общему пути
+    удаляли бы файл друг у друга.
+    """
     file_url = await file_service.get_telegram_file_url(request.file_id)
-    temp_file_path = f"temp/{request.file_name}"
+    temp_file_path = f"temp/{uuid.uuid4().hex[:12]}_{request.file_name}"
 
     async with OptimizedHTTPClient() as http_client:
         result = await http_client.download_file(file_url, temp_file_path)

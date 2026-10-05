@@ -86,6 +86,7 @@ class _Downloads:
 
     def __init__(self, ok=True):
         self.ok = ok
+        self.paths = []
 
     def __call__(self, *args, **kwargs):
         return self
@@ -99,6 +100,7 @@ class _Downloads:
     async def download_file(self, url, file_path, *args, **kwargs):
         if not self.ok:
             return {"success": False, "error": "404"}
+        self.paths.append(file_path)
         with open(file_path, "wb") as f:
             f.write(AUDIO)
         return {"success": True, "bytes_downloaded": len(AUDIO), "duration": 0.0}
@@ -163,15 +165,18 @@ class World:
     def downloads(self, ok):
         import src.services.processing.record_preparation as preparation
 
-        self.monkeypatch.setattr(preparation, "OptimizedHTTPClient", _Downloads(ok))
+        self.fetched = _Downloads(ok)
+        self.monkeypatch.setattr(preparation, "OptimizedHTTPClient", self.fetched)
 
     def external_file(self, name="ссылка.mp3"):
         path = self.tmp_path / "temp" / name
         path.write_bytes(b"external-audio")
         return path
 
-    def telegram_file(self, name="голос.mp3"):
-        return self.tmp_path / "temp" / name
+    def telegram_file(self):
+        """Куда прогон скачал Telegram-файл (последнее скачивание)."""
+        assert self.fetched.paths, "прогон ничего не скачивал"
+        return self.tmp_path / self.fetched.paths[-1]
 
     # --- сценарии ----------------------------------------------------------
 
@@ -466,3 +471,26 @@ async def test_failed_telegram_download_is_a_download_error(world):
         await world.run(_telegram_request())
 
     assert "Ошибка скачивания" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Одновременные прогоны
+# ---------------------------------------------------------------------------
+
+
+async def test_same_named_telegram_records_get_separate_files(world):
+    """Два голосовых с одинаковым именем идут разными прогонами одновременно.
+
+    Каждый прогон удаляет свою скачанную копию, когда закончил с ней, — если
+    бы обе лежали по одному пути, первый прогон удалил бы файл второго.
+    """
+    from src.services.processing.record_preparation import prepare_record
+
+    file_service = SimpleNamespace(
+        get_telegram_file_url=AsyncMock(return_value="https://telegram/file")
+    )
+    first = await prepare_record(_telegram_request("голос.mp3"), file_service=file_service)
+    second = await prepare_record(_telegram_request("голос.mp3"), file_service=file_service)
+
+    assert first.path != second.path
+    assert first.file_format == second.file_format == ".mp3"
