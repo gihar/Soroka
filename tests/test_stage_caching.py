@@ -61,7 +61,7 @@ async def test_llm_generation_runs_on_every_call(gen_service, monkeypatch):
 
 def test_result_cache_key_includes_agenda_and_projects():
     """Смена повестки или списка проектов → другой ключ кеша результата."""
-    from src.services.processing.processing_history import ProcessingHistoryService
+    from src.services.processing.record_preparation import result_cache_key
 
     base = _request()
     with_agenda = _request()
@@ -69,9 +69,9 @@ def test_result_cache_key_includes_agenda_and_projects():
     with_projects = _request()
     with_projects.project_list = "Проект Альфа"
 
-    key_base = ProcessingHistoryService.generate_result_cache_key(base, "abc123")
-    key_agenda = ProcessingHistoryService.generate_result_cache_key(with_agenda, "abc123")
-    key_projects = ProcessingHistoryService.generate_result_cache_key(with_projects, "abc123")
+    key_base = result_cache_key(base, "abc123")
+    key_agenda = result_cache_key(with_agenda, "abc123")
+    key_projects = result_cache_key(with_projects, "abc123")
 
     assert key_base != key_agenda
     assert key_base != key_projects
@@ -80,9 +80,9 @@ def test_result_cache_key_includes_agenda_and_projects():
 
 def test_result_cache_key_is_versioned():
     """Ключ несёт версию формы результата: старые pickle-записи не поднимаются (#59)."""
-    from src.services.processing.processing_history import ProcessingHistoryService
+    from src.services.processing.record_preparation import result_cache_key
 
-    key = ProcessingHistoryService.generate_result_cache_key(_request(), "abc123")
+    key = result_cache_key(_request(), "abc123")
 
     # Версионный префикс в ключе, а не старый «full_result:».
     assert key.startswith("full_result_v2:")

@@ -30,7 +30,6 @@ sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "src"))
 
 import src.handlers.callbacks.processing_callbacks as pc  # noqa: E402
-import src.handlers.message_handlers as mh  # noqa: E402
 import src.services.task_queue_manager as tqm_mod  # noqa: E402
 import src.ux.queue_tracker as qt_mod  # noqa: E402
 
@@ -98,7 +97,8 @@ class _FakeQueueManager:
 class _FakeTrackerFactory:
     @staticmethod
     async def create_tracker(**kwargs):
-        # message_id=None → блок обновления БД в _process_file пропускается.
+        # message_id=None → запуск не пишет message_id в БД; is_active=False →
+        # монитор позиции выходит сразу.
         return SimpleNamespace(message_id=None, is_active=False)
 
 
@@ -115,7 +115,6 @@ def _patch_processing(monkeypatch):
     fake_qm = _FakeQueueManager()
     monkeypatch.setattr(tqm_mod, "task_queue_manager", fake_qm)
     monkeypatch.setattr(qt_mod, "QueueTrackerFactory", _FakeTrackerFactory)
-    monkeypatch.setattr(mh, "_monitor_queue_position", AsyncMock())
     monkeypatch.setattr(pc, "safe_edit_text", AsyncMock())
     return fake_qm
 
@@ -289,7 +288,7 @@ async def test_configure_with_saved_list_shows_saved_button(monkeypatch):
     assert "use_saved_participants" in data
     # Кнопки «Добавить участников» больше нет: экран сам открывает шаг ввода
     # и принимает текст (критика v11).
-    assert data == {"use_saved_participants", "skip_participants"}
+    assert data == {"use_saved_participants", "add_meeting_agenda", "skip_participants"}
 
 
 @pytest.mark.asyncio
@@ -313,4 +312,4 @@ async def test_configure_without_saved_list_hides_saved_button(monkeypatch):
     keyboard = callback.message.answer.call_args.kwargs["reply_markup"]
     data = _callback_data_set(keyboard)
     assert "use_saved_participants" not in data
-    assert data == {"skip_participants"}
+    assert data == {"add_meeting_agenda", "skip_participants"}

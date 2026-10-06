@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.llm import MeetingInputs
 from src.models.llm_schemas import PROTOCOL_DATA_SCHEMA
 from src.reliability.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from src.reliability.rate_limiter import RateLimitConfig, RateLimiter
@@ -64,8 +65,7 @@ async def _generate(gen, *, template_variables, template_name=None):
         transcription="т",
         template_variables=template_variables,
         template_name=template_name,
-        meeting_type="status",
-        speaker_mapping={"SPEAKER_0": "Анна"},
+        meeting=MeetingInputs(meeting_type="status", speaker_mapping={"SPEAKER_0": "Анна"}),
     )
 
 

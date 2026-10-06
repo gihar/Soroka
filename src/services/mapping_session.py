@@ -41,6 +41,9 @@ class MappingSession:
     # (#99): ставится при входе в под-вид (sm_change), снимается на «◀️ Назад»,
     # выборе участника, применении имени, подтверждении и пропуске.
     editing_speaker: Optional[str] = None
+    # Подготовленная запись (``record_preparation.PreparedRecord``): закрытие
+    # паузы сообщает ей исход прогона, а она решает судьбу временного файла.
+    record: Optional[Any] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -55,7 +58,7 @@ class MappingSessionStore:
 
     Карточка при этом по-прежнему одна: ``peek``/``take`` работают с активной
     (последней сохранённой) сессией пользователя — предыдущую при новой паузе
-    доводит до протокола ``mapping_timeout.finish_superseded_session``.
+    доводит до протокола пауза на карточке (``processing.mapping_pause``).
     """
 
     def __init__(self, ttl_seconds: int = 3600):

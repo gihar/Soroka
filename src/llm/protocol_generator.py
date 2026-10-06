@@ -36,6 +36,7 @@ from src.exceptions.processing import (
     LLMQuotaExhaustedError,
 )
 from src.llm.json_utils import safe_json_parse
+from src.llm.meeting_inputs import NO_MEETING_INPUTS, MeetingInputs
 from src.llm.model_step import ModelStep, resolve_step
 from src.models.llm_schemas import MEETING_ANALYSIS_SCHEMA, PROTOCOL_DATA_SCHEMA
 from src.prompts.prompts import (
@@ -338,12 +339,15 @@ class ProtocolGenerator:
 
     async def generate(self, *, preset: Optional[Dict[str, Any]],
                        transcription: str, template_variables: Dict[str, str],
-                       **context) -> Dict[str, Any]:
+                       template_name: Optional[str] = None,
+                       meeting: MeetingInputs = NO_MEETING_INPUTS) -> Dict[str, Any]:
         """Сгенерировать протокол по транскрипции (двухэтапно, с надёжностью).
 
         ``transcription`` — уже готовый текст: вызывающий передаёт
         ``best_transcript`` (формат из диаризации либо сырой), генератору знать о
-        диаризации не нужно.
+        диаризации не нужно. ``template_name`` выбирает контракт ЭТАПА 2 (бриф
+        системного шаблона или legacy), ``meeting`` — всё, что известно о
+        встрече помимо записи; не передан — о встрече не известно ничего.
         """
         self._require_provider_key(preset)
         return await self._protected(
@@ -351,7 +355,8 @@ class ProtocolGenerator:
             preset=preset,
             transcription=transcription,
             template_variables=template_variables,
-            **context,
+            template_name=template_name,
+            meeting=meeting,
         )
 
     async def structured_call(self, *, system_prompt: str, user_prompt: str,
@@ -417,37 +422,18 @@ class ProtocolGenerator:
 
     async def _generate_two_stage(self, *, preset: Optional[Dict[str, Any]],
                                   transcription: str, template_variables: Dict[str, str],
-                                  **kwargs) -> Dict[str, Any]:
+                                  template_name: Optional[str],
+                                  meeting: MeetingInputs) -> Dict[str, Any]:
         """Two-stage generation: analysis (тип встречи + спикеры) → protocol."""
-        participants = kwargs.get('participants')
-        meeting_metadata = {
-            'meeting_topic': kwargs.get('meeting_topic', ''),
-            'meeting_date': kwargs.get('meeting_date', ''),
-            'meeting_time': kwargs.get('meeting_time', '')
-        }
-
         # transcription — уже готовый текст (best_transcript вызывающего): анализ и
         # генерация идут по нему, отдельного выбора «формат или сырой» здесь нет.
-        analysis_transcription = transcription
-
-        participants_list_str = "Не предоставлен"
-        if participants:
-            try:
-                from src.services.participants_service import participants_service
-                participants_list_str = participants_service.format_participants_for_llm(participants)
-            except ImportError:
-                participants_list_str = "\\n".join([f"- {p.get('name', 'Unknown')}" for p in participants])
-
-        provided_meeting_type = kwargs.get('meeting_type')
-        provided_speaker_mapping = kwargs.get('speaker_mapping')
-
-        if provided_meeting_type and provided_speaker_mapping:
+        if meeting.analysis_settled:
             logger.info(
-                f"ЭТАП 1 пропущен: тип встречи ({provided_meeting_type}) и сопоставление "
-                f"спикеров ({len(provided_speaker_mapping)} спикеров) уже определены"
+                f"ЭТАП 1 пропущен: тип встречи ({meeting.meeting_type}) и сопоставление "
+                f"спикеров ({len(meeting.speaker_mapping)} спикеров) уже определены"
             )
-            meeting_type = provided_meeting_type
-            speaker_mapping = provided_speaker_mapping
+            meeting_type = meeting.meeting_type
+            speaker_mapping = dict(meeting.speaker_mapping)
             analysis_result = {}
         else:
             logger.info("Запуск ЭТАПА 1: Анализ встречи и сопоставление спикеров")
@@ -455,11 +441,11 @@ class ProtocolGenerator:
             analysis_result = await self._call_openai(
                 system_prompt=build_analysis_system_prompt(),
                 user_prompt=build_analysis_prompt(
-                    transcription=analysis_transcription,
-                    participants_list=participants_list_str,
-                    meeting_metadata=meeting_metadata,
-                    meeting_agenda=kwargs.get('meeting_agenda'),
-                    project_list=kwargs.get('project_list')
+                    transcription=transcription,
+                    participants_list=meeting.participants_for_prompt(),
+                    meeting_agenda=meeting.agenda,
+                    project_list=meeting.projects,
+                    meeting_topic=meeting.topic,
                 ),
                 schema=MEETING_ANALYSIS_SCHEMA,
                 step=ModelStep.ANALYSIS,
@@ -475,18 +461,21 @@ class ProtocolGenerator:
 
         # Единая точка: бриф-контракт для системного шаблона, legacy — для кастомного.
         generation_schema, generation_system_prompt = _select_generation_contract(
-            kwargs.get('template_name'), template_variables
+            template_name, template_variables
         )
 
         generation_result = await self._call_openai(
             system_prompt=generation_system_prompt,
             user_prompt=build_generation_prompt(
-                transcription=analysis_transcription,
+                transcription=transcription,
                 template_variables=template_variables,
                 speaker_mapping=speaker_mapping,
                 meeting_type=meeting_type,
-                meeting_agenda=kwargs.get('meeting_agenda'),
-                project_list=kwargs.get('project_list')
+                meeting_agenda=meeting.agenda,
+                project_list=meeting.projects,
+                meeting_topic=meeting.topic,
+                meeting_date=meeting.date,
+                meeting_time=meeting.time,
             ),
             schema=generation_schema,
             step=ModelStep.GENERATION,
@@ -500,7 +489,7 @@ class ProtocolGenerator:
         final_result['_meeting_type'] = meeting_type
         final_result['_speaker_mapping'] = speaker_mapping
         final_result['_analysis_confidence'] = (
-            0.0 if provided_meeting_type else analysis_result.get('analysis_confidence', 0.0)
+            0.0 if meeting.meeting_type else analysis_result.get('analysis_confidence', 0.0)
         )
         final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
 

@@ -10,6 +10,7 @@ class ParticipantsInput(StatesGroup):
     waiting_for_participants = State()  # Ожидание ввода списка (текст или файл)
     confirm_participants = State()  # Подтверждение распарсенного списка
     confirm_meeting_info = State()  # Подтверждение автоматически извлеченной информации
+    waiting_for_agenda = State()  # Ожидание повестки и (строкой «Проекты:») проектов
 
 
 class SpeakerMappingEdit(StatesGroup):

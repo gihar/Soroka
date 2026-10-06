@@ -15,7 +15,6 @@ from src.config import settings
 from src.database import queue_repo
 from src.models.processing import ProcessingRequest
 from src.models.task_queue import QueuedTask, TaskPriority, TaskStatus
-from src.services import provider_failure
 
 try:
     from src.performance.oom_protection import get_oom_protection
@@ -286,6 +285,7 @@ class TaskQueueManager:
     async def _process_task(self, task: QueuedTask):
         """Обработать задачу"""
         from src.config import settings as cfg
+        from src.services.processing.failure_policy import fail_processing, on_tracker
         from src.services.processing_service import ProcessingService
         from src.ux.progress_tracker import ProgressFactory
 
@@ -317,17 +317,16 @@ class TaskQueueManager:
             # на паузу для подтверждения сопоставления, он окажется в сохранённом
             # состоянии ДО показа кнопок — без гонки с отдельной привязкой.
             processing_service = ProcessingService()
-            result = await processing_service.process_file(
+            outcome = await processing_service.process_file(
                 task.request, progress_tracker, task_id=str(task.task_id)
             )
 
-            # Проверяем, была ли обработка приостановлена для подтверждения сопоставления
-            if result is None:
+            # Исход прогона явный: приостановлен на карточке сопоставления?
+            if outcome.paused:
                 logger.info(f"Обработка задачи {task.task_id} приостановлена - ожидаю подтверждения от пользователя")
-                # Результат и финальный статус задачи проставит путь
-                # возобновления (continue_processing_after_mapping_confirmation).
-                # НЕ завершаем трекер: иначе появится ложное «Обработка завершена!
-                # Протокол готов» ещё ДО подтверждения сопоставления.
+                # Результат и финальный статус задачи проставит закрытие паузы
+                # (mapping_pause). НЕ завершаем трекер: иначе появится ложное
+                # «Обработка завершена! Протокол готов» ещё ДО подтверждения.
                 paused = True
                 return
 
@@ -338,30 +337,22 @@ class TaskQueueManager:
 
         except Exception as e:
             logger.error(f"Ошибка обработки задачи {task.task_id}: {e}")
-            
-            # Останавливаем прогресс-трекер с сообщением об ошибке
-            if progress_tracker:
-                try:
-                    # Определяем текущий этап для отображения ошибки
-                    current_stage = progress_tracker.current_stage or "preparation"
-                    
-                    # Трекер сам подбирает пользовательский текст по причине
-                    # сбоя (error_presentation): сюда идёт сырой текст — он
-                    # нужен для выбора шага и уходит в лог, не пользователю.
-                    await progress_tracker.error(current_stage, str(e), str(e))
-                except Exception as tracker_error:
-                    logger.error(f"Ошибка обновления прогресс-трекера: {tracker_error}")
-            
-            # Сбой провайдера — повод написать администраторам: он ломает
-            # обработку у всех сразу. Решение «когда писать» живёт в
-            # provider_failure: путей сбоя два, и у второго (возобновление
-            # после паузы) своей ветки уведомления быть не должно.
-            try:
-                await provider_failure.report_llm_failure(e)
-            except Exception as admin_error:
-                logger.error(
-                    f"Не удалось уведомить админов о сбое провайдера: {admin_error}"
-                )
+
+            async def nobody(error: Exception) -> None:
+                logger.warning("Сбой до создания трекера: показать его негде")
+
+            # Политика сбоя одна на воркер и на закрытие паузы (ADR-0011):
+            # статус задачи, пользователь, администратор (provider_failure).
+            # Канал воркера к пользователю — трекер прогресса; текст по причине
+            # сбоя трекер берёт из error_presentation сам.
+            await fail_processing(
+                e,
+                task_id=str(task.task_id),
+                notify_user=(
+                    on_tracker(progress_tracker, default_stage="preparation")
+                    if progress_tracker else nobody
+                ),
+            )
 
             # НЕ пробрасываем исключение - обрабатываем локально
         

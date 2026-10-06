@@ -11,7 +11,6 @@
 затирается, а доводится до протокола тем же путём, что таймер.
 """
 
-import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -134,7 +133,7 @@ def test_discard_targets_one_recording():
     """discard выбрасывает названную запись и не трогает соседнюю.
 
     В проде две живые сессии одновременно не встречаются — предыдущую доводит
-    ``finish_superseded_session`` до того, как слот займёт новая. Но ключ
+    пауза на карточке (``MappingPause.open``) до того, как слот займёт новая. Но ключ
     обязан работать точечно: иначе «UI не показался» по второй записи унёс бы
     первую, а это ровно та потеря, ради которой ключ и вводился.
     """
@@ -199,133 +198,8 @@ def test_stale_card_text_does_not_claim_the_work_is_lost():
     assert "доставлен" in _DELIVERED_TEXT.lower()
 
 
-# ---------------------------------------------------------------------------
-# Таймер привязан к своей записи
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_timer_delivers_only_its_own_recording():
-    from src.services.mapping_timeout import deliver_on_timeout
-
-    store = MappingSessionStore()
-    first = _session(task_id="task-1")
-    store.save(42, first)
-    second = _session(task_id="task-2")
-    store.save(42, second)
-
-    service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=AsyncMock()
-    )
-    await deliver_on_timeout(
-        service, store, user_id=42, session_key="task-1",
-        bot=SimpleNamespace(send_message=AsyncMock()), chat_id=1, delay_seconds=0,
-    )
-
-    delivered = service.continue_processing_after_mapping_confirmation.await_args
-    assert delivered.kwargs["session"] is first
-    assert store.peek(42) is second, "вторая запись не должна пострадать"
-
-
-@pytest.mark.asyncio
-async def test_timer_is_silent_when_its_recording_is_gone():
-    from src.services.mapping_timeout import deliver_on_timeout
-
-    store = MappingSessionStore()
-    store.save(42, _session(task_id="task-1"))
-    store.take_regardless(42, "task-1")
-
-    service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=AsyncMock()
-    )
-    bot = SimpleNamespace(send_message=AsyncMock())
-    await deliver_on_timeout(
-        service, store, user_id=42, session_key="task-1",
-        bot=bot, chat_id=1, delay_seconds=0,
-    )
-
-    service.continue_processing_after_mapping_confirmation.assert_not_awaited()
-    bot.send_message.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Новая пауза доводит предыдущую запись, а не выбрасывает её
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_previous_recording_is_finished_not_dropped():
-    from src.services.mapping_timeout import finish_superseded_session
-
-    store = MappingSessionStore()
-    previous = _session(task_id="task-1", mapping={"SPEAKER_1": "Иван"})
-    store.save(42, previous)
-
-    service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=AsyncMock()
-    )
-    finished = await finish_superseded_session(
-        service, store, user_id=42,
-        bot=SimpleNamespace(send_message=AsyncMock()), chat_id=1,
-    )
-
-    assert finished is True
-    call = service.continue_processing_after_mapping_confirmation.await_args
-    assert call.kwargs["session"] is previous
-    assert call.kwargs["confirmed_mapping"] == {"SPEAKER_1": "Иван"}
-
-
-@pytest.mark.asyncio
-async def test_superseded_recording_is_explained_in_one_line():
-    from src.services.mapping_timeout import finish_superseded_session
-
-    store = MappingSessionStore()
-    store.save(42, _session(task_id="task-1"))
-    bot = SimpleNamespace(send_message=AsyncMock())
-
-    await finish_superseded_session(
-        SimpleNamespace(continue_processing_after_mapping_confirmation=AsyncMock()),
-        store, user_id=42, bot=bot, chat_id=1,
-    )
-
-    text = bot.send_message.await_args.kwargs["text"]
-    assert "Участник N" in text, "пользователь должен узнать цену досрочного конца"
-    assert len(text.splitlines()) <= 2
-
-
-@pytest.mark.asyncio
-async def test_nothing_to_supersede_is_a_noop():
-    from src.services.mapping_timeout import finish_superseded_session
-
-    bot = SimpleNamespace(send_message=AsyncMock())
-    finished = await finish_superseded_session(
-        SimpleNamespace(continue_processing_after_mapping_confirmation=AsyncMock()),
-        MappingSessionStore(), user_id=42, bot=bot, chat_id=1,
-    )
-
-    assert finished is False
-    bot.send_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_superseding_survives_a_failing_resume():
-    """Довести не вышло — новая запись всё равно обязана встать на паузу."""
-    from src.services.mapping_timeout import finish_superseded_session
-
-    store = MappingSessionStore()
-    store.save(42, _session(task_id="task-1"))
-
-    service = SimpleNamespace(
-        continue_processing_after_mapping_confirmation=AsyncMock(
-            side_effect=RuntimeError("LLM упал")
-        )
-    )
-    finished = await finish_superseded_session(
-        service, store, user_id=42,
-        bot=SimpleNamespace(send_message=AsyncMock()), chat_id=1,
-    )
-
-    assert finished is False
+# Таймер привязан к своей записи, новая пауза доводит предыдущую — это
+# поведение паузы на карточке: tests/test_mapping_pause.py («Вытеснение»).
 
 
 # ---------------------------------------------------------------------------
@@ -436,10 +310,3 @@ async def test_asyncio_is_not_needed_for_a_missing_session():
 
     message = SimpleNamespace(from_user=SimpleNamespace(id=4242), text="Иван")
     assert await _capturing_speaker_name(message, None) is False
-
-
-def test_module_imports_asyncio_free():
-    """Заглушка-страховка от случайного удаления asyncio-импорта в таймере."""
-    import src.services.mapping_timeout as mt
-
-    assert asyncio is not None and hasattr(mt, "deliver_on_timeout")

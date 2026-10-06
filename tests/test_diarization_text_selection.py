@@ -93,6 +93,7 @@ def test_mapping_prompt_previews_long_text_unless_full_matching():
 
 async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch):
     """_generate_two_stage не выбирает текст сам — ведёт свой transcription в промпт."""
+    from src.llm import MeetingInputs
     from src.llm import protocol_generator as generator
 
     calls = []
@@ -107,8 +108,8 @@ async def test_two_stage_forwards_given_transcription_to_generation(monkeypatch)
         preset=None,
         transcription="ГОТОВЫЙ_ТЕКСТ",
         template_variables={},
-        meeting_type="technical",
-        speaker_mapping={"SPEAKER_1": "Иван Иванов"},
+        template_name=None,
+        meeting=MeetingInputs(meeting_type="technical", speaker_mapping={"SPEAKER_1": "Иван Иванов"}),
     )
     from src.llm import ModelStep
 
@@ -183,9 +184,6 @@ async def _run_preprocessing(monkeypatch, result):
     import src.services.processing.processing_service as pss
 
     service = pss.ProcessingService.__new__(pss.ProcessingService)
-    service.history = types.SimpleNamespace(
-        calculate_file_hash=AsyncMock(return_value="hash")
-    )
     service._run_transcription_async = AsyncMock(return_value=result)
 
     class _Cache:
@@ -214,7 +212,9 @@ async def _run_preprocessing(monkeypatch, result):
     request = ProcessingRequest(
         file_name="a.mp3", llm_provider="openai", user_id=1, language="ru",
     )
-    out = await service._optimized_transcription("f.mp3", request, types.SimpleNamespace())
+    out = await service._optimized_transcription(
+        "f.mp3", request, types.SimpleNamespace(), file_hash="hash"
+    )
     return captured, out
 
 

@@ -2,6 +2,8 @@
 Обработчики callback запросов для обработки файлов и управления задачами.
 """
 
+from typing import Any, Mapping
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -9,144 +11,121 @@ from loguru import logger
 
 from src.services import ProcessingService, TemplateService, UserService
 from src.services.participants_service import participants_service
-from src.utils.request_diagnostics import log_meeting_inputs
+from src.services.processing_launch import (
+    SMART_SELECTION,
+    ExternalRecord,
+    LaunchInputError,
+    MeetingDetails,
+    ProcessingChoice,
+    Record,
+    RecordLost,
+    SpecificTemplate,
+    TelegramRecord,
+    TemplateNotChosen,
+    launch_processing,
+)
 from src.utils.telegram_safe import safe_edit_text
+from src.ux import queue_tracker
 from src.ux.html_text import esc
 from src.ux.message_builder import RECORD_LOST_FILE, RECORD_LOST_LINK
 
 from .helpers import _safe_callback_answer
 
+# Тексты ошибок запуска. Записи потерянной — общие с приёмом (message_builder).
+_TEMPLATE_NOT_CHOSEN = (
+    "❌ Шаблон не выбран.\n"
+    "Отправьте запись заново и выберите шаблон."
+)
+_LAUNCH_FAILED = (
+    "❌ Не получилось запустить обработку.\n"
+    "Отправьте запись заново."
+)
 
-async def _process_file(callback: CallbackQuery, state: FSMContext, processing_service: ProcessingService):
-    """Начать обработку файла"""
-    import asyncio
 
-    from src.models.processing import ProcessingRequest
-    from src.models.task_queue import TaskPriority
-    from src.services.task_queue_manager import task_queue_manager
-    from src.ux.queue_tracker import QueueTrackerFactory
+def launch_input_from_state(data: Mapping[str, Any]) -> tuple[Record, ProcessingChoice]:
+    """Прочитать FSM-словарь диалога как вход «Запуска обработки».
 
-    try:
-        # Получаем данные из состояния
-        data = await state.get_data()
+    Единственное место, где ключи состояния превращаются в типизированный
+    вход. ``template_id``: 0 — умный выбор, нет ключа — шаблон не выбран.
+    Шаблон проверяется раньше записи. Неполный вход — ``LaunchInputError``.
+    """
+    template_id = data.get('template_id')
+    if template_id is None:
+        raise TemplateNotChosen()
+    template = SMART_SELECTION if template_id == 0 else SpecificTemplate(template_id)
 
-        protocol_info = (data.get('protocol_info') or {})
-        log_meeting_inputs(
-            "очередь (callback)",
-            participants_list=data.get('participants_list'),
-            meeting_topic=data.get('meeting_topic'),
-            meeting_date=data.get('meeting_date'),
-            meeting_time=data.get('meeting_time'),
-            meeting_agenda=protocol_info.get('meeting_agenda'),
-            project_list=protocol_info.get('project_list'),
+    if data.get('is_external_file'):
+        record = ExternalRecord(
+            file_path=data.get('file_path'),
+            file_name=data.get('file_name'),
+            file_url=data.get('file_url'),
         )
+    else:
+        record = TelegramRecord(file_id=data.get('file_id'), file_name=data.get('file_name'))
 
-        # Проверяем наличие модели (template_id может быть None для умного выбора)
-        if not data.get('llm_provider'):
-            await safe_edit_text(callback.message,
-                "❌ Настройки обработки не сохранились.\n"
-                "Отправьте запись заново — и снова выберите способ обработки."
-            )
-            await state.clear()
-            return
+    choice = ProcessingChoice(
+        template=template,
+        participants=data.get('participants_list'),
+        meeting=MeetingDetails(
+            topic=data.get('meeting_topic'),
+            date=data.get('meeting_date'),
+            time=data.get('meeting_time'),
+            agenda=data.get('meeting_agenda'),
+            projects=data.get('project_list'),
+        ),
+    )
+    return record, choice
 
-        # Проверяем template_id только если не используется умный выбор
-        if (not data.get('use_smart_selection') and
-            not data.get('template_id')):
-            await safe_edit_text(callback.message,
-                "❌ Шаблон не выбран.\n"
-                "Отправьте запись заново и выберите шаблон."
-            )
-            await state.clear()
-            return
 
-        # Проверяем, что есть либо file_id (для Telegram файлов), либо file_path (для внешних файлов)
-        is_external_file = data.get('is_external_file', False)
-        if is_external_file:
-            if not data.get('file_path') or not data.get('file_name'):
-                await safe_edit_text(callback.message,
-                    RECORD_LOST_LINK
-                )
-                await state.clear()
-                return
-        else:
-            if not data.get('file_id') or not data.get('file_name'):
-                await safe_edit_text(callback.message,
-                    RECORD_LOST_FILE
-                )
-                await state.clear()
-                return
+def _input_error_text(error: LaunchInputError) -> str:
+    if isinstance(error, RecordLost):
+        return RECORD_LOST_LINK if error.external else RECORD_LOST_FILE
+    return _TEMPLATE_NOT_CHOSEN
 
-        # Создаем запрос на обработку
-        request = ProcessingRequest(
-            file_id=data.get('file_id') if not is_external_file else None,
-            file_path=data.get('file_path') if is_external_file else None,
-            file_name=data['file_name'],
-            file_url=data.get('file_url'),  # Оригинальный URL для внешних файлов
-            template_id=data['template_id'],
-            llm_provider=data['llm_provider'],
-            user_id=callback.from_user.id,
-            language="ru",
-            is_external_file=is_external_file,
-            # ДОБАВЛЕНО: Передача участников и информации о встрече
-            participants_list=data.get('participants_list'),
-            meeting_topic=data.get('meeting_topic'),
-            meeting_date=data.get('meeting_date'),
-            meeting_time=data.get('meeting_time'),
-            meeting_agenda=protocol_info.get('meeting_agenda'),
-            project_list=protocol_info.get('project_list')
-        )
 
-        # Добавляем задачу в очередь
-        queued_task = await task_queue_manager.add_task(
-            request=request,
-            chat_id=callback.message.chat.id,
-            priority=TaskPriority.NORMAL
-        )
+class _TelegramLaunchChannel:
+    """Канал запуска в Telegram: экран выбора — сообщение колбэка."""
 
-        # Удаляем старое сообщение с выбором
+    def __init__(self, callback: CallbackQuery):
+        self._callback = callback
+
+    async def dismiss_choice(self) -> None:
         try:
-            await callback.message.delete()
-        except Exception:
-            pass
+            await self._callback.message.delete()
+        except Exception as e:
+            logger.debug(f"Экран выбора уже не удалить: {e}")
 
-        # Получаем позицию в очереди
-        position = await task_queue_manager.get_queue_position(str(queued_task.task_id))
-        total_in_queue = await task_queue_manager.get_queue_size()
-
-        # Создаем трекер позиции в очереди
-        queue_tracker = await QueueTrackerFactory.create_tracker(
-            bot=callback.bot,
-            chat_id=callback.message.chat.id,
-            task_id=str(queued_task.task_id),
-            initial_position=position if position is not None else 0,
-            total_in_queue=total_in_queue
+    async def show_queue_position(self, task_id: str, position: int, total: int):
+        return await queue_tracker.QueueTrackerFactory.create_tracker(
+            bot=self._callback.bot,
+            chat_id=self._callback.message.chat.id,
+            task_id=task_id,
+            initial_position=position,
+            total_in_queue=total,
         )
 
-        # Сохраняем message_id в задаче
-        if queue_tracker.message_id:
-            queued_task.message_id = queue_tracker.message_id
-            from src.database import queue_repo
-            await queue_repo.update_queue_task_message_id(str(queued_task.task_id), queue_tracker.message_id)
 
-        # Запускаем фоновое обновление позиции в очереди
-        from src.handlers.message_handlers import _monitor_queue_position
-        asyncio.create_task(_monitor_queue_position(
-            queue_tracker, queued_task.task_id, task_queue_manager
-        ))
+async def start_processing_from_dialog(callback: CallbackQuery, state: FSMContext) -> None:
+    """Запустить обработку записи, выбранной в диалоге.
 
-        # Очищаем состояние
-        await state.clear()
-
-        logger.info(f"Задача {queued_task.task_id} успешно добавлена в очередь через callback")
-
+    Хендлеры кладут свой выбор в состояние и зовут эту функцию. Состояние
+    очищается при любом исходе: прогон начат либо его нужно начать заново.
+    """
+    try:
+        record, choice = launch_input_from_state(await state.get_data())
+        await launch_processing(
+            record, choice,
+            user_id=callback.from_user.id,
+            chat_id=callback.message.chat.id,
+            channel=_TelegramLaunchChannel(callback),
+        )
+    except LaunchInputError as e:
+        logger.info(f"Запуск обработки отклонён: {e!r}")
+        await safe_edit_text(callback.message, _input_error_text(e))
     except Exception as e:
         logger.error(f"Ошибка при создании запроса на обработку: {e}")
-        await safe_edit_text(
-            callback.message,
-            "❌ Не получилось запустить обработку.\n"
-            "Отправьте запись заново."
-        )
+        await safe_edit_text(callback.message, _LAUNCH_FAILED)
+    finally:
         await state.clear()
 
 
@@ -235,10 +214,6 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             if user and getattr(user, 'default_template_id', None):
                 template_id = user.default_template_id
 
-            # LLM provider is always OpenAI post-migration; the actual model is
-            # determined by the admin-configured active preset at processing time.
-            llm_provider = 'openai'
-
             # Сохранённый список участников — часть тех самых «сохранённых
             # настроек», которые обещает кнопка. Раньше он молча обнулялся, и
             # карточка сопоставления становилась длиннее именно у того, кто
@@ -255,8 +230,6 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
             # Set state and process
             await state.update_data(
                 template_id=template_id,
-                use_smart_selection=(template_id == 0),
-                llm_provider=llm_provider,
                 participants_list=participants_list
             )
 
@@ -264,7 +237,7 @@ def setup_processing_callbacks(user_service: UserService, template_service: Temp
                 "<b>Быстрая обработка</b>\n\n⏳ Начинаю обработку...",
                 parse_mode="HTML")
             await _safe_callback_answer(callback)
-            await _process_file(callback, state, processing_service)
+            await start_processing_from_dialog(callback, state)
 
         except Exception as e:
             logger.error(f"Ошибка в quick_process_file_callback: {e}")

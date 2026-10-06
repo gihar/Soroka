@@ -300,7 +300,6 @@ async def test_link_then_quick_process_enqueues_external_record(monkeypatch):
     fake_qm = _FakeQueueManager()
     monkeypatch.setattr(tqm_mod, "task_queue_manager", fake_qm)
     monkeypatch.setattr(qt_mod, "QueueTrackerFactory", _FakeTrackerFactory)
-    monkeypatch.setattr(mh, "_monitor_queue_position", AsyncMock())
     monkeypatch.setattr(pc, "safe_edit_text", AsyncMock())
 
     router = pc.setup_processing_callbacks(_FakeUserService(), MagicMock(), MagicMock())

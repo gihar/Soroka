@@ -147,63 +147,65 @@ async def test_known_classes_keep_their_own_alerts(sent):
 # ------------------------------------------ второй путь: возобновление после паузы
 
 
-def _service():
-    """Сервис обработки без запуска: нужен только его обработчик сбоя."""
-    from src.services.processing.processing_service import ProcessingService
+def _chat(chat_id=2):
+    """Канал паузы в чат пользователя — тот, которым закрытие паузы сообщает о сбое."""
+    from src.services.processing.pause_channel import TelegramPauseChannel
 
-    return ProcessingService.__new__(ProcessingService)
+    return TelegramPauseChannel(bot=object(), chat_id=chat_id)
 
 
-async def test_a_failure_after_the_mapping_pause_also_reaches_the_admin(sent, monkeypatch):
+async def _fail_after_pause(error):
+    """Сбой после паузы проходит ту же политику, что и сбой в воркере."""
+    from src.services.processing.failure_policy import fail_processing
+
+    await fail_processing(error, task_id=None, notify_user=_chat().report_failure)
+
+
+def _to(sent, chat_id):
+    return [str(call.args[2] if len(call.args) > 2 else call.kwargs.get("text"))
+            for call in sent.await_args_list
+            if (call.args[1] if len(call.args) > 1 else call.kwargs.get("chat_id")) == chat_id]
+
+
+async def test_a_failure_after_the_mapping_pause_also_reaches_the_admin(sent):
     """Четырнадцать сбоев из пятнадцати шли здесь — и не уведомляли никого."""
-    import src.services.processing.processing_service as processing_service
     from src.exceptions.processing import LLMAccessNotPurchasedError
 
-    monkeypatch.setattr(processing_service, "safe_send_message", AsyncMock())
+    await _fail_after_pause(
+        LLMAccessNotPurchasedError(RAW_403, provider="openai", model="qwen3.8-max")
+    )
 
-    with pytest.raises(Exception):
-        await _service()._handle_resume_failure(
-            LLMAccessNotPurchasedError(RAW_403, provider="openai", model="qwen3.8-max"),
-            user_id=1, chat_id=2, bot=object(), task_id=None,
-        )
-
-    assert sent.await_count == 1
-    assert "подписк" in _texts(sent)[0].lower()
+    to_admin = _to(sent, 111)
+    assert len(to_admin) == 1
+    assert "подписк" in to_admin[0].lower()
 
 
-async def test_the_user_still_hears_about_it_before_the_admin_does(sent, monkeypatch):
+async def test_the_user_still_hears_about_it_before_the_admin_does(sent):
     """Уведомление админов — добавка к сообщению пользователю, а не замена."""
-    import src.services.processing.processing_service as processing_service
+    await _fail_after_pause(RuntimeError(RAW_403))
 
-    to_user = AsyncMock()
-    monkeypatch.setattr(processing_service, "safe_send_message", to_user)
-
-    with pytest.raises(Exception):
-        await _service()._handle_resume_failure(
-            RuntimeError(RAW_403), user_id=1, chat_id=2, bot=object(), task_id=None,
-        )
-
-    assert to_user.await_count == 1
-    assert "файл менять не нужно" in str(to_user.await_args.kwargs["text"])
+    to_user = _to(sent, 2)
+    assert len(to_user) == 1
+    assert "файл менять не нужно" in to_user[0]
+    chats = [
+        call.args[1] if len(call.args) > 1 else call.kwargs.get("chat_id")
+        for call in sent.await_args_list
+    ]
+    assert chats.index(2) < chats.index(111)
 
 
 async def test_a_broken_alert_does_not_swallow_the_failure(sent, monkeypatch):
-    """Уведомление админов best-effort: его сбой не отменяет ProcessingError."""
-    import src.services.processing.processing_service as processing_service
+    """Уведомление админов best-effort: его сбой не отменяет сообщения пользователю."""
     from src.services import provider_failure
 
-    monkeypatch.setattr(processing_service, "safe_send_message", AsyncMock())
     monkeypatch.setattr(
         provider_failure, "report_llm_failure",
         AsyncMock(side_effect=RuntimeError("telegram down")),
     )
 
-    from src.exceptions.processing import ProcessingError
+    await _fail_after_pause(RuntimeError(RAW_403))
 
-    with pytest.raises(ProcessingError):
-        await _service()._handle_resume_failure(
-            RuntimeError(RAW_403), user_id=1, chat_id=2, bot=object(), task_id=None,
-        )
+    assert len(_to(sent, 2)) == 1
 
 
 # ------------------------------------------------ резерв, которого не назначили
