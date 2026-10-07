@@ -126,7 +126,7 @@ def _protocol_keys(json_schema: dict):
     return sorted(keys) if keys else None
 
 
-async def capture(case_id: str, monkeypatch) -> dict:
+async def capture(case_id: str, monkeypatch, *, transcript: str = TRANSCRIPT) -> dict:
     """Прогнать случай через шов и вернуть всё, что ушло модели, и итог генерации."""
     import src.llm as llm_package
     import src.services.processing.llm_generation as llm_gen
@@ -149,7 +149,7 @@ async def capture(case_id: str, monkeypatch) -> dict:
     )
     request = ProcessingRequest(file_name="a.mp3", llm_provider="openai", user_id=1, **fields)
     result = await service.optimized_llm_generation(
-        TranscriptionResult(transcription=TRANSCRIPT), template, request, None,
+        TranscriptionResult(transcription=transcript), template, request, None,
         meeting_type=meeting_type,
     )
 

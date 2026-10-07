@@ -1,0 +1,44 @@
+"""Качество протокола: что именно уходит модели (#127).
+
+Шов — генерация протокола с подменённым SDK провайдера (тот же, что у
+характеризации промптов генерации): тест видит системный и пользовательский
+промпты обоих этапов. Качество ответа модели здесь не доказывается — только то,
+какие правила и данные модель получила.
+"""
+
+from test_generation_prompts_characterization import capture
+
+UNLABELED = "Добрый день, начнём. Да, по плану релиз в пятницу, я возьму проверку."
+
+
+def _generation(captured) -> dict:
+    return captured["calls"][-1]
+
+
+# ---------------------------------------------------------------------------
+# #130: старая запись истории без меток спикеров
+# ---------------------------------------------------------------------------
+
+
+async def test_unlabeled_text_with_stored_mapping_warns_the_model(monkeypatch):
+    """Текст без меток + сохранённое сопоставление: модель не приписывает реплики.
+
+    Так перегенерируются записи, сохранённые до #130: сопоставление есть, меток
+    в тексте нет. Блок «SPEAKER_1 = Имя» привязать не к чему — вместо него имена
+    идут как участники, а модель предупреждена.
+    """
+    captured = await capture("type_and_mapping", monkeypatch, transcript=UNLABELED)
+    user = _generation(captured)["user"]
+
+    assert "SPEAKER_1 =" not in user
+    assert "Алексей Тимченко" in user and "Анна Смирнова" in user
+    assert "нет меток спикеров" in user
+    assert "не приписывай" in user
+
+
+async def test_labeled_text_keeps_the_speakers_block(monkeypatch):
+    captured = await capture("type_and_mapping", monkeypatch)
+    user = _generation(captured)["user"]
+
+    assert "SPEAKER_1 = Алексей Тимченко" in user
+    assert "нет меток спикеров" not in user

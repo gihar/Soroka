@@ -375,10 +375,21 @@ def build_generation_prompt(
     if context_parts:
         parts.append(f"<context>\n{chr(10).join(context_parts)}\n</context>")
 
-    # Speaker mapping
+    # Speaker mapping. Метки есть в тексте — сопоставление привязывает реплики к
+    # именам. Меток нет (запись истории до сохранения размеченного текста) —
+    # привязать не к чему: имена идут только как участники.
     if speaker_mapping:
-        mapping_str = "\n".join([f"{k} = {v}" for k, v in speaker_mapping.items()])
-        parts.append(f"<speakers>\n{mapping_str}\n</speakers>")
+        if any(label in transcription for label in speaker_mapping):
+            mapping_str = "\n".join([f"{k} = {v}" for k, v in speaker_mapping.items()])
+            parts.append(f"<speakers>\n{mapping_str}\n</speakers>")
+        else:
+            names = "\n".join(dict.fromkeys(speaker_mapping.values()))
+            parts.append(
+                f"<participants>\n{names}\n</participants>\n"
+                "В транскрипции нет меток спикеров: не приписывай реплики и "
+                "обязательства конкретным людям — имена выше используй только "
+                "для списка участников."
+            )
 
     # Fields (rules are now in system prompt for caching)
     parts.append(f"<fields>\n{variables_str}\n</fields>")
