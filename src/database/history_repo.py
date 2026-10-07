@@ -20,22 +20,24 @@ class HistoryRepository:
                                      llm_provider: str, transcription_text: str,
                                      result_text: str,
                                      speaker_mapping: Optional[Dict[str, str]] = None,
-                                     meeting_type: Optional[str] = None) -> Optional[int]:
+                                     meeting_type: Optional[str] = None,
+                                     prompt_version: Optional[str] = None) -> Optional[int]:
         """Save processing result to history. Returns the new row id.
 
         ``speaker_mapping`` и ``meeting_type`` — итог ЭТАПА 1 анализа. Сохраняются,
         чтобы перегенерация из истории пропускала анализ и держала имена участников
         консистентными с уже отправленным протоколом. Пустые значения → NULL.
+        ``prompt_version`` — отпечаток версии промпта, с которой собран протокол.
         """
         async with self._db.connect() as db:
             cursor = await db.execute("""
                 INSERT INTO processing_history
                 (user_id, file_name, template_id, llm_provider, transcription_text,
-                 result_text, speaker_mapping, meeting_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 result_text, speaker_mapping, meeting_type, prompt_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (user_id, file_name, template_id, llm_provider, transcription_text,
                   result_text, _serialize_speaker_mapping(speaker_mapping),
-                  meeting_type or None))
+                  meeting_type or None, prompt_version or None))
             await db.commit()
             return cursor.lastrowid
 

@@ -65,6 +65,7 @@ class ProcessingMetrics:
     transcription_length: int = 0
     speakers_count: int = 0
     protocol_quality_score: float = 0.0  # Оценка качества протокола (0-1)
+    prompt_version: str = ""  # Отпечаток версии промпта генерации
     # Ответ модели разошёлся с ключами брифа системного шаблона: разделы
     # потеряны молча (строгая схема принята и выброшена — см. ADR-0007).
     protocol_brief_mismatch: bool = False

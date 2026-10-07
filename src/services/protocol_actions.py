@@ -51,16 +51,18 @@ class _StoredHistory:
 
     async def save_processing_history(self, request, result) -> Optional[int]:
         from src.database import history_repo
+        from src.services.processing.processing_history import history_transcript
 
         return await history_repo.save_processing_result(
             user_id=self._source_user_id,
             file_name=request.file_name,
             template_id=request.template_id,
             llm_provider=result.llm_provider_used,
-            transcription_text=result.transcription_result.transcription,
+            transcription_text=history_transcript(result.transcription_result),
             result_text=result.protocol_text or "",
             speaker_mapping=result.speaker_mapping,
             meeting_type=result.meeting_type,
+            prompt_version=result.prompt_version,
         )
 
 

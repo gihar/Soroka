@@ -196,12 +196,10 @@ async def _run_preprocessing(monkeypatch, result):
     captured = {}
 
     class _Preprocessor:
-        def preprocess(self, text, formatted_transcript=None):
+        def preprocess(self, text):
             captured["text"] = text
-            captured["formatted_transcript"] = formatted_transcript
             return {
                 "cleaned_text": f"{text}_C",
-                "cleaned_formatted": "",
                 "statistics": {"reduction_percent": 0},
             }
 
@@ -219,7 +217,7 @@ async def _run_preprocessing(monkeypatch, result):
 
 
 async def test_preprocessing_reads_raw_transcription(monkeypatch):
-    """Препроцессор получает сырую transcription; форматированный текст ему не передаётся."""
+    """Препроцессор получает сырую transcription; форматированного текста он не принимает вовсе."""
     result = TranscriptionResult(
         transcription="СЫРОЙ",
         diarization=Diarization(segments=[Segment(speaker="SPEAKER_1", text="реплика")]),
@@ -228,7 +226,6 @@ async def test_preprocessing_reads_raw_transcription(monkeypatch):
     captured, _ = await _run_preprocessing(monkeypatch, result)
 
     assert captured["text"] == "СЫРОЙ"
-    assert captured["formatted_transcript"] is None
 
 
 async def test_preprocessing_writes_cleaned_text_back(monkeypatch):

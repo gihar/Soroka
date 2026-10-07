@@ -102,18 +102,18 @@ def _protocol_data_object(brief: ProtocolBrief) -> dict:
 def brief_to_schema(brief: ProtocolBrief) -> dict:
     """Строгая схема, ЗЕРКАЛЯЩАЯ прод-обёртку ``PROTOCOL_DATA_SCHEMA``.
 
-    Корень и мета-поля (``quality_score``, ``issues``, ``context_used``)
-    идентичны прод-схеме — иначе парсинг ``generation_result.get('protocol_data')``
-    не совпал бы. Отличие ровно одно: ``protocol_data`` — не Dict[str, str], а
-    закрытый объект с фиксированными ключами (шапка + секции брифа). Из-за этого
-    ``protocol_data`` становится required: провайдер исключает из required только
-    Dict-поля (с типизированным additionalProperties), а закрытый объект — нет.
+    Обёртка та же, что у прод-схемы (``protocol_data`` в корне) — иначе парсинг
+    ``generation_result.get('protocol_data')`` не совпал бы. Отличия два:
+    ``protocol_data`` — не Dict[str, str], а закрытый объект с фиксированными
+    ключами (шапка + секции брифа), поэтому он required; мета-полей legacy-схемы
+    (самооценка ``quality_score``, ``issues``, ``context_used``) нет — их никто не
+    читал, а ответ модели тратился на них. Legacy-схема их пока держит: её корень
+    без них остался бы без required, а это строгий режим провайдеров не проверял.
     """
     schema = copy.deepcopy(PROTOCOL_DATA_SCHEMA)
     root = schema["schema"]
-    root["properties"]["protocol_data"] = _protocol_data_object(brief)
-    if "protocol_data" not in root["required"]:
-        root["required"] = [*root["required"], "protocol_data"]
+    root["properties"] = {"protocol_data": _protocol_data_object(brief)}
+    root["required"] = ["protocol_data"]
     return schema
 
 

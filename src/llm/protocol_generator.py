@@ -21,6 +21,7 @@ LLMAccessNotPurchasedError. Ни одно из трёх не ретраится 
 ответа неразличимое, поэтому вердикт даёт только сравнение ключей.
 """
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -191,6 +192,29 @@ class SchemaProbeVerdict:
     base_url: Optional[str]
     requested_keys: Tuple[str, ...]
     returned_keys: Tuple[str, ...]
+
+
+def prompt_version(generation_system_prompt: str, template_variables: Dict[str, str],
+                   meeting_type: str) -> str:
+    """Отпечаток версии промпта: короткий хеш всего постоянного текста обоих этапов.
+
+    Входит всё, что задаёт код, — системные промпты анализа и генерации и
+    обвязка пользовательских промптов (собранная на пустой записи без данных
+    встречи). Не входит сама встреча: две встречи с одним шаблоном и типом дают
+    одну версию, а любая правка правил — новую. По ней сравнивают протоколы до
+    и после правки (история обработки).
+    """
+    parts = (
+        build_analysis_system_prompt(),
+        build_analysis_prompt(transcription=""),
+        generation_system_prompt,
+        build_generation_prompt(
+            transcription="", template_variables=template_variables,
+            meeting_type=meeting_type,
+        ),
+    )
+    digest = hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+    return digest[:12]
 
 
 class ProtocolGenerator:
@@ -476,6 +500,9 @@ class ProtocolGenerator:
                 meeting_topic=meeting.topic,
                 meeting_date=meeting.date,
                 meeting_time=meeting.time,
+                participants_list=(
+                    meeting.participants_for_prompt() if meeting.participants else None
+                ),
             ),
             schema=generation_schema,
             step=ModelStep.GENERATION,
@@ -491,7 +518,9 @@ class ProtocolGenerator:
         final_result['_analysis_confidence'] = (
             0.0 if meeting.meeting_type else analysis_result.get('analysis_confidence', 0.0)
         )
-        final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
+        final_result['_prompt_version'] = prompt_version(
+            generation_system_prompt, template_variables, meeting_type,
+        )
 
         return final_result
 

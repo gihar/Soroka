@@ -10,6 +10,24 @@ from loguru import logger
 from src.database import history_repo
 
 
+def history_transcript(transcription_result) -> str:
+    """Текст транскрипции для истории — тот, что видела модель.
+
+    Перегенерация («Другой шаблон») работает на сохранённом тексте и подаёт
+    модели сохранённое сопоставление спикеров. Сырой текст бэкенда меток
+    ``SPEAKER_N`` не несёт — привязать реплики к именам было бы нечем, — поэтому
+    храним ``best_transcript``: формат из диаризации, иначе сырой текст.
+    getattr: старый закешированный результат мог не иметь свойства.
+    """
+    if transcription_result is None:
+        return ""
+    return (
+        getattr(transcription_result, "best_transcript", None)
+        or getattr(transcription_result, "transcription", "")
+        or ""
+    )
+
+
 class ProcessingHistoryService:
     """Запись результатов обработки в историю."""
 
@@ -31,13 +49,9 @@ class ProcessingHistoryService:
                 )
                 return None
 
-            transcription_text = ""
-            if getattr(result, "transcription_result", None):
-                transcription_text = getattr(
-                    result.transcription_result,
-                    "transcription",
-                    "",
-                ) or ""
+            transcription_text = history_transcript(
+                getattr(result, "transcription_result", None)
+            )
 
             return await history_repo.save_processing_result(
                 user_id=user.id,
@@ -49,6 +63,7 @@ class ProcessingHistoryService:
                 # getattr: старый закешированный результат мог не иметь этих полей
                 speaker_mapping=getattr(result, "speaker_mapping", None),
                 meeting_type=getattr(result, "meeting_type", None),
+                prompt_version=getattr(result, "prompt_version", None),
             )
         except Exception as err:
             logger.error(f"Ошибка при сохранении истории обработки: {err}")

@@ -220,9 +220,10 @@ class Database:
             
             # Миграция: поля перегенерации в processing_history (nullable, без
             # DEFAULT — NULL значит «данных нет», backfill не нужен). По ним
-            # перегенерация из истории пропускает ЭТАП 1 анализа. Дубликат
-            # колонки на уже мигрированной БД — норма, прочие ошибки логируем.
-            for _column in ("speaker_mapping", "meeting_type"):
+            # перегенерация из истории пропускает ЭТАП 1 анализа; prompt_version —
+            # отпечаток версии промпта для сравнения протоколов до и после правки.
+            # Дубликат колонки на уже мигрированной БД — норма, прочие ошибки логируем.
+            for _column in ("speaker_mapping", "meeting_type", "prompt_version"):
                 try:
                     await db.execute(
                         f"ALTER TABLE processing_history ADD COLUMN {_column} TEXT"

@@ -64,14 +64,10 @@ def _protocol_data_node(brief):
 @pytest.mark.parametrize("brief", ALL_BRIEFS, ids=lambda b: b.template_name)
 def test_schema_root_mirrors_prod_wrapper(brief):
     root = brief_to_schema(brief)["schema"]
-    # Тот же набор корневых ключей, что у прод-схемы.
-    assert set(root["properties"]) == set(PROTOCOL_DATA_SCHEMA["schema"]["properties"])
-    # Мета-поля идентичны прод-схеме — меняется только protocol_data.
-    for meta in ("quality_score", "issues", "context_used"):
-        assert (
-            root["properties"][meta]
-            == PROTOCOL_DATA_SCHEMA["schema"]["properties"][meta]
-        )
+    # Обёртка прод-схемы (protocol_data в корне) без мета-полей: самооценку,
+    # issues и context_used никто не читал (#134).
+    assert set(root["properties"]) == {"protocol_data"}
+    assert "protocol_data" in PROTOCOL_DATA_SCHEMA["schema"]["properties"]
     # protocol_data — закрытый объект (не Dict), поэтому обязан быть в required.
     assert "protocol_data" in root["required"]
 

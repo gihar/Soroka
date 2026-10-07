@@ -126,7 +126,9 @@ def _protocol_keys(json_schema: dict):
     return sorted(keys) if keys else None
 
 
-async def capture(case_id: str, monkeypatch) -> dict:
+async def capture(
+    case_id: str, monkeypatch, *, transcript: str = TRANSCRIPT, full_result: bool = False,
+) -> dict:
     """Прогнать случай через шов и вернуть всё, что ушло модели, и итог генерации."""
     import src.llm as llm_package
     import src.services.processing.llm_generation as llm_gen
@@ -149,7 +151,7 @@ async def capture(case_id: str, monkeypatch) -> dict:
     )
     request = ProcessingRequest(file_name="a.mp3", llm_provider="openai", user_id=1, **fields)
     result = await service.optimized_llm_generation(
-        TranscriptionResult(transcription=TRANSCRIPT), template, request, None,
+        TranscriptionResult(transcription=transcript), template, request, None,
         meeting_type=meeting_type,
     )
 
@@ -164,6 +166,12 @@ async def capture(case_id: str, monkeypatch) -> dict:
         for c in client.chat.completions.create.call_args_list
     ]
     stage1 = {k: result[k] for k in ("_meeting_type", "_speaker_mapping", "_analysis_confidence")}
+    if full_result:
+        schemas = [
+            c.kwargs["response_format"]["json_schema"]["schema"]
+            for c in client.chat.completions.create.call_args_list
+        ]
+        return {"calls": calls, "result": stage1, "llm_result": result, "schemas": schemas}
     return {"calls": calls, "result": stage1}
 
 

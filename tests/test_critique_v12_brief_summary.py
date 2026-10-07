@@ -60,7 +60,7 @@ def test_risks_section_carries_the_canonical_heading():
 
 
 def test_risks_rule_is_the_shared_one():
-    # Своего правила рискам не нужно: общее уже требует жирный ярлык и митигацию.
+    # Своего правила рискам не нужно: общее уже требует жирный ярлык и отделяет риск от вопроса.
     rules = brief_field_rules(_brief())
     assert rules["risks_and_blockers"] == FIELD_SPECIFIC_RULES["risks_and_blockers"]
 
