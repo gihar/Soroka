@@ -6,7 +6,15 @@
 какие правила и данные модель получила.
 """
 
+import re
+
+import pytest
+import test_generation_prompts_characterization as characterization
 from test_generation_prompts_characterization import capture
+
+from src.prompts.prompts import FIELD_SPECIFIC_RULES
+from src.services import protocol_briefs
+from src.services.brief_compiler import brief_protocol_keys
 
 UNLABELED = "Добрый день, начнём. Да, по плану релиз в пятницу, я возьму проверку."
 
@@ -158,3 +166,67 @@ async def test_analysis_states_type_logic_once(monkeypatch):
     assert combined.count("доминирующ") == 1
     # Инструкция генерации, к анализу не относящаяся
     assert "цифры, даты" not in analysis["system"]
+
+
+# ---------------------------------------------------------------------------
+# #133: правила согласованы с брифом шаблона
+# ---------------------------------------------------------------------------
+
+BRIEFS = [
+    b for b in vars(protocol_briefs).values() if isinstance(b, protocol_briefs.ProtocolBrief)
+]
+
+
+async def _brief_generation(brief, monkeypatch, meeting_type="business") -> dict:
+    case = f"brief:{brief.template_name}"
+    monkeypatch.setitem(
+        characterization.CASES, case,
+        ({"speaker_mapping": characterization.MAPPING}, meeting_type,
+         {"name": brief.template_name, "content": "{{ meeting_title }}"}),
+    )
+    return _generation(await capture(case, monkeypatch))
+
+
+@pytest.mark.parametrize("brief", BRIEFS, ids=lambda b: b.template_name)
+async def test_rules_mention_only_sections_of_the_template(brief, monkeypatch):
+    """Правило «перенеси в issues» при шаблоне без issues — пункт теряется или ложится не туда."""
+    system = (await _brief_generation(brief, monkeypatch))["system"]
+
+    mentioned = set(re.findall(r"\b[a-z_]+\b", system)) & set(FIELD_SPECIFIC_RULES)
+    assert mentioned <= set(brief_protocol_keys(brief))
+
+
+def _brief(name):
+    return next(b for b in BRIEFS if b.template_name == name)
+
+
+async def test_key_points_leave_risks_to_the_risk_section(monkeypatch):
+    system = (await _brief_generation(_brief("Стандартный протокол встречи"), monkeypatch))["system"]
+    key_points = system.split("key_points —", 1)[1].split("\n\n", 1)[0]
+
+    carries = key_points.split("чего нет в других секциях (", 1)[1].split(")", 1)[0]
+    assert "риск" not in carries  # риски не в перечне того, что несут выводы
+    assert "НЕ переноси сюда риски и блокеры" in key_points
+
+
+async def test_lecture_has_one_attribution_rule(monkeypatch):
+    """Лекция — конспект без атрибуции: общий принцип «кто что сказал» ей не противоречит."""
+    system = (await _brief_generation(_brief("Лекция и презентация"), monkeypatch, "educational"))["system"]
+
+    assert "кроме образовательных" in system
+
+
+@pytest.mark.parametrize("meeting_type", ["technical", "business", "brainstorm", "status", "management"])
+async def test_type_specifics_fit_the_template(meeting_type, monkeypatch):
+    """Специфика типа не требует разделов, которых в шаблоне нет."""
+    user = (await _brief_generation(_brief("Стандартный протокол встречи"), monkeypatch, meeting_type))["user"]
+    specifics = user.split("СПЕЦИФИКА", 1)[1].split("<transcription>", 1)[0]
+
+    for demand in ("Выделяй выбранные идеи отдельно", "Планы на следующие периоды",
+                   "Статус исполнения ранее данных поручений", "Директивные решения дословно",
+                   "Ответственные лица и их роли"):
+        assert demand not in specifics
+
+
+def test_meeting_title_prefers_the_users_topic():
+    assert "Тема встречи" in FIELD_SPECIFIC_RULES["meeting_title"]
