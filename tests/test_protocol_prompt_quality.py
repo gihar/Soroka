@@ -73,3 +73,48 @@ async def test_prompt_version_changes_with_any_rule(monkeypatch):
     after_rule = await _version("type_without_mapping", monkeypatch)
 
     assert before != after_rule
+
+
+# ---------------------------------------------------------------------------
+# #131: ответственные и безымянные спикеры
+# ---------------------------------------------------------------------------
+
+THREE_SPEAKERS = (
+    "SPEAKER_1: Начнём.\nSPEAKER_2: Я возьму проверку.\nSPEAKER_3: А я подготовлю отчёт."
+)
+
+
+async def test_owner_rule_never_asks_to_clarify(monkeypatch):
+    """«Отв.: уточнить» терял, кто взял задачу: теперь — имя, «Участник N» или «не назначен»."""
+    captured = await capture("brief_template_with_participants", monkeypatch)
+    system = _generation(captured)["system"]
+
+    assert "уточнить" not in system
+    assert "Отв.: Участник N" in system
+    assert "Отв.: не назначен" in system
+
+
+def test_owner_rule_is_one_rule_for_every_task_field():
+    from src.prompts.prompts import FIELD_SPECIFIC_RULES, OWNER_RULE
+
+    for key in ("tasks", "tasks_od", "action_items"):
+        assert OWNER_RULE in FIELD_SPECIFIC_RULES[key], key
+        assert "уточнить" not in FIELD_SPECIFIC_RULES[key], key
+
+
+async def test_generation_knows_participants_and_roles(monkeypatch):
+    """Анализ пропущен — а участники с ролями всё равно доходят до генерации."""
+    captured = await capture("everything_analysis_skipped", monkeypatch)
+    user = _generation(captured)["user"]
+
+    assert [c["schema"] for c in captured["calls"]] == ["ProtocolDataSchema"]
+    assert "Алексей Тимченко (Руководитель)" in user  # канон «Имя Фамилия» с ролью
+    assert "Борис" in user  # промолчавший участник тоже в списке
+
+
+async def test_generation_names_the_unnamed_speakers(monkeypatch):
+    captured = await capture("type_and_mapping", monkeypatch, transcript=THREE_SPEAKERS)
+    user = _generation(captured)["user"]
+
+    assert "SPEAKER_3" in user.split("<transcription>")[0]
+    assert "Участник 3" in user

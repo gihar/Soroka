@@ -500,6 +500,9 @@ class ProtocolGenerator:
                 meeting_topic=meeting.topic,
                 meeting_date=meeting.date,
                 meeting_time=meeting.time,
+                participants_list=(
+                    meeting.participants_for_prompt() if meeting.participants else None
+                ),
             ),
             schema=generation_schema,
             step=ModelStep.GENERATION,
