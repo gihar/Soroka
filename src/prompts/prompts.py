@@ -5,8 +5,14 @@
 import re
 from typing import Dict, Optional
 
-# Метка спикера диаризации в транскрипции: SPEAKER_1, SPEAKER_12
-_SPEAKER_LABEL = re.compile(r"\bSPEAKER_\d+\b")
+# Метка спикера в начале реплики размеченной транскрипции: «SPEAKER_1: …» у
+# большинства бэкендов, родные «S1: …» у Speechmatics (их не нормализуют)
+_SPEAKER_LABEL = re.compile(r"^(SPEAKER_\d+|S\d+):", re.MULTILINE)
+
+
+def _label_number(label: str) -> str:
+    """Номер метки — тот же, что даст постобработка в «Участник N»."""
+    return re.sub(r"\D", "", label)
 
 # Ответственный за задачу — одно правило для всех полей задач. «Отв.: уточнить»
 # терял связь «кто сказал → кто взял»: человек на записи говорил «я возьму», в
@@ -412,7 +418,7 @@ def build_generation_prompt(
     unnamed = [label for label in labels if label not in mapping]
     if unnamed:
         unnamed_str = "\n".join(
-            f"{label} → Участник {label.split('_', 1)[1]}" for label in unnamed
+            f"{label} → Участник {_label_number(label)}" for label in unnamed
         )
         parts.append(
             "Спикеры без имени — в протоколе (участники, обсуждение, "

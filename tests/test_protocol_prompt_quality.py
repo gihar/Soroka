@@ -290,3 +290,24 @@ async def test_risks_are_not_open_questions(monkeypatch):
     assert "открытых вопросов" in risks  # вопрос без ответа — не риск
     assert "если он прозвучал" in risks  # план снижения не выдумывается
     assert "оставь поле пустым" in risks
+
+
+async def test_speechmatics_labels_keep_attribution(monkeypatch):
+    """Speechmatics держит родные метки S1/S2 — это тоже метки, атрибуция сохраняется.
+
+    Ревью: проверка «есть ли метки» знала только SPEAKER_N, и запись Speechmatics
+    с известным сопоставлением получала запрет приписывать реплики.
+    """
+    monkeypatch.setitem(
+        characterization.CASES, "speechmatics",
+        ({"speaker_mapping": {"S1": "Алексей Тимченко"}}, "business",
+         characterization.CUSTOM_TEMPLATE),
+    )
+    captured = await capture(
+        "speechmatics", monkeypatch, transcript="S1: Начнём.\n\nS2: Я возьму проверку.",
+    )
+    user = _generation(captured)["user"]
+
+    assert "S1 = Алексей Тимченко" in user
+    assert "нет меток спикеров" not in user
+    assert "S2 → Участник 2" in user
