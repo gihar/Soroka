@@ -230,3 +230,32 @@ async def test_type_specifics_fit_the_template(meeting_type, monkeypatch):
 
 def test_meeting_title_prefers_the_users_topic():
     assert "Тема встречи" in FIELD_SPECIFIC_RULES["meeting_title"]
+
+
+# ---------------------------------------------------------------------------
+# #134: контракт ответа без балласта
+# ---------------------------------------------------------------------------
+
+
+async def test_answer_schema_carries_only_the_protocol(monkeypatch):
+    """Самооценка, «использованный контекст» и сомнения модели никто не читал.
+
+    Только системные шаблоны (бриф-схема, 73 из 86 протоколов прода): корень
+    legacy-схемы без мета-полей остался бы без required — строгий режим
+    провайдеров на нём не проверен.
+    """
+    captured = await capture("brief_template_with_participants", monkeypatch, full_result=True)
+    generation_schema = captured["schemas"][-1]
+
+    assert set(generation_schema["properties"]) == {"protocol_data"}
+    assert generation_schema["additionalProperties"] is False
+    assert "_quality_score" not in captured["llm_result"]
+
+
+async def test_fields_list_has_no_empty_descriptions_or_phantom_keys(monkeypatch):
+    user = _generation(await capture("type_and_mapping", monkeypatch))["user"]
+    fields = user.split("<fields>", 1)[1].split("</fields>", 1)[0]
+
+    assert not re.search(r"^- \w+: *$", fields, re.MULTILINE)
+    assert "meeting_date" not in fields and "meeting_time" not in fields
+    assert "- date" in fields and "- time" in fields

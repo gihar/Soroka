@@ -167,7 +167,11 @@ async def capture(
     ]
     stage1 = {k: result[k] for k in ("_meeting_type", "_speaker_mapping", "_analysis_confidence")}
     if full_result:
-        return {"calls": calls, "result": stage1, "llm_result": result}
+        schemas = [
+            c.kwargs["response_format"]["json_schema"]["schema"]
+            for c in client.chat.completions.create.call_args_list
+        ]
+        return {"calls": calls, "result": stage1, "llm_result": result, "schemas": schemas}
     return {"calls": calls, "result": stage1}
 
 

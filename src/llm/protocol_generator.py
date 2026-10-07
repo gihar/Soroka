@@ -518,7 +518,6 @@ class ProtocolGenerator:
         final_result['_analysis_confidence'] = (
             0.0 if meeting.meeting_type else analysis_result.get('analysis_confidence', 0.0)
         )
-        final_result['_quality_score'] = generation_result.get('quality_score', 0.0)
         final_result['_prompt_version'] = prompt_version(
             generation_system_prompt, template_variables, meeting_type,
         )

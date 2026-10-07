@@ -76,7 +76,7 @@ async def test_generate_runs_two_stages_and_merges_result():
     assert result["_meeting_type"] == "status"
     assert result["_speaker_mapping"] == {"SPEAKER_0": "Анна", "SPEAKER_1": "Борис"}
     assert result["_analysis_confidence"] == 0.9
-    assert result["_quality_score"] == 0.8
+    assert "_quality_score" not in result  # самооценку модели никто не читал (#134)
 
 
 async def test_stage1_skipped_when_type_and_mapping_provided():

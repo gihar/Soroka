@@ -364,7 +364,11 @@ def build_generation_prompt(
     Спикеры, оставшиеся без имени, перечисляются явно — правило ответственного
     называет их «Участник N».
     """
-    variables_str = "\n".join([f"- {key}: {desc}" for key, desc in template_variables.items()])
+    # Описаний у полей нет (правила — в системном промпте), поэтому только ключи:
+    # раньше здесь стояли пустые «- key: »
+    variables_str = "\n".join(
+        f"- {key}: {desc}" if desc else f"- {key}" for key, desc in template_variables.items()
+    )
     type_instructions = _get_type_specific_instructions(meeting_type)
 
     parts = [f"Извлеки данные из транскрипции для протокола. Тип встречи: {meeting_type}"]

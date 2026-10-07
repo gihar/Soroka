@@ -329,10 +329,12 @@ class LLMGenerationService:
 
             template_variables = {}
 
+            # Шапка — те же ключи, что у брифов и правил полей (date/time):
+            # meeting_date/meeting_time — метки контекста встречи, а не поля
             core_variables = {
                 'meeting_title': '',
-                'meeting_date': '',
-                'meeting_time': '',
+                'date': '',
+                'time': '',
                 'participants': '',
             }
             template_variables.update(core_variables)
@@ -347,8 +349,6 @@ class LLMGenerationService:
             logger.error(f"Ошибка при извлечении переменных из шаблона: {e}")
             return {
                 'meeting_title': '',
-                'meeting_date': '',
-                'meeting_time': '',
                 'participants': '',
                 'agenda': '',
                 'discussion': '',
