@@ -4,7 +4,7 @@
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from loguru import logger
 
@@ -12,26 +12,14 @@ from loguru import logger
 class TranscriptionPreprocessor:
     """Препроцессор для очистки и нормализации текста транскрипции"""
     
-    # Русские междометия и заполнители
+    # Русские междометия — только звуки без смысла. Слова-«паразиты» вроде
+    # «значит», «допустим», «в принципе», «типа» несут смысл («это значит, что
+    # срок сдвигается»; «допустим, 500 тысяч» — оговорка о допущении) и
+    # остаются: модель видит этот текст при перегенерации и без диаризации.
     RUSSIAN_FILLERS = [
         r'\bэ+[-\s]*э+\b',  # э-э, ээ
         r'\bм+[-\s]*м+\b',  # м-м, мм
         r'\bа+[-\s]*а+\b',  # а-а, аа
-        r'\bну\s+вот\b',
-        r'\bну\s+это\b',
-        r'\bну\s+как\s+бы\b',
-        r'\bкак\s+бы\b',
-        r'\bтак\s+сказать\b',
-        r'\bвообще\s+говоря\b',
-        r'\bв\s+общем[-,\s]+то\b',
-        r'\bв\s+принципе\b',
-        r'\bдопустим\b',
-        r'\bпредположим\b',
-        r'\bзначит\b',
-        r'\bкороче\b',
-        r'\bблин\b',
-        r'\bтипа\b',
-        r'\bчисто\b',
     ]
     
     # Английские междометия
@@ -120,8 +108,10 @@ class TranscriptionPreprocessor:
         Returns:
             Текст с нормализованной пунктуацией
         """
-        # Удаляем множественные пробелы
-        text = re.sub(r'\s+', ' ', text)
+        # Схлопываем пробелы внутри строки; переводы строк — границы реплик,
+        # их сохраняем
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r' *\n *', '\n', text)
         
         # Нормализуем точки (удаляем множественные)
         text = re.sub(r'\.{2,}', '.', text)
@@ -130,10 +120,13 @@ class TranscriptionPreprocessor:
         text = re.sub(r',{2,}', ',', text)
         
         # Удаляем пробелы перед пунктуацией
-        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+        text = re.sub(r' +([.,!?;:])', r'\1', text)
         
-        # Добавляем пробел после пунктуации, если его нет
-        text = re.sub(r'([.,!?;:])([^\s\d])', r'\1 \2', text)
+        # Пробел после запятой и знаков конца фразы, если дальше буква. После
+        # точки и двоеточия — только перед заглавной: иначе рвутся file.py,
+        # http://, v2.1
+        text = re.sub(r'([,!?;])([^\W\d_])', r'\1 \2', text)
+        text = re.sub(r'([.:])([A-ZА-ЯЁ])', r'\1 \2', text)
         
         return text.strip()
     
@@ -155,95 +148,16 @@ class TranscriptionPreprocessor:
         
         return sentences
     
-    def group_speaker_turns(self, formatted_transcript: str) -> str:
-        """
-        Группировать последовательные реплики одного спикера
-        
-        Args:
-            formatted_transcript: Форматированная транскрипция с метками спикеров
-            
-        Returns:
-            Сгруппированная транскрипция
-        """
-        lines = formatted_transcript.split('\n')
-        grouped_lines = []
-        current_speaker = None
-        current_text = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Проверяем, начинается ли строка с метки спикера
-            speaker_match = re.match(r'^(Спикер \d+|Speaker \d+):\s*(.*)$', line)
-            
-            if speaker_match:
-                speaker = speaker_match.group(1)
-                text = speaker_match.group(2)
-                
-                if speaker == current_speaker:
-                    # Тот же спикер - добавляем к текущему тексту
-                    current_text.append(text)
-                else:
-                    # Новый спикер - сохраняем предыдущего
-                    if current_speaker and current_text:
-                        grouped_lines.append(f"{current_speaker}: {' '.join(current_text)}")
-                    
-                    current_speaker = speaker
-                    current_text = [text]
-            else:
-                # Строка без метки спикера - добавляем к текущему тексту
-                if current_text:
-                    current_text.append(line)
-        
-        # Добавляем последнюю группу
-        if current_speaker and current_text:
-            grouped_lines.append(f"{current_speaker}: {' '.join(current_text)}")
-        
-        return '\n'.join(grouped_lines)
-    
-    def fix_common_recognition_errors(self, text: str) -> str:
-        """
-        Исправить распространенные ошибки распознавания
-        
-        Args:
-            text: Исходный текст
-            
-        Returns:
-            Текст с исправленными ошибками
-        """
-        corrections = {
-            # Русские распространенные ошибки
-            r'\bв общим\b': 'в общем',
-            r'\bв общем то\b': 'в общем-то',
-            r'\bпотому что\b': 'потому что',
-            r'\bпо этому\b': 'поэтому',
-            r'\bтак же\b': 'также',
-            r'\bчто бы\b': 'чтобы',
-            r'\bи так\b': 'итак',
-            # Английские распространенные ошибки
-            r'\ba lot of\b': 'a lot of',
-            r'\bgoing to\b': 'going to',
-        }
-        
-        for pattern, replacement in corrections.items():
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-        
-        return text
-    
-    def preprocess(self, text: str, formatted_transcript: Optional[str] = None) -> dict:
+    def preprocess(self, text: str) -> dict:
         """
         Выполнить полную предобработку текста
         
         Args:
             text: Исходный текст транскрипции
-            formatted_transcript: Форматированная транскрипция с метками спикеров (опционально)
             
         Returns:
             Dict с результатами предобработки:
             - cleaned_text: Очищенный текст
-            - cleaned_formatted: Очищенная форматированная транскрипция (если была передана)
             - statistics: Статистика предобработки
         """
         logger.info("Начало предобработки транскрипции")
@@ -264,25 +178,12 @@ class TranscriptionPreprocessor:
         cleaned_text = self.remove_repetitions(cleaned_text)
         stats['repetitions_removed'] = (before_rep - len(cleaned_text)) // 5  # Примерная оценка
         
-        # Шаг 3: Исправление распространенных ошибок
-        cleaned_text = self.fix_common_recognition_errors(cleaned_text)
-        
-        # Шаг 4: Нормализация пунктуации
+        # Шаг 3: Нормализация пунктуации
         cleaned_text = self.normalize_punctuation(cleaned_text)
         
-        # Шаг 5: Разделение на предложения
+        # Шаг 4: Разделение на предложения
         sentences = self.split_into_sentences(cleaned_text)
         stats['sentences_count'] = len(sentences)
-        
-        # Шаг 6: Группировка реплик спикеров (если есть форматированная транскрипция)
-        cleaned_formatted = None
-        if formatted_transcript:
-            # Применяем те же очистки к форматированной транскрипции
-            temp_formatted, _ = self.remove_fillers(formatted_transcript)
-            temp_formatted = self.remove_repetitions(temp_formatted)
-            temp_formatted = self.fix_common_recognition_errors(temp_formatted)
-            temp_formatted = self.normalize_punctuation(temp_formatted)
-            cleaned_formatted = self.group_speaker_turns(temp_formatted)
         
         stats['cleaned_length'] = len(cleaned_text)
         if stats['original_length'] == 0:
@@ -300,7 +201,6 @@ class TranscriptionPreprocessor:
         
         return {
             'cleaned_text': cleaned_text,
-            'cleaned_formatted': cleaned_formatted,
             'statistics': stats,
             'sentences': sentences
         }
