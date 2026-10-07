@@ -70,7 +70,9 @@ def test_numbered_sections_keep_content_requirements():
     assert "Обоснование" in FIELD_SPECIFIC_RULES["architecture_decisions"]
     # decisions отбирает только утверждённое (капс-словарь «РЕШЕНО» снят, v6).
     assert "утвердили" in FIELD_SPECIFIC_RULES["decisions"]
-    assert "митигаци" in FIELD_SPECIFIC_RULES["risks_and_blockers"]
+    # План снижения — только прозвучавший (#135: раньше обязательная митигация
+    # подталкивала заполнять раздел всегда — 37 из 37 протоколов).
+    assert "План снижения" in FIELD_SPECIFIC_RULES["risks_and_blockers"]
 
 
 def test_excluded_sections_are_not_forced_to_number():

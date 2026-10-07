@@ -259,3 +259,34 @@ async def test_fields_list_has_no_empty_descriptions_or_phantom_keys(monkeypatch
     assert not re.search(r"^- \w+: *$", fields, re.MULTILINE)
     assert "meeting_date" not in fields and "meeting_time" not in fields
     assert "- date" in fields and "- time" in fields
+
+
+# ---------------------------------------------------------------------------
+# #135: обсуждение и риски без дублей
+# ---------------------------------------------------------------------------
+
+
+def _rule(system: str, key: str) -> str:
+    rules = system.split("ПРАВИЛА ДЛЯ ПОЛЕЙ:", 1)[1]
+    return rules.split(f"\n{key} —", 1)[1].split("\n\n", 1)[0]
+
+
+async def test_discussion_ends_with_the_last_topic(monkeypatch):
+    """В 16 из 40 длинных протоколов обсуждение кончалось «Итогами», пересказывая задачи."""
+    system = (await _brief_generation(_brief("Стандартный протокол встречи"), monkeypatch))["system"]
+    discussion = _rule(system, "discussion")
+
+    assert "блоком итогов" in discussion
+    assert "Процедурные реплики" in discussion
+    assert "АБСОЛЮТНАЯ ПОЛНОТА" in discussion  # полнота тем не снижается
+
+
+async def test_risks_are_not_open_questions(monkeypatch):
+    """Раздел рисков был заполнен в 37 из 37 и пересказывал «Открытые вопросы»."""
+    system = (await _brief_generation(_brief("Стандартный протокол встречи"), monkeypatch))["system"]
+    risks = _rule(system, "risks_and_blockers")
+
+    assert "может сорваться" in risks
+    assert "открытых вопросов" in risks  # вопрос без ответа — не риск
+    assert "если он прозвучал" in risks  # план снижения не выдумывается
+    assert "оставь поле пустым" in risks
