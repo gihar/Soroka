@@ -118,3 +118,43 @@ async def test_generation_names_the_unnamed_speakers(monkeypatch):
 
     assert "SPEAKER_3" in user.split("<transcription>")[0]
     assert "Участник 3" in user
+
+
+# ---------------------------------------------------------------------------
+# #132: анализ называет спикеров по наблюдаемым основаниям
+# ---------------------------------------------------------------------------
+
+
+async def _analysis(monkeypatch) -> dict:
+    captured = await capture("everything_with_analysis", monkeypatch)
+    analysis = captured["calls"][0]
+    assert analysis["schema"] == "MeetingAnalysisSchema"
+    return analysis
+
+
+async def test_analysis_has_no_confidence_threshold(monkeypatch):
+    """Схема анализа не несёт уверенности по спикеру — порог «≥ 0.7» был непроверяем."""
+    analysis = await _analysis(monkeypatch)
+    prompt = analysis["system"] + analysis["user"]
+
+    assert "0.7" not in prompt
+    assert "веренность" not in prompt
+
+
+async def test_analysis_names_speakers_only_on_observable_grounds(monkeypatch):
+    analysis = await _analysis(monkeypatch)
+    prompt = analysis["system"] + analysis["user"]
+
+    assert "по имени" in prompt  # обращение: «Иван, сделаешь?»
+    assert "представился" in prompt
+    assert "роль" in prompt  # однозначное совпадение с ролью из списка
+    assert "unmapped_speakers" in prompt  # без основания — несопоставлен
+
+
+async def test_analysis_states_type_logic_once(monkeypatch):
+    analysis = await _analysis(monkeypatch)
+
+    combined = analysis["system"] + analysis["user"]
+    assert combined.count("доминирующ") == 1
+    # Инструкция генерации, к анализу не относящаяся
+    assert "цифры, даты" not in analysis["system"]
