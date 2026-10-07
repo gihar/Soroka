@@ -89,6 +89,10 @@ class ProcessingResult(BaseModel):
         None,
         description="Сопоставление спикеров (итог ЭТАПА 1) — для консистентной перегенерации",
     )
+    prompt_version: Optional[str] = Field(
+        None,
+        description="Отпечаток версии промпта генерации — сравнение протоколов до и после правки",
+    )
     date_is_assumed: bool = Field(
         False,
         description=(

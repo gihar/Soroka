@@ -42,3 +42,34 @@ async def test_labeled_text_keeps_the_speakers_block(monkeypatch):
 
     assert "SPEAKER_1 = Алексей Тимченко" in user
     assert "нет меток спикеров" not in user
+
+
+# ---------------------------------------------------------------------------
+# #128: версия промпта
+# ---------------------------------------------------------------------------
+
+
+async def _version(case_id, monkeypatch, **kwargs) -> str:
+    captured = await capture(case_id, monkeypatch, full_result=True, **kwargs)
+    return captured["llm_result"]["_prompt_version"]
+
+
+async def test_prompt_version_ignores_the_meeting_itself(monkeypatch):
+    """Одинаковые шаблон и тип, разные записи — одна версия; другой тип — другая."""
+    plain = await _version("type_and_mapping", monkeypatch)
+    other_meeting = await _version("type_and_mapping", monkeypatch, transcript="SPEAKER_1: Другое.")
+    business = await _version("everything_analysis_skipped", monkeypatch)
+
+    assert plain and plain == other_meeting
+    # Тип встречи меняет специфику в промпте — это другая версия
+    assert business != plain
+
+
+async def test_prompt_version_changes_with_any_rule(monkeypatch):
+    import src.prompts.prompts as prompts
+
+    before = await _version("type_without_mapping", monkeypatch)
+    monkeypatch.setitem(prompts.FIELD_SPECIFIC_RULES, "decisions", "decisions — другое правило")
+    after_rule = await _version("type_without_mapping", monkeypatch)
+
+    assert before != after_rule

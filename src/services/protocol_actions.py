@@ -62,6 +62,7 @@ class _StoredHistory:
             result_text=result.protocol_text or "",
             speaker_mapping=result.speaker_mapping,
             meeting_type=result.meeting_type,
+            prompt_version=result.prompt_version,
         )
 
 

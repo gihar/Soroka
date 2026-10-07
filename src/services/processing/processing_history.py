@@ -63,6 +63,7 @@ class ProcessingHistoryService:
                 # getattr: старый закешированный результат мог не иметь этих полей
                 speaker_mapping=getattr(result, "speaker_mapping", None),
                 meeting_type=getattr(result, "meeting_type", None),
+                prompt_version=getattr(result, "prompt_version", None),
             )
         except Exception as err:
             logger.error(f"Ошибка при сохранении истории обработки: {err}")

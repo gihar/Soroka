@@ -293,6 +293,7 @@ async def _assemble_result(
         warnings=user_warnings,
         meeting_type=effective_meeting_type,
         speaker_mapping=effective_speaker_mapping,
+        prompt_version=llm_result.get("_prompt_version"),
         date_is_assumed=date_is_assumed,
     )
 

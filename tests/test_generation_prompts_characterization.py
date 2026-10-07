@@ -126,7 +126,9 @@ def _protocol_keys(json_schema: dict):
     return sorted(keys) if keys else None
 
 
-async def capture(case_id: str, monkeypatch, *, transcript: str = TRANSCRIPT) -> dict:
+async def capture(
+    case_id: str, monkeypatch, *, transcript: str = TRANSCRIPT, full_result: bool = False,
+) -> dict:
     """Прогнать случай через шов и вернуть всё, что ушло модели, и итог генерации."""
     import src.llm as llm_package
     import src.services.processing.llm_generation as llm_gen
@@ -164,6 +166,8 @@ async def capture(case_id: str, monkeypatch, *, transcript: str = TRANSCRIPT) ->
         for c in client.chat.completions.create.call_args_list
     ]
     stage1 = {k: result[k] for k in ("_meeting_type", "_speaker_mapping", "_analysis_confidence")}
+    if full_result:
+        return {"calls": calls, "result": stage1, "llm_result": result}
     return {"calls": calls, "result": stage1}
 
 

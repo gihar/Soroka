@@ -197,6 +197,9 @@ class LLMGenerationService:
             )
 
             record_metric(processing_metrics, 'llm_duration', time.time() - start_time)
+            record_metric(
+                processing_metrics, 'prompt_version', llm_result_data.get('_prompt_version', ''),
+            )
 
             # Валидация протокола
             if settings.enable_protocol_validation:
